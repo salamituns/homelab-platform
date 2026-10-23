@@ -1,0 +1,20 @@
+# Secrets
+.envrc
+*.tfvars
+!*.tfvars.example
+*.pem
+*.key
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+tfplan
+
+# Ansible
+*.retry
+.ansible/
+
+# Ansible collections (installed from ansible/requirements.yml)
+ansible/collections/

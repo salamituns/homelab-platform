@@ -1,0 +1,12 @@
+baseline_timezone: America/Chicago
+baseline_packages:
+  - qemu-guest-agent
+  - unattended-upgrades
+  - fail2ban
+  - chrony
+  - curl
+  - htop
+  - auditd
+# Users allowed to SSH in. Used by the SSH hardening tasks.
+baseline_ssh_allow_users:
+  - tunsadmin

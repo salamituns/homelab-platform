@@ -1,0 +1,12 @@
+# SSH hardening for every managed host.
+#
+# Ubuntu 24.04's /etc/ssh/sshd_config includes /etc/ssh/sshd_config.d/*.conf FIRST,
+# and for most sshd options the first value read wins, so a drop-in here overrides the defaults.
+#
+# Requirements:
+#   - Write ONE drop-in file: /etc/ssh/sshd_config.d/10-hardening.conf
+#   - It must never lock you out: validate the full config with `sshd -t` before it goes live
+#   - Notify the "Restart ssh" handler only when the file changes
+#   - Use baseline_ssh_allow_users (defaults/main.yml)
+#
+# TODO(you): implement the task(s) below. Decide which directives to set and why.

@@ -1,0 +1,6 @@
+# Baseline every managed VM. Start safe:
+#   ansible-playbook playbooks/baseline.yml --limit sectools --check --diff
+- name: Baseline managed hosts
+  hosts: managed
+  roles:
+    - baseline

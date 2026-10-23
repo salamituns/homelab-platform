@@ -1,0 +1,4 @@
+# Copy to terraform.tfvars (gitignored). Public keys are not secret, but keep tfvars out of git by habit.
+ssh_public_keys = [
+  "ssh-ed25519 AAAA... you@macbook",
+]
