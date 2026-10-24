@@ -1,0 +1,23 @@
+# Kernel network hardening settings written to /etc/sysctl.d/99-security-hardening.conf.
+#
+# Container / cluster networking notes:
+# - net.ipv4.ip_forward is intentionally NOT set to 0 here: Kubernetes nodes
+#   (Master, WorkerNode1, WorkerNode2) and Docker hosts (DockerApp) require
+#   net.ipv4.ip_forward = 1 for pod and container bridge routing.
+# - net.bridge.bridge-nf-call-iptables and net.bridge.bridge-nf-call-ip6tables
+#   must remain 1 on Kubernetes nodes (loaded with br_netfilter); do not disable them.
+# - net.ipv4.conf.*.rp_filter = 1 (strict reverse-path filtering) is safe on a flat
+#   L2 LAN, but can drop asymmetric CNI overlay traffic (Flannel/Calico cross-subnet).
+#   Override to 2 (loose mode) in host_vars/group_vars if CNI pod routing is affected.
+sysctl_hardening_settings:
+  # SYN flood protection
+  net.ipv4.tcp_syncookies: 1
+  net.ipv4.tcp_max_syn_backlog: 2048
+  # IP spoofing protection (see rp_filter note above for Kubernetes CNI overlays)
+  net.ipv4.conf.all.rp_filter: 1
+  net.ipv4.conf.default.rp_filter: 1
+  # Ignore ICMP redirects
+  net.ipv4.conf.all.accept_redirects: 0
+  net.ipv4.conf.default.accept_redirects: 0
+  # Log packets with impossible source addresses
+  net.ipv4.conf.all.log_martians: 1

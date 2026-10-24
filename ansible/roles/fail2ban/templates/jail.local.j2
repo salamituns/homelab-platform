@@ -1,0 +1,14 @@
+# Managed by Ansible (homelab-platform, role: fail2ban). Local edits are overwritten.
+[DEFAULT]
+bantime = {{ fail2ban_bantime }}
+findtime = {{ fail2ban_findtime }}
+maxretry = {{ fail2ban_maxretry }}
+ignoreip = {{ fail2ban_ignoreips | join(' ') }}
+
+[sshd]
+enabled = true
+port = ssh
+logpath = /var/log/auth.log
+backend = systemd
+maxretry = {{ fail2ban_sshd_maxretry }}
+bantime = {{ fail2ban_sshd_bantime }}

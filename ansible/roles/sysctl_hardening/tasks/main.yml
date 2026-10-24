@@ -1,0 +1,8 @@
+- name: Deploy sysctl security hardening drop-in
+  ansible.builtin.template:
+    src: 99-security-hardening.conf.j2
+    dest: /etc/sysctl.d/99-security-hardening.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload sysctl

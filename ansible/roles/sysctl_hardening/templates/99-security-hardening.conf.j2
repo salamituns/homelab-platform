@@ -1,0 +1,6 @@
+# Managed by Ansible (homelab-platform, role: sysctl_hardening). Local edits are overwritten.
+# Note: net.ipv4.ip_forward and net.bridge.* are intentionally omitted here so
+# Kubernetes pod routing and Docker bridge networking are never disabled by default.
+{% for key, value in sysctl_hardening_settings | dictsort %}
+{{ key }} = {{ value }}
+{% endfor %}

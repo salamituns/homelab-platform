@@ -1,0 +1,23 @@
+- name: Install fail2ban
+  ansible.builtin.apt:
+    name: fail2ban
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Configure fail2ban jail.local
+  ansible.builtin.template:
+    src: jail.local.j2
+    dest: /etc/fail2ban/jail.local
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart fail2ban
+
+- name: Enable and start fail2ban
+  ansible.builtin.service:
+    name: fail2ban
+    state: started
+    enabled: true
+  # In --check the package above may not be installed yet on a fresh host.
+  ignore_errors: "{{ ansible_check_mode }}"

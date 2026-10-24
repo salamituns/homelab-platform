@@ -1,0 +1,6 @@
+# Extra hardening playbook (sysctl kernel parameters).
+# NOT applied to any host yet; test with --limit sectools --check --diff first.
+- name: Apply extra kernel hardening to managed hosts
+  hosts: managed
+  roles:
+    - sysctl_hardening

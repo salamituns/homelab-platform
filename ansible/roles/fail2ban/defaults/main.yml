@@ -1,0 +1,11 @@
+fail2ban_bantime: 3600
+fail2ban_findtime: 600
+fail2ban_maxretry: 3
+# Trusted networks never banned by fail2ban (updated from legacy 10.2.0.0/21 to current LAN).
+fail2ban_ignoreips:
+  - 127.0.0.1/8
+  - ::1
+  - 192.168.1.0/24
+
+fail2ban_sshd_maxretry: 3
+fail2ban_sshd_bantime: 7200
