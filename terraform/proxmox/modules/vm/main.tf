@@ -15,6 +15,7 @@ resource "proxmox_virtual_environment_vm" "this" {
   description = "Managed by Terraform (homelab-platform). Do not edit in the Proxmox UI."
   node_name   = var.node_name
   vm_id       = var.vm_id
+  pool_id     = var.pool_id
   tags        = sort(concat(["terraform"], var.tags))
   on_boot     = true
 

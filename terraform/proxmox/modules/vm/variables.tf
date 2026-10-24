@@ -11,6 +11,12 @@ variable "node_name" {
   default = "tuns"
 }
 
+variable "pool_id" {
+  description = "Proxmox pool. The Terraform token only has rights inside this pool."
+  type        = string
+  default     = "terraform"
+}
+
 variable "template_id" {
   description = "VMID of the cloud-init template to clone."
   type        = number
