@@ -1,0 +1,5 @@
+# UbuntuNew hosts Gitea (gitea.example.internal via cloudflared + nginx + postgres).
+# The "git" user serves git-over-SSH; removing it breaks pushes to Gitea.
+baseline_ssh_allow_users:
+  - tunsadmin
+  - git
