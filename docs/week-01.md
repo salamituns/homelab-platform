@@ -309,8 +309,42 @@ Lessons:
 
 ## 10. Still to do
 
-- [ ] Week 1 proof: destroy and rebuild `sectools` yourself (see `runbooks/rebuild-vm.md`), and time it
-- [ ] Push this repo to Gitea (and optionally mirror to GitHub)
+- [x] Week 1 proof: destroyed and rebuilt `sectools` from code (2026-10-24), all checks passed
+- [x] Push this repo to Gitea (private, source of truth) with a push-mirror to public GitHub
 - [ ] Retire `~/ansible` on `tuns` (its sshd template removes the `Include` line). Port its useful
       parts (sysctl hardening, ufw, internal DNS) into this repo in week 2
 - [ ] Roll the baseline out to the remaining VMs, one at a time, dry run first
+
+---
+
+## 11. Source control: Gitea + GitHub mirror
+
+```
+Mac --git push--> Gitea (private, source of truth) --push-mirror--> GitHub (public portfolio)
+```
+
+- Gitea repo: `<gitea-org>/homelab-platform` (private)
+- GitHub repo: https://github.com/salamituns/homelab-platform (public, read-only copy)
+- Mirror: Gitea, Settings, Mirror Settings. Syncs on every push, plus every 8h.
+  Auth: GitHub fine-grained token scoped to this one repo, Contents read/write, **expires in 90 days**.
+
+Push from the Mac (token from `.envrc`, never stored in `.git/config`):
+
+```sh
+source .envrc
+git -c credential.helper= -c http.extraHeader="Authorization: token $GITEA_TOKEN" push
+```
+
+Before the repo went public, the Gitea domain was scrubbed from **all history** with
+`git filter-repo --replace-text` (cleaning only the latest files would have left it in old commits).
+Audit the public copy any time:
+
+```sh
+git clone https://github.com/salamituns/homelab-platform.git /tmp/audit && cd /tmp/audit
+git log -p --all | grep -ciE 'gitea\.[a-z]+\.com'   # expect 0
+gitleaks git . --no-banner                           # expect: no leaks found
+```
+
+Gitea token scopes learned the hard way: creating a repo under a user needs `write:user`;
+pushing and managing mirrors needs only `write:repository`. The repo was created in the UI instead,
+so the token stays at `write:repository` + `read:user`.

@@ -20,7 +20,8 @@ Each week ends with **proof**: something you can demo or link in an interview.
 - [x] SSH hardening tasks (you write these)
 - [x] pre-commit: gitleaks, tflint, trivy config scan, ansible-lint
 - [x] Baseline applied to UbuntuNew (Gitea) and sectools; legacy sshd Include bug fixed
-- **Proof:** `terraform destroy && terraform apply && make baseline` rebuilds a hardened VM
+- [x] **Proof:** `terraform destroy && terraform apply && make baseline` rebuilds a hardened VM (done 2026-10-24)
+- [x] Repo on private Gitea, push-mirrored to public GitHub; history scrubbed before first push
 
 ## Week 2: State, storage and the platform in git
 - [ ] MinIO on `sectools`, Terraform state moved to an S3 backend with locking
