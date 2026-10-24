@@ -22,3 +22,8 @@ make baseline HOST=sectools
 ```
 
 See [ROADMAP.md](ROADMAP.md) for the 8-week plan.
+
+## Docs
+- [Week 1 log](docs/week-01.md): what was built, why, every command, problems hit
+- [Runbook: rebuild a VM](docs/runbooks/rebuild-vm.md): destroy and rebuild drill
+- [ADRs](docs/adr/): architecture decisions
