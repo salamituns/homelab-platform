@@ -45,26 +45,37 @@ make plan      # expect: 1 to add, 0 to change, 0 to destroy
 make apply     # about 4 minutes
 ```
 
-## 4. Verify and trust the new host key
+## 4. Wait for boot, then verify and trust the new host key
+
+`make apply` finishes when the guest agent answers, which is **before** cloud-init and sshd are
+ready. Running the key check straight away gets nothing back (`(stdin) is not a public key file`,
+then `Connection refused`). The script waits for cloud-init and port 22, compares fingerprints,
+and only writes `known_hosts` on a match:
+
+```sh
+scripts/trust-host-key.sh 192.168.1.95 120
+```
+
+Expected ending: `MATCH: 192.168.1.95 added to known_hosts`. On `MISMATCH`, **stop**:
+something else may be answering on that IP.
+
+<details><summary>What the script does, by hand</summary>
 
 ```sh
 IP=192.168.1.95; VMID=120
+ssh tuns "qm guest exec $VMID -- cloud-init status"      # repeat until: status: done
+nc -z $IP 22                                              # repeat until it succeeds
 ssh-keyscan -t ed25519 $IP 2>/dev/null | grep -v '^#' | ssh-keygen -lf -
 ssh tuns "qm guest exec $VMID -- cat /etc/ssh/ssh_host_ed25519_key.pub" \
   | python3 -c 'import sys,json;print(json.load(sys.stdin)["out-data"].strip())' | ssh-keygen -lf -
+# Both fingerprints must be present AND identical before you append to known_hosts.
 ```
+</details>
 
-The two `SHA256:...` fingerprints must match. If they do not, **stop**: something else is
-answering on that IP. If they match:
+## 5. Confirm SSH login
 
 ```sh
-ssh-keyscan -t ed25519 $IP 2>/dev/null | grep -v '^#' >> ~/.ssh/known_hosts
-```
-
-## 5. Wait for cloud-init
-
-```sh
-ssh tunsadmin@192.168.1.95 'cloud-init status --wait'    # expect: status: done
+ssh tunsadmin@192.168.1.95 'hostname; cloud-init status'    # expect: sectools / status: done
 ```
 
 ## 6. Harden

@@ -296,6 +296,8 @@ make scan        # = pre-commit run --all-files
 | Dry run failed on chrony/auditd services | In `--check`, packages are not really installed, so services do not exist | `ignore_errors: "{{ ansible_check_mode }}"` on that task only |
 | SSH drop-in would have done nothing on old VMs | Legacy role removed the `Include` line | New task restores it, **after** the drop-in exists |
 | Hardening would have locked out Gitea's `git` user | `UbuntuNew` is the Gitea server, not idle | `inventory/host_vars/UbuntuNew.yml` allows `git` |
+| Rebuild drill: `(stdin) is not a public key file`, then `Connection refused` | `make apply` returns when the guest agent answers, before cloud-init and sshd are up | `scripts/trust-host-key.sh` waits for cloud-init + port 22, and only trusts on a fingerprint match |
+| `trust-host-key.sh` hung on old VMs | Their cloud-init reports `status: disabled`, never `done` | Accept `done` or `disabled` |
 | Proxmox token creation blocked by Claude Code's auto-mode safety check | Creating a privileged credential needs human action | Packaged as `scripts/bootstrap-proxmox-token.sh`, run by you |
 
 Lessons:
