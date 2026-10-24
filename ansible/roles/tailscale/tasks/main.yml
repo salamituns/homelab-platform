@@ -77,19 +77,36 @@
       tailscale_authkey (TS_AUTHKEY) is empty. Export TS_AUTHKEY in .envrc before enrolling.
   when: tailscale_backend_state != "Running"
 
+# The key goes through a root-only file on /run (tmpfs, never on disk), not argv:
+# no_log hides it from Ansible output, but argv is readable by any local user via ps / /proc.
 - name: Enroll node into Tailscale tailnet
-  ansible.builtin.command:
-    argv:
-      - tailscale
-      - up
-      - "--auth-key={{ tailscale_authkey }}"
-      - "--hostname={{ tailscale_hostname }}"
-      - "--advertise-routes={{ tailscale_advertise_routes | join(',') }}"
-      - "--advertise-tags={{ tailscale_tags | join(',') }}"
-      - --ssh=false
-  no_log: true
-  changed_when: true
   when: tailscale_backend_state != "Running"
+  block:
+    - name: Write auth key to a root-only tmpfs file
+      ansible.builtin.copy:
+        content: "{{ tailscale_authkey | trim }}"
+        dest: /run/tailscale-authkey
+        owner: root
+        group: root
+        mode: "0600"
+      no_log: true
+
+    - name: Run tailscale up
+      ansible.builtin.command:
+        argv:
+          - tailscale
+          - up
+          - --auth-key=file:/run/tailscale-authkey
+          - "--hostname={{ tailscale_hostname }}"
+          - "--advertise-routes={{ tailscale_advertise_routes | join(',') }}"
+          - "--advertise-tags={{ tailscale_tags | join(',') }}"
+          - --ssh=false
+      changed_when: true
+  always:
+    - name: Remove auth key file
+      ansible.builtin.file:
+        path: /run/tailscale-authkey
+        state: absent
 
 # Limitation: `tailscale set` exits 0 with empty output whether settings changed or not,
 # and ACL tags cannot be changed via `tailscale set` (tags require re-auth via `tailscale up`).
