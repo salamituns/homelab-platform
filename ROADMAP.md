@@ -14,11 +14,12 @@ Each week ends with **proof**: something you can demo or link in an interview.
   worker disks at 73% / 81%
 
 ## Week 1: Infrastructure as Code + secure baseline
-- [ ] Proxmox API token for Terraform with a least-privilege role (not root)
-- [ ] `terraform apply` creates `sectools` (VMID 120) from template 109
-- [ ] Ansible baseline role: packages, auto security updates, fail2ban, auditd
-- [ ] SSH hardening tasks (you write these)
-- [ ] pre-commit: gitleaks, tflint, trivy config scan, ansible-lint
+- [x] Proxmox API token for Terraform with a least-privilege role (not root)
+- [x] `terraform apply` creates `sectools` (VMID 120) from template 109
+- [x] Ansible baseline role: packages, auto security updates, fail2ban, auditd
+- [x] SSH hardening tasks (you write these)
+- [x] pre-commit: gitleaks, tflint, trivy config scan, ansible-lint
+- [x] Baseline applied to UbuntuNew (Gitea) and sectools; legacy sshd Include bug fixed
 - **Proof:** `terraform destroy && terraform apply && make baseline` rebuilds a hardened VM
 
 ## Week 2: State, storage and the platform in git
