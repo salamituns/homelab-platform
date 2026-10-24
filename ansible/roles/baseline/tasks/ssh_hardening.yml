@@ -1,12 +1,39 @@
 # SSH hardening for every managed host.
 #
 # Ubuntu 24.04's /etc/ssh/sshd_config includes /etc/ssh/sshd_config.d/*.conf FIRST,
-# and for most sshd options the first value read wins, so a drop-in here overrides the defaults.
-#
-# Requirements:
-#   - Write ONE drop-in file: /etc/ssh/sshd_config.d/10-hardening.conf
-#   - It must never lock you out: validate the full config with `sshd -t` before it goes live
-#   - Notify the "Restart ssh" handler only when the file changes
-#   - Use baseline_ssh_allow_users (defaults/main.yml)
-#
-# TODO(you): implement the task(s) below. Decide which directives to set and why.
+# and for most sshd options the first value read wins. Files load in name order, so
+# "10-" beats cloud-init's "50-cloud-init.conf" (which can set PasswordAuthentication yes).
+- name: Deploy SSH hardening drop-in
+  ansible.builtin.copy:
+    dest: /etc/ssh/sshd_config.d/10-hardening.conf
+    owner: root
+    group: root
+    mode: "0644"
+    validate: /usr/sbin/sshd -t -f %s
+    content: |
+      # Managed by Ansible (homelab-platform, role: baseline). Local edits are overwritten.
+      PermitRootLogin no
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      PubkeyAuthentication yes
+      PermitEmptyPasswords no
+      MaxAuthTries 3
+      LoginGraceTime 30
+      X11Forwarding no
+      AllowAgentForwarding no
+      ClientAliveInterval 300
+      ClientAliveCountMax 2
+      LogLevel VERBOSE
+      AllowUsers {{ baseline_ssh_allow_users | join(' ') }}
+  notify: Restart ssh
+
+# The legacy base-hardening role replaced sshd_config wholesale and dropped this line,
+# which makes every drop-in above a silent no-op. It must be the first directive.
+# Runs after the drop-in so cloud-init's "PasswordAuthentication yes" never wins.
+- name: Ensure sshd loads drop-in configs
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    line: Include /etc/ssh/sshd_config.d/*.conf
+    insertbefore: BOF
+    validate: /usr/sbin/sshd -t -f %s
+  notify: Restart ssh

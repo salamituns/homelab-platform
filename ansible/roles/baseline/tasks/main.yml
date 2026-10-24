@@ -20,6 +20,8 @@
     - fail2ban
     - chrony
     - auditd
+  # In --check the packages above are never installed, so their units don't exist yet.
+  ignore_errors: "{{ ansible_check_mode }}"
 
 - name: Enable automatic security updates
   ansible.builtin.copy:
