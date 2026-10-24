@@ -1,0 +1,7 @@
+tailscale_advertise_routes:
+  - 192.168.1.0/24
+tailscale_hostname: homelab-gateway
+tailscale_tags:
+  - tag:homelab-gateway
+# Secret: comes from .envrc (TS_AUTHKEY), only needed for first enrollment, never committed.
+tailscale_authkey: "{{ lookup('ansible.builtin.env', 'TS_AUTHKEY') }}"

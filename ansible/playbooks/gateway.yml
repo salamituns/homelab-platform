@@ -1,0 +1,8 @@
+# Baseline and configure the Tailscale subnet router gateway VM.
+# Usage:
+#   source ../.envrc && ansible-playbook playbooks/gateway.yml --limit gateway
+- name: Configure Tailscale subnet router gateway
+  hosts: gateway
+  roles:
+    - baseline
+    - tailscale

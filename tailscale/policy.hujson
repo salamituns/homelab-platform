@@ -1,0 +1,45 @@
+// Tailscale access policy for the homelab tailnet, kept in git.
+// Apply: Tailscale admin console, Access controls, paste this file (week 3: automate with
+// the tailscale/gitops-acl-action so a merged PR updates the policy).
+//
+// Model: nobody reaches the lab LAN unless a rule below says so. The gateway is a tagged
+// device (owned by the tailnet, not a person), so its node key never expires and it is
+// not tied to anyone's login.
+{
+  "tagOwners": {
+    // Only tailnet admins may enroll a device with this tag.
+    "tag:homelab-gateway": ["autogroup:admin"],
+  },
+
+  // Routes advertised by tagged gateways are approved automatically (no manual click per route).
+  // Only this exact subnet, only from this tag.
+  "autoApprovers": {
+    "routes": {
+      "192.168.1.0/24": ["tag:homelab-gateway"],
+    },
+  },
+
+  "grants": [
+    // Tailnet members (you) may reach the whole lab LAN through the gateway.
+    {
+      "src": ["autogroup:member"],
+      "dst": ["192.168.1.0/24"],
+      "ip":  ["*"],
+    },
+    // Members may reach the gateway itself (for diagnostics).
+    {
+      "src": ["autogroup:member"],
+      "dst": ["tag:homelab-gateway"],
+      "ip":  ["*"],
+    },
+    // Deliberately NO rule allowing tag:homelab-gateway to initiate connections to members:
+    // a compromised gateway cannot reach your laptop over the tailnet.
+  ],
+
+  "tests": [
+    {
+      "src":    "autogroup:member",
+      "accept": ["192.168.1.181:8006", "192.168.1.90:22", "192.168.1.96:22"],
+    },
+  ],
+}

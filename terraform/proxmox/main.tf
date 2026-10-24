@@ -10,6 +10,15 @@ locals {
       disk_gb      = 60
       tags         = ["devsecops"]
     }
+    # Tailscale subnet router: remote access to 192.168.1.0/24. One job only, see docs/adr/0002.
+    gateway = {
+      vm_id        = 121
+      ipv4_address = "192.168.1.96"
+      cores        = 1
+      memory_mb    = 1024
+      disk_gb      = 40
+      tags         = ["network", "tailscale"]
+    }
   }
 }
 

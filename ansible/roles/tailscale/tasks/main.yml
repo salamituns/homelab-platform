@@ -1,0 +1,109 @@
+- name: Download Tailscale apt signing keyring
+  ansible.builtin.get_url:
+    url: "https://pkgs.tailscale.com/stable/ubuntu/{{ ansible_distribution_release }}.noarmor.gpg"
+    dest: /usr/share/keyrings/tailscale-archive-keyring.gpg
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Add Tailscale official apt repository
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg] https://pkgs.tailscale.com/stable/ubuntu {{ ansible_distribution_release }} main"
+    filename: tailscale
+    state: present
+
+- name: Install tailscale package
+  ansible.builtin.apt:
+    name: tailscale
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Enable and start tailscaled service
+  ansible.builtin.service:
+    name: tailscaled
+    state: started
+    enabled: true
+  # In --check on a fresh host the package is not installed yet, so the unit does not exist.
+  ignore_errors: "{{ ansible_check_mode }}"
+
+- name: Enable IPv4 and IPv6 forwarding for Tailscale subnet routing
+  ansible.posix.sysctl:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    sysctl_file: /etc/sysctl.d/99-tailscale.conf
+    state: present
+    reload: true
+  loop:
+    - name: net.ipv4.ip_forward
+      value: "1"
+    - name: net.ipv6.conf.all.forwarding
+      value: "1"
+
+- name: Read current Tailscale daemon status
+  ansible.builtin.command:
+    argv:
+      - tailscale
+      - status
+      - --json
+  register: tailscale_status_raw
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Parse Tailscale status and backend state
+  ansible.builtin.set_fact:
+    tailscale_status: >-
+      {{
+        (tailscale_status_raw.stdout | from_json)
+        if (tailscale_status_raw.rc | default(1)) == 0
+           and (tailscale_status_raw.stdout | default('') | trim | length > 0)
+        else {}
+      }}
+    tailscale_backend_state: >-
+      {{
+        ((tailscale_status_raw.stdout | from_json).BackendState | default('Unknown'))
+        if (tailscale_status_raw.rc | default(1)) == 0
+           and (tailscale_status_raw.stdout | default('') | trim | length > 0)
+        else 'Unknown'
+      }}
+
+- name: Ensure TS_AUTHKEY is provided when initial Tailscale enrollment is required
+  ansible.builtin.assert:
+    that:
+      - tailscale_authkey | trim | length > 0
+    fail_msg: >-
+      Tailscale is not enrolled (BackendState={{ tailscale_backend_state }}) and
+      tailscale_authkey (TS_AUTHKEY) is empty. Export TS_AUTHKEY in .envrc before enrolling.
+  when: tailscale_backend_state != "Running"
+
+- name: Enroll node into Tailscale tailnet
+  ansible.builtin.command:
+    argv:
+      - tailscale
+      - up
+      - "--auth-key={{ tailscale_authkey }}"
+      - "--hostname={{ tailscale_hostname }}"
+      - "--advertise-routes={{ tailscale_advertise_routes | join(',') }}"
+      - "--advertise-tags={{ tailscale_tags | join(',') }}"
+      - --ssh=false
+  no_log: true
+  changed_when: true
+  when: tailscale_backend_state != "Running"
+
+# Limitation: `tailscale set` exits 0 with empty output whether settings changed or not,
+# and ACL tags cannot be changed via `tailscale set` (tags require re-auth via `tailscale up`).
+# Also, `tailscale status --json` exposes `Self.PrimaryRoutes` only after advertised routes
+# are approved in the Tailscale admin console; until approved, `PrimaryRoutes` is empty and
+# this task will report `changed` on each run.
+- name: Configure Tailscale hostname and advertised routes when already running
+  ansible.builtin.command:
+    argv:
+      - tailscale
+      - set
+      - "--hostname={{ tailscale_hostname }}"
+      - "--advertise-routes={{ tailscale_advertise_routes | join(',') }}"
+  changed_when: >-
+    (tailscale_status.Self.HostName | default('') != tailscale_hostname) or
+    ((tailscale_status.Self.PrimaryRoutes | default([]) | sort) != (tailscale_advertise_routes | sort))
+  when: tailscale_backend_state == "Running"

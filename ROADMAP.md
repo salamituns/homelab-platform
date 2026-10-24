@@ -23,6 +23,20 @@ Each week ends with **proof**: something you can demo or link in an interview.
 - [x] **Proof:** `terraform destroy && terraform apply && make baseline` rebuilds a hardened VM (done 2026-10-24)
 - [x] Repo on private Gitea, push-mirrored to public GitHub; history scrubbed before first push
 
+## Week 1.5: Remote access + network foundations
+Why: on 2026-10-24 the Mac was on a phone hotspot mid-incident and could not reach anything.
+See [ADR 0002](docs/adr/0002-remote-access-tailscale-subnet-router.md).
+- [ ] `gateway` VM (VMID 121, .96) by Terraform, baseline-hardened
+- [ ] Tailscale subnet router on `gateway`, advertising 192.168.1.0/24, tagged device
+- [ ] Access policy in git (`tailscale/policy.hujson`): members to LAN only, gateway cannot reach members
+- [ ] Single-use, tagged, short-lived auth key; documented in `docs/credentials.md`
+- [ ] Break-glass: second path in if `gateway` is down (Tailscale on `tuns`, or a second router)
+- [ ] Internal DNS: names like `proxmox.lab`, `gitea.lab`, served on the LAN and over Tailscale (split DNS),
+      porting the legacy `internal_dns` role
+- [ ] Inventory of every way into the lab (Tailscale, Cloudflare tunnel, port forwards on the router) in `docs/`
+- **Proof:** from a phone hotspot, `ssh Master`, open the Proxmox UI, and `kubectl get nodes` all work,
+  and a test in `policy.hujson` shows the gateway cannot connect back to your laptop
+
 ## Week 2: State, storage and the platform in git
 - [ ] MinIO on `sectools`, Terraform state moved to an S3 backend with locking
 - [ ] metrics-server, Longhorn (or grow worker disks via Terraform import)
