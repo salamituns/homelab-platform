@@ -10,3 +10,9 @@ baseline_packages:
 # Users allowed to SSH in. Used by the SSH hardening tasks.
 baseline_ssh_allow_users:
   - tunsadmin
+# Public keys that must never be authorized on any host (removed for these users on every run).
+# Public keys are not secret; listing them here is how revocation stays enforced.
+baseline_ssh_revoke_from_users:
+  - root
+  - tunsadmin
+baseline_revoked_ssh_keys: "{{ lookup('ansible.builtin.file', 'revoked_keys.pub').splitlines() | reject('match', '^#') | list }}"

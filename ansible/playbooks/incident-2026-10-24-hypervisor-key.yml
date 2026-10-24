@@ -1,0 +1,30 @@
+# Incident 2026-10-24: root@tuns private key found on DockerApp.
+# See docs/postmortems/2026-10-24-hypervisor-key-exposure.md
+#
+# Run order:
+#   1. this playbook (contain + revoke on VMs)
+#   2. scripts/rotate-tuns-root-key.sh (rotate on the hypervisor, clean templates)
+#
+#   ansible-playbook playbooks/incident-2026-10-24-hypervisor-key.yml --check --diff
+#   ansible-playbook playbooks/incident-2026-10-24-hypervisor-key.yml
+
+- name: Contain - delete the exposed private key from DockerApp
+  hosts: DockerApp
+  tasks:
+    - name: Delete exposed root@tuns key pair
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /root/.ssh/id_rsa
+        - /root/.ssh/id_rsa.pub
+        - /home/tunsadmin/.ssh/id_rsa
+        - /home/tunsadmin/.ssh/id_rsa.pub
+
+- name: Revoke - remove root@tuns public key from every managed host
+  hosts: managed
+  tasks:
+    - name: Remove revoked SSH keys
+      ansible.builtin.include_role:
+        name: baseline
+        tasks_from: revoked_keys

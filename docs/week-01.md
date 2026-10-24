@@ -313,7 +313,9 @@ Lessons:
 - [x] Push this repo to Gitea (private, source of truth) with a push-mirror to public GitHub
 - [ ] Retire `~/ansible` on `tuns` (its sshd template removes the `Include` line). Port its useful
       parts (sysctl hardening, ufw, internal DNS) into this repo in week 2
-- [ ] Roll the baseline out to the remaining VMs, one at a time, dry run first
+- [x] Baseline rolled out to all 10 managed VMs one at a time (2026-10-24): every service kept, k8s stayed Ready
+- Decision: all servers use `America/Chicago` (owner's choice over UTC; Nexus and Sonar moved from UTC)
+- [ ] **Incident 2026-10-24**: run `ansible/playbooks/incident-2026-10-24-hypervisor-key.yml`, then `scripts/rotate-tuns-root-key.sh` (see docs/postmortems/)
 
 ---
 

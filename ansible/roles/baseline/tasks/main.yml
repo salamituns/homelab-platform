@@ -33,3 +33,6 @@
 
 - name: Harden SSH
   ansible.builtin.import_tasks: ssh_hardening.yml
+
+- name: Revoke compromised SSH keys
+  ansible.builtin.import_tasks: revoked_keys.yml

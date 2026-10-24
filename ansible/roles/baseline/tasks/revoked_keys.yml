@@ -1,0 +1,10 @@
+# Remove revoked public keys from authorized_keys. Runs on every baseline, so a revoked key
+# that reappears (an old template, a restored backup) is removed again.
+- name: Remove revoked SSH keys
+  ansible.posix.authorized_key:
+    user: "{{ item.0 }}"
+    key: "{{ item.1 }}"
+    state: absent
+  loop: "{{ baseline_ssh_revoke_from_users | product(baseline_revoked_ssh_keys) | list }}"
+  loop_control:
+    label: "{{ item.0 }}"
