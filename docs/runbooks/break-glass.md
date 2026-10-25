@@ -48,6 +48,15 @@ ssh root@homelab-breakglass 'qm start 121'              # restore
 sleep 60; ssh Master 'kubectl get nodes'                # expect: works again via gateway
 ```
 
+## Drill log
+
+| Date | Where | Result |
+|---|---|---|
+| 2026-10-25 | Phone hotspot, Mac | Gateway down: direct `ssh Master` timed out; `ssh -J` via break-glass worked (3 nodes Ready); gateway restarted, normal path back |
+
+Note: run the drill **from the Mac**. Run on `tuns`, `ssh` uses the hypervisor's key, which no
+VM trusts (by design since the 2026-10-24 incident), so it fails for the wrong reason.
+
 ## If something goes wrong
 
 | Symptom | Cause | Fix |

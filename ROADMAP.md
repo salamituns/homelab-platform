@@ -30,7 +30,7 @@ See [ADR 0002](docs/adr/0002-remote-access-tailscale-subnet-router.md).
 - [x] Tailscale subnet router on `gateway`, advertising 192.168.1.0/24, tagged device
 - [x] Access policy in git (`tailscale/policy.hujson`): members to LAN only, gateway cannot reach members
 - [x] Single-use, tagged, short-lived auth key; documented in `docs/credentials.md`
-- [ ] Break-glass: Tailscale on `tuns`, no routes, narrow grant ([ADR 0003](docs/adr/0003-break-glass-access.md)); drill passed
+- [x] Break-glass: Tailscale on `tuns`, no routes, narrow grant ([ADR 0003](docs/adr/0003-break-glass-access.md)); drill passed 2026-10-25 from a hotspot
 - [ ] Internal DNS: names like `proxmox.lab`, `gitea.lab`, served on the LAN and over Tailscale (split DNS),
       porting the legacy `internal_dns` role
 - [ ] Inventory of every way into the lab (Tailscale, Cloudflare tunnel, port forwards on the router) in `docs/`
@@ -63,6 +63,7 @@ See [ADR 0002](docs/adr/0002-remote-access-tailscale-subnet-router.md).
 ## Week 6: TLS, network and runtime security
 - [ ] cert-manager with an internal CA, TLS on every ingress (and on the Proxmox UI)
 - [ ] NetworkPolicies: default-deny per namespace
+- [ ] Proxmox firewall: `tuns` 22/8006 only from the Mac and `tailscale0`, not from every VM (ADR 0003 gap)
 - [ ] Falco for runtime detection, alerts to Alertmanager
 - **Proof:** `kubectl exec` into a pod and spawn a shell, then show the Falco alert
 
