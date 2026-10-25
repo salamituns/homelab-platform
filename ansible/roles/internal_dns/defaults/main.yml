@@ -1,0 +1,6 @@
+# Server side runs only where internal_dns_role == "server" (set in host_vars/gateway.yml).
+internal_dns_role: client
+# Where the server sends everything that is not in the zone.
+internal_dns_upstreams:
+  - 1.1.1.1
+  - 9.9.9.9

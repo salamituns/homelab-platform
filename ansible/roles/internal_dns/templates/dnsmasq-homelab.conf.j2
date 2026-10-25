@@ -1,0 +1,28 @@
+# {{ ansible_managed }}
+# Internal DNS for {{ internal_dns_zone }} (ADR 0004). Records: inventory/group_vars/all/dns.yml
+
+# Network exposure: LAN address only (also reached over Tailscale via the subnet route).
+listen-address={{ internal_dns_server_ip }}
+bind-interfaces
+except-interface=lo
+
+# Upstreams for everything outside the zone; ignore /etc/resolv.conf.
+no-resolv
+{% for u in internal_dns_upstreams %}
+server={{ u }}
+{% endfor %}
+
+# Hygiene: never forward plain names or private reverse lookups to the internet.
+domain-needed
+bogus-priv
+
+# Authoritative for the zone: unknown names get NXDOMAIN, not forwarded.
+local=/{{ internal_dns_zone }}/
+domain={{ internal_dns_zone }}
+
+{% for r in internal_dns_records %}
+host-record={{ r.names | map('regex_replace', '$', '.' ~ internal_dns_zone) | join(',') }},{{ r.ip }}
+{% endfor %}
+{% for w in internal_dns_wildcards %}
+address=/{{ w.name }}.{{ internal_dns_zone }}/{{ w.ip }}
+{% endfor %}

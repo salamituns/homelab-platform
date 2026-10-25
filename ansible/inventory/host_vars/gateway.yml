@@ -1,0 +1,2 @@
+# gateway is the Tailscale subnet router (ADR 0002) and the internal DNS server (ADR 0004).
+internal_dns_role: server

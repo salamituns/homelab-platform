@@ -1,0 +1,6 @@
+- name: Configure the DNS server
+  ansible.builtin.import_tasks: server.yml
+  when: internal_dns_role == "server"
+
+- name: Configure the DNS client
+  ansible.builtin.import_tasks: client.yml

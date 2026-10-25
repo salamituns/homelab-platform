@@ -1,0 +1,42 @@
+# Config goes in BEFORE the package: on install, dnsmasq starts at once, and with its default
+# config it listens on every address and fights systemd-resolved for port 53.
+- name: Ensure dnsmasq config directory exists
+  ansible.builtin.file:
+    path: /etc/dnsmasq.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# Listen only on the LAN address. systemd-resolved keeps 127.0.0.53, so the two do not clash,
+# and the resolver is never exposed on any other interface.
+- name: Deploy dnsmasq zone config
+  ansible.builtin.template:
+    src: dnsmasq-homelab.conf.j2
+    dest: /etc/dnsmasq.d/homelab.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart dnsmasq
+
+- name: Install dnsmasq
+  ansible.builtin.apt:
+    name: dnsmasq
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+# The template module's validate= cannot be used: dnsmasq may not be installed yet at that point.
+- name: Check dnsmasq configuration syntax
+  ansible.builtin.command:
+    argv: [/usr/sbin/dnsmasq, --test, --conf-dir=/etc/dnsmasq.d]
+  changed_when: false
+  check_mode: false
+  when: not ansible_check_mode
+
+- name: Enable and start dnsmasq
+  ansible.builtin.service:
+    name: dnsmasq
+    state: started
+    enabled: true
+  ignore_errors: "{{ ansible_check_mode }}"

@@ -31,8 +31,8 @@ See [ADR 0002](docs/adr/0002-remote-access-tailscale-subnet-router.md).
 - [x] Access policy in git (`tailscale/policy.hujson`): members to LAN only, gateway cannot reach members
 - [x] Single-use, tagged, short-lived auth key; documented in `docs/credentials.md`
 - [x] Break-glass: Tailscale on `tuns`, no routes, narrow grant ([ADR 0003](docs/adr/0003-break-glass-access.md)); drill passed 2026-10-25 from a hotspot
-- [ ] Internal DNS: names like `proxmox.lab`, `gitea.lab`, served on the LAN and over Tailscale (split DNS),
-      porting the legacy `internal_dns` role
+- [ ] Internal DNS: `*.home.arpa` from dnsmasq on `gateway`, split DNS over Tailscale
+      ([ADR 0004](docs/adr/0004-internal-dns.md); replaces the legacy `internal_dns` role)
 - [ ] Inventory of every way into the lab (Tailscale, Cloudflare tunnel, port forwards on the router) in `docs/`
 - **Proof (done 2026-10-24 for access; laptop test in policy):** from a phone hotspot, `ssh Master`, open the Proxmox UI, and `kubectl get nodes` all work,
   and a test in `policy.hujson` shows the gateway cannot connect back to your laptop
@@ -61,7 +61,7 @@ See [ADR 0002](docs/adr/0002-remote-access-tailscale-subnet-router.md).
 - **Proof:** rotate the DB password in Vault and the app picks it up with no git change
 
 ## Week 6: TLS, network and runtime security
-- [ ] cert-manager with an internal CA, TLS on every ingress (and on the Proxmox UI)
+- [ ] cert-manager with an internal CA, TLS on every ingress (and on the Proxmox UI); move `*.local` ingress hosts to `*.apps.home.arpa`
 - [ ] NetworkPolicies: default-deny per namespace
 - [ ] Proxmox firewall: `tuns` 22/8006 only from the Mac and `tailscale0`, not from every VM (ADR 0003 gap)
 - [ ] Falco for runtime detection, alerts to Alertmanager

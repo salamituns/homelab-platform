@@ -117,3 +117,13 @@ git add -A && git commit -m "Week 1 proof: rebuilt sectools from code in N minut
 | `Host key verification failed` | Step 2 or 4 skipped | `ssh-keygen -R 192.168.1.95`, then redo step 4 |
 | Ansible apt lock errors | cloud-init still running | Step 5, then rerun |
 | Locked out of SSH | Bad SSH change | Proxmox UI, VM 120, Console (does not use SSH) |
+
+## Host key changes after the first Proxmox start
+
+Seen 2026-10-25 on `gateway`: the first `qm start` after Terraform created the VM gave cloud-init
+a new instance ID, so it generated **new SSH host keys** (`REMOTE HOST IDENTIFICATION HAS CHANGED`).
+Later restarts kept the same ID. Do not just delete the old line: verify out of band first.
+
+```sh
+scripts/trust-host-key.sh <ip> <vmid>   # compares the key via the guest agent, writes only on match
+```

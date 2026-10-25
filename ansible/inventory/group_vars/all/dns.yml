@@ -1,0 +1,23 @@
+# Internal DNS zone (ADR 0004). One list, used by the DNS server and documented in docs/dns.md.
+# RFC 8375: home.arpa is reserved for home networks, so it can never collide with a real domain.
+internal_dns_zone: home.arpa
+internal_dns_server_ip: 192.168.1.96   # gateway
+
+# name: first entry is the canonical name, the rest are aliases (all under the zone).
+internal_dns_records:
+  - { names: [proxmox, tuns], ip: 192.168.1.181 }
+  - { names: [gitea, ubuntunew], ip: 192.168.1.83 }
+  - { names: [workernode2], ip: 192.168.1.84 }
+  - { names: [tomcat], ip: 192.168.1.85 }
+  - { names: [sonar, sonarquality], ip: 192.168.1.86 }
+  - { names: [nexus], ip: 192.168.1.87 }
+  - { names: [jenkins, jenkinscicd], ip: 192.168.1.88 }
+  - { names: [workernode1], ip: 192.168.1.89 }
+  - { names: [master, k8s-api], ip: 192.168.1.90 }
+  - { names: [dockerapp], ip: 192.168.1.92 }
+  - { names: [sectools], ip: 192.168.1.95 }
+  - { names: [gateway], ip: 192.168.1.96 }
+
+# Wildcard: anything under apps.home.arpa goes to the ingress-nginx LoadBalancer (MetalLB).
+internal_dns_wildcards:
+  - { name: apps, ip: 192.168.1.240 }

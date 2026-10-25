@@ -1,0 +1,11 @@
+- name: Restart dnsmasq
+  ansible.builtin.service:
+    name: dnsmasq
+    state: restarted
+  # In --check on a fresh host the package is not installed, so the unit does not exist.
+  ignore_errors: "{{ ansible_check_mode }}"
+
+- name: Restart systemd-resolved
+  ansible.builtin.service:
+    name: systemd-resolved
+    state: restarted

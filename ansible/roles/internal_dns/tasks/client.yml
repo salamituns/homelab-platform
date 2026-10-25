@@ -1,0 +1,18 @@
+- name: Ensure systemd-resolved drop-in directory exists
+  ansible.builtin.file:
+    path: /etc/systemd/resolved.conf.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# "~zone" is a routing-only domain: only *.home.arpa goes to the internal server.
+# All other lookups keep using the host's normal DNS, so a gateway outage cannot break them.
+- name: Route the internal zone to the internal DNS server
+  ansible.builtin.template:
+    src: resolved-homelab.conf.j2
+    dest: /etc/systemd/resolved.conf.d/homelab.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart systemd-resolved

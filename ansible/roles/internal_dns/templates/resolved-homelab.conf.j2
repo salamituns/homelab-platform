@@ -1,0 +1,5 @@
+# {{ ansible_managed }}
+# Send only *.{{ internal_dns_zone }} to the internal DNS server (ADR 0004).
+[Resolve]
+DNS={{ internal_dns_server_ip }}
+Domains=~{{ internal_dns_zone }}
