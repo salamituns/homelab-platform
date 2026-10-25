@@ -1,3 +1,5 @@
+# Ubuntu or Debian repo, picked from the host's facts.
+tailscale_apt_base: "https://pkgs.tailscale.com/stable/{{ ansible_facts['distribution'] | lower }}"
 tailscale_advertise_routes:
   - 192.168.1.0/24
 tailscale_hostname: homelab-gateway

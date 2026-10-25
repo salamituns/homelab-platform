@@ -1,6 +1,6 @@
 - name: Download Tailscale apt signing keyring
   ansible.builtin.get_url:
-    url: "https://pkgs.tailscale.com/stable/ubuntu/{{ ansible_distribution_release }}.noarmor.gpg"
+    url: "{{ tailscale_apt_base }}/{{ ansible_facts['distribution_release'] }}.noarmor.gpg"
     dest: /usr/share/keyrings/tailscale-archive-keyring.gpg
     owner: root
     group: root
@@ -8,7 +8,7 @@
 
 - name: Add Tailscale official apt repository
   ansible.builtin.apt_repository:
-    repo: "deb [signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg] https://pkgs.tailscale.com/stable/ubuntu {{ ansible_distribution_release }} main"
+    repo: "deb [signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg] {{ tailscale_apt_base }} {{ ansible_facts['distribution_release'] }} main"
     filename: tailscale
     state: present
 
@@ -39,6 +39,8 @@
       value: "1"
     - name: net.ipv6.conf.all.forwarding
       value: "1"
+  # Only a subnet router forwards. A plain node (e.g. break-glass on the hypervisor) must not.
+  when: tailscale_advertise_routes | length > 0
 
 - name: Read current Tailscale daemon status
   ansible.builtin.command:

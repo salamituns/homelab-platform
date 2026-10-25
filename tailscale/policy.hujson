@@ -9,6 +9,8 @@
   "tagOwners": {
     // Only tailnet admins may enroll a device with this tag.
     "tag:homelab-gateway": ["autogroup:admin"],
+    // Break-glass node on the hypervisor (ADR 0003). Routes nothing.
+    "tag:homelab-breakglass": ["autogroup:admin"],
   },
 
   // Routes advertised by tagged gateways are approved automatically (no manual click per route).
@@ -32,6 +34,11 @@
       "dst": ["tag:homelab-gateway"],
       "ip":  ["*"],
     },
+    // Break-glass: members may reach the hypervisor directly when the gateway is down.
+    // TODO(you): write this grant. Allow only the ports you need to repair the lab, nothing more.
+    //   src: who may use the back door?   dst: "tag:homelab-breakglass"
+    //   ip:  which ports? ("tcp:NN" strings). Not "*": the hypervisor is the crown jewel.
+
     // Deliberately NO rule allowing tag:homelab-gateway to initiate connections to members:
     // a compromised gateway cannot reach your laptop over the tailnet.
   ],
@@ -50,5 +57,7 @@
       "src":  "tag:homelab-gateway",
       "deny": ["100.117.210.50:22", "100.117.210.50:5900"],
     },
+    // TODO(you): a test that the gateway cannot reach the break-glass node, so one compromised
+    // entry point cannot be used to reach the other. (Tag names are valid test destinations.)
   ],
 }

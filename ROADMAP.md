@@ -30,7 +30,7 @@ See [ADR 0002](docs/adr/0002-remote-access-tailscale-subnet-router.md).
 - [x] Tailscale subnet router on `gateway`, advertising 192.168.1.0/24, tagged device
 - [x] Access policy in git (`tailscale/policy.hujson`): members to LAN only, gateway cannot reach members
 - [x] Single-use, tagged, short-lived auth key; documented in `docs/credentials.md`
-- [ ] Break-glass: second path in if `gateway` is down (Tailscale on `tuns`, or a second router)
+- [ ] Break-glass: Tailscale on `tuns`, no routes, narrow grant ([ADR 0003](docs/adr/0003-break-glass-access.md)); drill passed
 - [ ] Internal DNS: names like `proxmox.lab`, `gitea.lab`, served on the LAN and over Tailscale (split DNS),
       porting the legacy `internal_dns` role
 - [ ] Inventory of every way into the lab (Tailscale, Cloudflare tunnel, port forwards on the router) in `docs/`

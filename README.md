@@ -27,5 +27,6 @@ See [ROADMAP.md](ROADMAP.md) for the 8-week plan.
 - [Week 1 log](docs/week-01.md): what was built, why, every command, problems hit
 - [Runbook: rebuild a VM](docs/runbooks/rebuild-vm.md): destroy and rebuild drill
 - [Runbook: enable remote access](docs/runbooks/enable-remote-access.md): Tailscale subnet router
+- [Runbook: break-glass access](docs/runbooks/break-glass.md): back door when the gateway is down, with a drill
 - [Credential inventory](docs/credentials.md)
 - [ADRs](docs/adr/): architecture decisions

@@ -1,0 +1,8 @@
+# Break-glass access: Tailscale on the Proxmox host, no subnet routes (ADR 0003).
+# The hypervisor is not baselined (see inventory `managed`), so only the tailscale role runs.
+# Usage:
+#   source ../.envrc && ansible-playbook playbooks/breakglass.yml --limit tuns
+- name: Enroll the Proxmox host as a break-glass Tailscale node
+  hosts: tuns
+  roles:
+    - tailscale

@@ -1,0 +1,5 @@
+# Break-glass Tailscale node on the hypervisor (ADR 0003): reachable by you, routes nothing.
+tailscale_hostname: homelab-breakglass
+tailscale_tags:
+  - tag:homelab-breakglass
+tailscale_advertise_routes: []
