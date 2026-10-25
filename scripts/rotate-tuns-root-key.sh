@@ -14,6 +14,11 @@ set -euo pipefail
 
 PVE_HOST="${PVE_HOST:-tuns}"
 OLD_FP="SHA256:fZPNfUEZXkP0Dl1aNGJ4dfPA/4fS5uZrl4JAEQfg57c"
+
+# This runs on the Mac and drives tuns over SSH. Copied to tuns, it would read tuns's own keys.
+for f in ~/.ssh/id_ed25519.pub ~/.ssh/id_rsa.pub; do
+  [ -f "$f" ] || { echo "Missing $f. Run this from the Mac (repo root), not on $PVE_HOST." >&2; exit 1; }
+done
 MAC_KEYS="$(cat ~/.ssh/id_ed25519.pub ~/.ssh/id_rsa.pub)"
 MAC_BLOB="$(awk '{print $2}' ~/.ssh/id_rsa.pub)"   # the key this Mac logs into tuns with
 

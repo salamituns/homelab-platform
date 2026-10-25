@@ -2,7 +2,7 @@
 
 - Date found: 2026-10-24
 - Severity: **Critical** (path to root on the hypervisor and every VM)
-- Status: Contained and rotated: _pending_ (see Action items)
+- Status: **Resolved 2026-10-24** (contained, revoked, rotated, verified). Follow-ups in Action items
 - Evidence of misuse: **none found**
 - Author: homelab-platform
 
@@ -34,15 +34,20 @@ CI job (any repo with Actions enabled)
 |---|---|
 | 2026-01-30 | Key pair copied to `DockerApp` (`/root/.ssh`, `/home/tunsadmin/.ssh`) by the legacy `gitea_git_client` Ansible role, which distributes the control node's private key to managed hosts |
 | 2026-08-17 15:26-15:48 | 3 SSH logins `DockerApp -> Master` as `tunsadmin` using this key. **Confirmed by the owner as their own activity.** |
+| 2026-08-19 09:35 | Same public key registered as an SSH key (Gitea key id 5) on the Gitea **admin** account (user id 1), giving git read/write over SSH to that account's repos |
 | 2026-10-24 | While porting the legacy Ansible project, the reviewing agent was asked to describe `gitea_git_client` and flagged that it distributes a private key |
 | 2026-10-24 | Fleet-wide fingerprint scan: key found only on `DockerApp`. Public key authorized on all 9 legacy VMs and on `tuns` |
+| 2026-10-24 | Owner ran the incident playbook: key absent from DockerApp and revoked on all 10 VMs (re-run `changed=0`). Verification scan then found the key in `UbuntuNew:/home/git/.ssh/authorized_keys`, i.e. the Gitea key above. sshd logs on UbuntuNew (journal from 2025-12-06) show **no** `git` logins with this key; only `tunsadmin` logins from `tuns` itself (2026-09-14, legacy Ansible) |
+| 2026-10-24 | Gitea key id 5 deleted in the UI. `root@tuns` rotated (new `SHA256:WcgvLIyj...`); templates 109/110 now carry only the Mac's keys. Final scan of all 10 VMs, the Gitea `git` account and `tuns`: old fingerprint found nowhere |
 | 2026-10-24 | Remediation written as code; containment pending owner execution (automation was correctly blocked from deleting key material and creating credentials on the hypervisor without a human) |
 
 ## Impact
 
 - **Actual:** none known. No logins into `tuns` from `DockerApp` in available logs. The only
   logins made with the key from `DockerApp` were the owner's own.
-- **Potential:** full compromise of the lab (hypervisor root, all VMs, all data).
+- **Potential:** full compromise of the lab (hypervisor root, all VMs, all data). Through the
+  Gitea key, also **code tampering**: push to a repo that ArgoCD or CI deploys, i.e. a supply-chain
+  path into the cluster that leaves no trace on the hypervisor.
 - Logs only go back so far, and a root-level attacker can edit logs, so "no evidence" is not
   "no compromise". The key is therefore treated as **compromised** and rotated.
 
@@ -62,11 +67,12 @@ SSH keys explicitly instead of inheriting them from the template.
 
 | Step | How | Status |
 |---|---|---|
-| Delete private key from DockerApp | `ansible/playbooks/incident-2026-10-24-hypervisor-key.yml` (play 1) | Pending |
-| Revoke public key on all VMs (and keep it revoked) | `baseline_revoked_ssh_keys` in the baseline role, enforced on every run | Pending |
-| Rotate `root@tuns` key; remove old key from `/etc/pve/priv/authorized_keys` | `scripts/rotate-tuns-root-key.sh` | Pending |
-| Remove `root@tuns` from templates 109/110 | same script | Pending |
-| Verify old fingerprint appears nowhere | fleet fingerprint scan (below) | Pending |
+| Delete private key from DockerApp | `ansible/playbooks/incident-2026-10-24-hypervisor-key.yml` (play 1) | Done 2026-10-24 |
+| Revoke public key on all VMs (and keep it revoked) | `baseline_revoked_ssh_keys` in the baseline role, enforced on every run | Done 2026-10-24 |
+| Rotate `root@tuns` key; remove old key from `/etc/pve/priv/authorized_keys` | `scripts/rotate-tuns-root-key.sh` | Done 2026-10-24 |
+| Remove `root@tuns` from templates 109/110 | same script | Done 2026-10-24 |
+| Delete the key from Gitea (admin account, SSH keys, key id 5). Not by editing `/home/git/.ssh/authorized_keys`: Gitea regenerates that file from its database | Gitea UI (needs `write:user`, which the automation token deliberately lacks) | Done 2026-10-24 |
+| Verify old fingerprint appears nowhere | fleet fingerprint scan (below) | Done 2026-10-24 |
 
 Verification scan (expect no output for any host):
 
@@ -79,7 +85,7 @@ done
 
 ## Action items
 
-- [ ] Run the remediation above (owner, on the home LAN)
+- [x] Run the remediation above (owner, on the home LAN, 2026-10-24)
 - [ ] Week 3: move the CI runner off the host Docker socket (rootless runner or a disposable VM)
 - [ ] Week 3: per-host Gitea deploy keys (read-only) instead of shared user keys
 - [ ] Do not port `gitea_git_client`; retire the legacy `~/ansible` project on `tuns`

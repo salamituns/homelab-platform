@@ -14,7 +14,7 @@ Review this list monthly. A credential that is not on this list should not exist
 | Tailscale node key of `gateway` | That device's identity on the tailnet; can reach only what `tailscale/policy.hujson` grants | `gateway:/var/lib/tailscale` | Never (tagged device) | Remove the device in the admin console if `gateway` is compromised |
 | Gitea credential for BelleShop | Gitea user's repo access over HTTPS | macOS keychain (moved out of `.git/config` on 2026-10-24) | Unknown | Consider rotating: it sat in plaintext in a config file |
 | SSH key `~/.ssh/id_rsa` (Mac) | Login as `tunsadmin` on every VM; root on `tuns` | Mac `~/.ssh` | Never | Plan: replace with ed25519, then remove RSA from `authorized_keys` everywhere |
-| SSH key `root@tuns` (`/root/.ssh/id_rsa` on the hypervisor) | Root SSH from the hypervisor. Old key `fZPN...` was authorized on every legacy VM | `tuns` only | Never | **Rotation pending**: exposed on DockerApp, see [postmortem](postmortems/2026-10-24-hypervisor-key-exposure.md). New key must not be authorized on any guest |
+| SSH key `root@tuns` (`/root/.ssh/id_rsa` on the hypervisor) | Root SSH from the hypervisor. Old key `fZPN...` was authorized on every legacy VM | `tuns` only | Never | Rotated 2026-10-24 (old key exposed, see [postmortem](postmortems/2026-10-24-hypervisor-key-exposure.md)). New key `WcgvLIyj...` must not be authorized on any guest or in Gitea |
 | Ansible Vault `group_vars/all/vault.yml` (legacy, on `tuns`) | Unknown; not reviewed | `tuns:~/ansible` | n/a | Review contents when the legacy project is retired |
 
 ## Rules
