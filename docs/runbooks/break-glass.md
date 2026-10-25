@@ -4,8 +4,8 @@ Design: [ADR 0003](../adr/0003-break-glass-access.md). Setup must start on the *
 
 ## Setup (once)
 
-1. Write the break-glass grant and test in `tailscale/policy.hujson` (the `TODO(you)` blocks),
-   then paste the policy into the admin console, **Access controls**, and save. Tests must pass.
+1. The break-glass grant and test are in `tailscale/policy.hujson`. Paste the policy
+   into the admin console, **Access controls**, and save. Tests must pass.
 2. Admin console, **Settings, Keys, Generate auth key**: reusable **off**, expiry **1 day**,
    ephemeral **off**, pre-approved **on**, tag **`tag:homelab-breakglass`**.
 3. Enroll:

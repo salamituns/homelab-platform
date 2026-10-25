@@ -34,10 +34,14 @@
       "dst": ["tag:homelab-gateway"],
       "ip":  ["*"],
     },
-    // Break-glass: members may reach the hypervisor directly when the gateway is down.
-    // TODO(you): write this grant. Allow only the ports you need to repair the lab, nothing more.
-    //   src: who may use the back door?   dst: "tag:homelab-breakglass"
-    //   ip:  which ports? ("tcp:NN" strings). Not "*": the hypervisor is the crown jewel.
+    // Break-glass: members may reach the hypervisor directly when the gateway is down (ADR 0003).
+    // Only the two repair ports: 22 = SSH, also carries `ssh -J` to every VM; 8006 = Proxmox UI,
+    // which gives a console to any VM even if its network is broken. Not "*": this is the hypervisor.
+    {
+      "src": ["autogroup:member"],
+      "dst": ["tag:homelab-breakglass"],
+      "ip":  ["tcp:22", "tcp:8006"],
+    },
 
     // Deliberately NO rule allowing tag:homelab-gateway to initiate connections to members:
     // a compromised gateway cannot reach your laptop over the tailnet.
@@ -57,7 +61,11 @@
       "src":  "tag:homelab-gateway",
       "deny": ["100.117.210.50:22", "100.117.210.50:5900"],
     },
-    // TODO(you): a test that the gateway cannot reach the break-glass node, so one compromised
-    // entry point cannot be used to reach the other. (Tag names are valid test destinations.)
+    {
+      // One compromised door must not open the other: the gateway cannot reach break-glass
+      // over the tailnet, on the granted ports or any other.
+      "src":  "tag:homelab-gateway",
+      "deny": ["tag:homelab-breakglass:22", "tag:homelab-breakglass:8006", "tag:homelab-breakglass:443"],
+    },
   ],
 }
