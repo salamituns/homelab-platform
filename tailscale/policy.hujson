@@ -22,10 +22,19 @@
   },
 
   "grants": [
-    // Tailnet members (you) may reach the whole lab LAN through the gateway.
+    // Tailnet members (you) may reach the LAB part of the LAN through the gateway, not the whole
+    // /24: the home network also holds IoT (alarm panel, garage opener, TV, printer, phones),
+    // which must not be reachable over the tailnet. Keep in sync with dns.yml.
     {
       "src": ["autogroup:member"],
-      "dst": ["192.168.1.0/24"],
+      "dst": [
+        "192.168.1.83/32",   // gitea (UbuntuNew)
+        "192.168.1.84/30",   // .84-.87  workernode2, tomcat, sonar, nexus
+        "192.168.1.88/29",   // .88-.95  jenkins, workernode1, master, .91 (VM 100), dockerapp, .93-.94 spare, sectools
+        "192.168.1.96/32",   // gateway (also internal DNS)
+        "192.168.1.181/32",  // proxmox (tuns)
+        "192.168.1.240/30",  // .240-.243  MetalLB: ingress, argocd, grafana, rollouts
+      ],
       "ip":  ["*"],
     },
     // Members may reach the gateway itself (for diagnostics).

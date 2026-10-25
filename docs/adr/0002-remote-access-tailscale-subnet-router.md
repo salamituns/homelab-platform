@@ -33,3 +33,9 @@ Gitea is public through a Cloudflare tunnel, but that is for applications, not a
   reaches the LAN directly at home (`tailscale` app: "Use Tailscale subnets" can be left on; check
   with `traceroute 192.168.1.90`).
 - Tailscale becomes a third-party dependency for remote admin. Local access is unaffected.
+
+## Amendment 2026-10-25
+
+The members grant was narrowed from `192.168.1.0/24` to the lab's addresses only. The /24 also holds
+IoT devices (alarm panel, garage opener, TV), which must not be reachable over the tailnet.
+The gateway still advertises the /24; the grant is what limits access.

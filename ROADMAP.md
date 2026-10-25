@@ -33,7 +33,7 @@ See [ADR 0002](docs/adr/0002-remote-access-tailscale-subnet-router.md).
 - [x] Break-glass: Tailscale on `tuns`, no routes, narrow grant ([ADR 0003](docs/adr/0003-break-glass-access.md)); drill passed 2026-10-25 from a hotspot
 - [x] Internal DNS: `*.home.arpa` from dnsmasq on `gateway`, split DNS over Tailscale
       ([ADR 0004](docs/adr/0004-internal-dns.md); replaces the legacy `internal_dns` role)
-- [ ] Inventory of every way into the lab (Tailscale, Cloudflare tunnel, port forwards on the router) in `docs/`
+- [x] Inventory of every way into the lab: [docs/entry-points.md](docs/entry-points.md) (open items tracked there)
 - **Proof (done 2026-10-24 for access; laptop test in policy):** from a phone hotspot, `ssh Master`, open the Proxmox UI, and `kubectl get nodes` all work,
   and a test in `policy.hujson` shows the gateway cannot connect back to your laptop
 
