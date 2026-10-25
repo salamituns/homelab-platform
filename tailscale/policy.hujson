@@ -36,10 +36,17 @@
     // a compromised gateway cannot reach your laptop over the tailnet.
   ],
 
+  // Test `src` must be a specific user, group, tag or host: autogroups are not allowed here, and
+  // naming a user would put a login email in this public repo. So tests are written from the
+  // gateway's side; member access is proven by the hotspot test in the runbook instead.
   "tests": [
     {
-      "src":    "autogroup:member",
-      "accept": ["192.168.1.181:8006", "192.168.1.90:22", "192.168.1.96:22"],
+      // The gateway gets no tailnet grant of its own: it routes for members, it cannot use the LAN.
+      "src":  "tag:homelab-gateway",
+      "deny": ["192.168.1.181:8006", "192.168.1.90:22"],
     },
+    // After enrollment, add the Mac's Tailscale IP (admin console, Machines) to prove a
+    // compromised gateway cannot connect back to the laptop:
+    // { "src": "tag:homelab-gateway", "deny": ["100.x.y.z:22"] },
   ],
 }

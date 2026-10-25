@@ -68,8 +68,13 @@ traceroute -n -m 3 192.168.1.90      # expect a direct hop, not 100.x
 
 ## If something goes wrong
 
+Finally, lock in the "gateway cannot reach the laptop" property as a policy test: copy the Mac's
+`100.x` address from the admin console (Machines), uncomment the last test in
+`tailscale/policy.hujson` with that IP, paste the policy again, and commit.
+
 | Symptom | Cause | Fix |
 |---|---|---|
+| `unknown user or host: "autogroup:member"` on save | Policy tests need a specific user, group, tag or host as `src` | Fixed in the repo: tests use `tag:homelab-gateway` as `src` |
 | Auth key form will not accept the tag | Policy not saved yet | Step 1.2 first |
 | `TS_AUTHKEY ... is empty` assertion | Forgot `source .envrc` | `source ../.envrc` |
 | Route shows "awaiting approval" | Policy `autoApprovers` missing or tag wrong | Check policy; or approve once by hand |
