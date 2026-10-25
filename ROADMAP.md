@@ -31,7 +31,7 @@ See [ADR 0002](docs/adr/0002-remote-access-tailscale-subnet-router.md).
 - [x] Access policy in git (`tailscale/policy.hujson`): members to LAN only, gateway cannot reach members
 - [x] Single-use, tagged, short-lived auth key; documented in `docs/credentials.md`
 - [x] Break-glass: Tailscale on `tuns`, no routes, narrow grant ([ADR 0003](docs/adr/0003-break-glass-access.md)); drill passed 2026-10-25 from a hotspot
-- [ ] Internal DNS: `*.home.arpa` from dnsmasq on `gateway`, split DNS over Tailscale
+- [x] Internal DNS: `*.home.arpa` from dnsmasq on `gateway`, split DNS over Tailscale
       ([ADR 0004](docs/adr/0004-internal-dns.md); replaces the legacy `internal_dns` role)
 - [ ] Inventory of every way into the lab (Tailscale, Cloudflare tunnel, port forwards on the router) in `docs/`
 - **Proof (done 2026-10-24 for access; laptop test in policy):** from a phone hotspot, `ssh Master`, open the Proxmox UI, and `kubectl get nodes` all work,
