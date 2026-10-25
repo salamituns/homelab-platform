@@ -45,8 +45,10 @@
       "src":  "tag:homelab-gateway",
       "deny": ["192.168.1.181:8006", "192.168.1.90:22"],
     },
-    // After enrollment, add the Mac's Tailscale IP (admin console, Machines) to prove a
-    // compromised gateway cannot connect back to the laptop:
-    // { "src": "tag:homelab-gateway", "deny": ["100.x.y.z:22"] },
+    {
+      // A compromised gateway cannot connect back to the Mac (its Tailscale IP, from Machines).
+      "src":  "tag:homelab-gateway",
+      "deny": ["100.117.210.50:22", "100.117.210.50:5900"],
+    },
   ],
 }
