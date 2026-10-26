@@ -28,8 +28,10 @@ new_git() { git -c credential.helper= -c credential.helper='!f(){ echo username=
 new_api() { curl -q -sS --fail-with-body --cacert "$CA" -H "Authorization: token $NEW_GITEA_TOKEN" \
                -H "Content-Type: application/json" "$@"; }
 
-repos=$(curl -q -sS --fail -H "Authorization: token $GITEA_TOKEN" "$OLD_URL/api/v1/user/repos?limit=50" |
-  python3 -c 'import sys,json; [print(r["name"]) for r in json.load(sys.stdin) if r["owner"]["login"]=="'"$OWNER"'"]')
+# repos/search, not user/repos: the latter needs read:user, which the laptop token deliberately lacks.
+repos=$(curl -q -sS --fail -H "Authorization: token $GITEA_TOKEN" "$OLD_URL/api/v1/repos/search?limit=50" |
+  python3 -c 'import sys,json; [print(r["name"]) for r in json.load(sys.stdin)["data"] if r["owner"]["login"]=="'"$OWNER"'"]')
+[ -n "$repos" ] || { echo "no repos found on old server" >&2; exit 1; }
 echo "repos on old server: $(echo "$repos" | tr '\n' ' ')"
 echo "work dir: $WORK"
 
