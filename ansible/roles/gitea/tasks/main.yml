@@ -1,0 +1,17 @@
+- name: Install Gitea binary, user, and directory tree
+  ansible.builtin.import_tasks: install.yml
+
+- name: Configure Gitea secrets, app.ini, and systemd service
+  ansible.builtin.import_tasks: config.yml
+
+- name: Bootstrap initial Gitea admin user
+  ansible.builtin.import_tasks: admin.yml
+
+- name: Configure Caddy HTTPS reverse proxy and fetch local root CA
+  ansible.builtin.import_tasks: caddy.yml
+
+- name: Allow HTTPS from named lab clients in UFW
+  ansible.builtin.import_tasks: firewall.yml
+
+- name: Configure daily Gitea dump systemd timer
+  ansible.builtin.import_tasks: backup.yml

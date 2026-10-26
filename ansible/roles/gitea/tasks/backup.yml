@@ -1,0 +1,31 @@
+- name: Create Gitea local backup directory
+  ansible.builtin.file:
+    path: "{{ gitea_backup_dir }}"
+    state: directory
+    owner: git
+    group: git
+    mode: "0750"
+
+- name: Deploy gitea-backup.service systemd unit
+  ansible.builtin.template:
+    src: gitea-backup.service.j2
+    dest: /etc/systemd/system/gitea-backup.service
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Deploy gitea-backup.timer systemd unit
+  ansible.builtin.template:
+    src: gitea-backup.timer.j2
+    dest: /etc/systemd/system/gitea-backup.timer
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Enable and start gitea-backup.timer
+  ansible.builtin.systemd_service:
+    name: gitea-backup.timer
+    state: started
+    enabled: true
+    daemon_reload: true
+  ignore_errors: "{{ ansible_check_mode }}"

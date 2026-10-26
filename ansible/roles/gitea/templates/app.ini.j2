@@ -1,0 +1,52 @@
+; Managed by Ansible (homelab-platform, role: gitea). Local edits are overwritten.
+; Secrets live in /etc/gitea/secrets/* (root:git 0640) and are loaded via *_URI.
+APP_NAME = Gitea
+RUN_USER = git
+RUN_MODE = prod
+WORK_PATH = /var/lib/gitea
+
+[database]
+DB_TYPE = sqlite3
+PATH = /var/lib/gitea/data/gitea.db
+SQLITE_JOURNAL_MODE = WAL
+
+[server]
+PROTOCOL = http
+HTTP_ADDR = 127.0.0.1
+HTTP_PORT = {{ gitea_http_port }}
+DOMAIN = {{ gitea_domain }}
+ROOT_URL = https://{{ gitea_domain }}/
+DISABLE_SSH = true
+START_SSH_SERVER = false
+OFFLINE_MODE = true
+LFS_START_SERVER = false
+LFS_JWT_SECRET_URI = file:/etc/gitea/secrets/lfs_jwt_secret
+
+[security]
+INSTALL_LOCK = true
+SECRET_KEY_URI = file:/etc/gitea/secrets/secret_key
+INTERNAL_TOKEN_URI = file:/etc/gitea/secrets/internal_token
+MIN_PASSWORD_LENGTH = 14
+
+[oauth2]
+JWT_SECRET_URI = file:/etc/gitea/secrets/jwt_secret
+
+[service]
+DISABLE_REGISTRATION = true
+REQUIRE_SIGNIN_VIEW = true
+DEFAULT_KEEP_EMAIL_PRIVATE = true
+
+[repository]
+DEFAULT_PRIVATE = private
+ROOT = /var/lib/gitea/data/gitea-repositories
+
+[actions]
+ENABLED = false
+
+[mailer]
+ENABLED = false
+
+[log]
+MODE = console
+LEVEL = Info
+ROOT_PATH = /var/lib/gitea/log

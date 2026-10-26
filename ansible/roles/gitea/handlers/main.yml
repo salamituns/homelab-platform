@@ -1,0 +1,12 @@
+- name: Restart gitea
+  ansible.builtin.systemd_service:
+    name: gitea
+    state: restarted
+    daemon_reload: true
+  ignore_errors: "{{ ansible_check_mode }}"
+
+- name: Reload caddy
+  ansible.builtin.service:
+    name: caddy
+    state: reloaded
+  ignore_errors: "{{ ansible_check_mode }}"

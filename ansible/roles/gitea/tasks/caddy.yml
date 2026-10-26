@@ -1,0 +1,60 @@
+# Cloudsmith's Caddy gpg.key is ASCII-armored ("-----BEGIN PGP PUBLIC KEY BLOCK-----"), unlike
+# Tailscale's binary .noarmor.gpg. Saving with the .asc extension lets apt verify signatures
+# directly without piping curl output through gpg --dearmor.
+- name: Download Caddy official apt signing key
+  ansible.builtin.get_url:
+    url: https://dl.cloudsmith.io/public/caddy/stable/gpg.key
+    dest: /usr/share/keyrings/caddy-stable-archive-keyring.asc
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Add Caddy official apt repository
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/usr/share/keyrings/caddy-stable-archive-keyring.asc] https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main"
+    filename: caddy-stable
+    state: present
+
+# Install libnss3-tools alongside caddy so `caddy` can manage its local PKI cleanly without warning.
+- name: Install caddy package
+  ansible.builtin.apt:
+    name:
+      - caddy
+      - libnss3-tools
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Deploy Caddyfile for Gitea TLS termination
+  ansible.builtin.template:
+    src: Caddyfile.j2
+    dest: /etc/caddy/Caddyfile
+    owner: root
+    group: root
+    mode: "0644"
+    validate: /usr/bin/caddy validate --config %s --adapter caddyfile
+  notify: Reload caddy
+
+- name: Enable and start caddy service
+  ansible.builtin.service:
+    name: caddy
+    state: started
+    enabled: true
+  ignore_errors: "{{ ansible_check_mode }}"
+
+- name: Flush handlers so Caddy provisions its internal CA root certificate
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait for Caddy to generate its local root CA certificate
+  ansible.builtin.wait_for:
+    path: /var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt
+    state: present
+    timeout: 30
+  when: not ansible_check_mode
+
+- name: Fetch Caddy local root CA certificate to the controller
+  ansible.builtin.fetch:
+    src: /var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt
+    dest: "{{ gitea_ca_fetch_dest }}"
+    flat: true
+  when: not ansible_check_mode

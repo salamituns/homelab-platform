@@ -1,0 +1,49 @@
+# Detect whether any admin user already exists. `gitea admin user list --admin` always prints
+# a header line ("ID   Username   Email ..."), so we match data rows starting with a numeric ID.
+- name: Check existing Gitea admin users
+  ansible.builtin.command:
+    argv:
+      - /usr/sbin/runuser
+      - -u
+      - git
+      - --
+      - /usr/local/bin/gitea
+      - admin
+      - user
+      - list
+      - --admin
+      - --work-path
+      - /var/lib/gitea
+      - --config
+      - /etc/gitea/app.ini
+  register: gitea_admin_list
+  changed_when: false
+  when: not ansible_check_mode
+
+# Note: Gitea's --random-password defaults to length 12 (--random-password-length=12), which fails
+# validation when [security] MIN_PASSWORD_LENGTH = 14 is set in app.ini. Passing
+# --random-password-length 24 satisfies MIN_PASSWORD_LENGTH while keeping generation inside Gitea.
+# Output is redirected directly to /root/gitea-initial-admin-password (0600) on the remote host
+# so the password never crosses the wire or enters Ansible controller logs.
+- name: Bootstrap initial Gitea admin user when none exists
+  ansible.builtin.shell:
+    cmd: |
+      set -euo pipefail
+      umask 0077
+      /usr/sbin/runuser -u git -- /usr/local/bin/gitea admin user create \
+        --admin \
+        --username {{ gitea_admin_user | quote }} \
+        --email {{ gitea_admin_email | quote }} \
+        --random-password \
+        --random-password-length 24 \
+        --must-change-password \
+        --work-path /var/lib/gitea \
+        --config /etc/gitea/app.ini > /root/gitea-initial-admin-password
+      chown root:root /root/gitea-initial-admin-password
+      chmod 0600 /root/gitea-initial-admin-password
+    executable: /bin/bash
+  no_log: true
+  changed_when: true
+  when:
+    - not ansible_check_mode
+    - (gitea_admin_list.stdout_lines | default([]) | select('match', '^\\s*[0-9]+\\s+') | list | length) == 0

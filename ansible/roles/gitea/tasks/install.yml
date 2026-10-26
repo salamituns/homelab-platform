@@ -1,0 +1,63 @@
+- name: Install git package required by Gitea
+  ansible.builtin.apt:
+    name: git
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Ensure git system group exists
+  ansible.builtin.group:
+    name: git
+    system: true
+    state: present
+
+# Gitea SSH is disabled (HTTPS-only per ADR 0005), so git never accepts interactive
+# SSH logins and is not added to baseline_ssh_allow_users.
+- name: Ensure git system user exists
+  ansible.builtin.user:
+    name: git
+    group: git
+    system: true
+    shell: /bin/bash
+    home: /var/lib/gitea
+    create_home: true
+    state: present
+
+- name: Create Gitea working directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: git
+    group: git
+    mode: "0750"
+  loop:
+    - /var/lib/gitea
+    - /var/lib/gitea/custom
+    - /var/lib/gitea/data
+    - /var/lib/gitea/log
+
+# /etc/gitea and /etc/gitea/secrets are root-owned and group-readable by git (0750)
+# so a compromised git process (like CVE-2026-60004) cannot overwrite app.ini or secret files.
+- name: Create Gitea configuration and secrets directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: git
+    mode: "0750"
+  loop:
+    - /etc/gitea
+    - /etc/gitea/secrets
+
+# With a checksum and force: false, get_url hashes the installed binary: a match skips the download
+# (126 MB), a mismatch (bumped gitea_version + gitea_sha256) downloads, verifies and replaces it.
+- name: Download pinned Gitea binary verified by SHA-256
+  ansible.builtin.get_url:
+    url: "{{ gitea_download_url }}"
+    dest: /usr/local/bin/gitea
+    checksum: "sha256:{{ gitea_sha256 }}"
+    force: false
+    owner: root
+    group: root
+    mode: "0755"
+  notify: Restart gitea

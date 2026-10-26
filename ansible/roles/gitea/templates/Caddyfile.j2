@@ -1,0 +1,5 @@
+# Managed by Ansible (homelab-platform, role: gitea). Local edits are overwritten.
+{{ ([gitea_domain] + gitea_extra_names) | join(', ') }} {
+	tls internal
+	reverse_proxy 127.0.0.1:{{ gitea_http_port }}
+}
