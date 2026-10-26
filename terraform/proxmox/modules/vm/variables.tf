@@ -38,7 +38,7 @@ variable "memory_mb" {
 }
 
 variable "disk_gb" {
-  description = "Must be >= the template's disk size (40G)."
+  description = "Must be >= the template's disk size (40G for 109; the Debian image is 3G and grows on clone)."
   type        = number
   default     = 40
 
@@ -46,6 +46,15 @@ variable "disk_gb" {
     condition     = var.disk_gb >= 40
     error_message = "Disk cannot be smaller than the 40G template disk."
   }
+}
+
+variable "data_disks" {
+  description = "Extra empty disks after scsi0. backup = false keeps the disk out of vzdump/PBS jobs."
+  type = list(object({
+    size_gb = number
+    backup  = optional(bool, true)
+  }))
+  default = []
 }
 
 variable "datastore_id" {

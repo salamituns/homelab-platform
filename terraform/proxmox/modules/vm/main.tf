@@ -45,6 +45,19 @@ resource "proxmox_virtual_environment_vm" "this" {
     discard      = "on"
   }
 
+  # Extra empty disks (scsi1, scsi2, ...), e.g. a backup datastore. Empty list = none, so existing VMs see no diff.
+  dynamic "disk" {
+    for_each = var.data_disks
+    content {
+      datastore_id = var.datastore_id
+      interface    = "scsi${disk.key + 1}"
+      size         = disk.value.size_gb
+      iothread     = true
+      discard      = "on"
+      backup       = disk.value.backup
+    }
+  }
+
   network_device {
     bridge   = var.bridge
     firewall = true

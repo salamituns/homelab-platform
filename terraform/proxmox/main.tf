@@ -28,6 +28,18 @@ locals {
       disk_gb      = 40
       tags         = ["git", "platform"]
     }
+    # Proxmox Backup Server (docs/adr/0006). PBS 4 supports Debian 13 only, hence its own template.
+    # The datastore disk has backup = false: backing the backup store up into itself is a loop.
+    pbs = {
+      vm_id        = 123
+      template_id  = var.debian_template_id
+      ipv4_address = "192.168.1.98"
+      cores        = 2
+      memory_mb    = 4096
+      disk_gb      = 40
+      data_disks   = [{ size_gb = 500, backup = false }]
+      tags         = ["backup", "platform"]
+    }
   }
 }
 
@@ -37,7 +49,8 @@ module "vm" {
 
   name            = each.key
   vm_id           = each.value.vm_id
-  template_id     = var.template_id
+  template_id     = try(each.value.template_id, var.template_id)
+  data_disks      = try(each.value.data_disks, [])
   ipv4_address    = each.value.ipv4_address
   cores           = each.value.cores
   memory_mb       = each.value.memory_mb

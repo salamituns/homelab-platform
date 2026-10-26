@@ -4,6 +4,12 @@ variable "template_id" {
   default     = 109
 }
 
+variable "debian_template_id" {
+  description = "Debian 13 cloud-init template, built by scripts/build-debian-template.sh."
+  type        = number
+  default     = 130
+}
+
 variable "gateway" {
   type    = string
   default = "192.168.1.254"
