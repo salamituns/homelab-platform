@@ -12,7 +12,7 @@ set -euo pipefail
 
 SRC="${1:?usage: $0 <src-vmid> <drill-vmid> [--keep]}"
 DRILL="${2:?usage: $0 <src-vmid> <drill-vmid> [--keep]}"
-KEEP="${3:-}"
+KEEP="${3:-no-keep}"   # never empty: ssh joins args into one string, so "" would vanish
 PVE_HOST="${PVE_HOST:-tuns}"
 STORAGE=pbs-store1
 
