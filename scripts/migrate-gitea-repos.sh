@@ -20,14 +20,15 @@ WORK="${WORK:-$(mktemp -d)}"
 : "${NEW_GITEA_TOKEN:?new-server token missing (read -rs NEW_GITEA_TOKEN)}"
 [ -f "$CA" ] || { echo "missing $CA (run playbooks/gitea.yml first)" >&2; exit 1; }
 
+# curl -q: ignore ~/.curlrc (an "-k" there would silently disable --cacert).
 # Tokens reach git through a credential helper reading the environment: never in URLs, argv or .git/config.
 old_git() { git -c credential.helper= -c credential.helper='!f(){ echo username='"$OWNER"'; echo "password=$GITEA_TOKEN"; }; f' "$@"; }
 new_git() { git -c credential.helper= -c credential.helper='!f(){ echo username='"$OWNER"'; echo "password=$NEW_GITEA_TOKEN"; }; f' \
                -c http.sslCAInfo="$CA" "$@"; }
-new_api() { curl -sS --fail-with-body --cacert "$CA" -H "Authorization: token $NEW_GITEA_TOKEN" \
+new_api() { curl -q -sS --fail-with-body --cacert "$CA" -H "Authorization: token $NEW_GITEA_TOKEN" \
                -H "Content-Type: application/json" "$@"; }
 
-repos=$(curl -sS --fail -H "Authorization: token $GITEA_TOKEN" "$OLD_URL/api/v1/user/repos?limit=50" |
+repos=$(curl -q -sS --fail -H "Authorization: token $GITEA_TOKEN" "$OLD_URL/api/v1/user/repos?limit=50" |
   python3 -c 'import sys,json; [print(r["name"]) for r in json.load(sys.stdin) if r["owner"]["login"]=="'"$OWNER"'"]')
 echo "repos on old server: $(echo "$repos" | tr '\n' ' ')"
 echo "work dir: $WORK"
@@ -45,7 +46,7 @@ for r in $repos; do
   # Secrets in history are reported, not blocking: tokens found here were revoked 2026-10-25.
   gitleaks git "$d" --no-banner --redact -l warn 2>&1 | grep -E 'leaks found|no leaks' || true
 
-  desc=$(curl -sS -H "Authorization: token $GITEA_TOKEN" "$OLD_URL/api/v1/repos/$OWNER/$r" |
+  desc=$(curl -q -sS -H "Authorization: token $GITEA_TOKEN" "$OLD_URL/api/v1/repos/$OWNER/$r" |
     python3 -c 'import sys,json; print(json.load(sys.stdin).get("description",""))')
   if new_api -o /dev/null "$NEW_URL/api/v1/repos/$OWNER/$r" 2>/dev/null; then
     echo "   exists on new server"
