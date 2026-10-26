@@ -57,7 +57,9 @@ proxmox-backup-manager user generate-token pve@pbs tuns \
   --output-format json \
   | python3 -c 'import sys,json; print(json.load(sys.stdin)["value"])' > /root/pbs-tuns-token.secret
 
-# Grant DatastoreBackup ONLY on /datastore/store1 (tokens do not inherit user permissions)
+# A token's effective rights = its own ACL INTERSECTED with its user's ACL. Both need the role,
+# or the token sees nothing (symptom on tuns: "Cannot find datastore 'store1'").
+proxmox-backup-manager acl update /datastore/store1 DatastoreBackup --auth-id pve@pbs
 proxmox-backup-manager acl update /datastore/store1 DatastoreBackup --auth-id 'pve@pbs!tuns'
 
 # Read the PBS TLS certificate SHA-256 fingerprint for pvesm on tuns
