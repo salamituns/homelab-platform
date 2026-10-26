@@ -49,14 +49,14 @@
     - /etc/gitea
     - /etc/gitea/secrets
 
-# force: true with checksum makes get_url compare the installed binary's SHA-256 against
-# gitea_sha256 on every run; bumping gitea_version + gitea_sha256 replaces the binary and restarts Gitea.
+# With a checksum and force: false, get_url hashes the installed binary: a match skips the download
+# (126 MB), a mismatch (bumped gitea_version + gitea_sha256) downloads, verifies and replaces it.
 - name: Download pinned Gitea binary verified by SHA-256
   ansible.builtin.get_url:
     url: "{{ gitea_download_url }}"
     dest: /usr/local/bin/gitea
     checksum: "sha256:{{ gitea_sha256 }}"
-    force: true
+    force: false
     owner: root
     group: root
     mode: "0755"
