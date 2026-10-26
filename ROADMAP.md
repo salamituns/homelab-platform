@@ -39,7 +39,9 @@ See [ADR 0002](docs/adr/0002-remote-access-tailscale-subnet-router.md).
 
 ## Incident 2026-10-25 follow-ups (before Week 2)
 See [postmortem](docs/postmortems/2026-10-25-gitea-rce-cve-2026-60004.md).
-- [ ] Rebuild Gitea on a Terraform VM with an Ansible role (TLS, pinned version), retire `UbuntuNew`
+- [x] Rebuild Gitea on a Terraform VM with an Ansible role (TLS, pinned version), migrate repos, and cut over (`gitea`, VMID 122, `.97`; done 2026-10-26)
+- [ ] Shut down `UbuntuNew`; delete after 2026-11-25
+- [ ] Verify SonarQube `admin` password
 - [ ] Re-add the GitHub push mirror with a new token
 - [ ] Delete stale Actions runners; remove Cloudflare public hostnames
 

@@ -17,7 +17,7 @@ Deploys and hardens the rebuilt Gitea server on `gitea` (`192.168.1.97`, VMID 12
    - On first run (when `gitea admin user list --admin` returns no admin users), creates `gitea_admin_user` with a random 24-character password and `--must-change-password`, saving the output to `/root/gitea-initial-admin-password` (`0600`) on the host with `no_log: true`.
 4. **Caddy TLS Proxy (`tasks/caddy.yml`):**
    - Installs Caddy from the official Cloudsmith apt repository with a signed keyring.
-   - Terminates TLS for `gitea.home.arpa` (and `gitea-new.home.arpa` until cutover) using `tls internal` and proxies to `127.0.0.1:3000`.
+   - Terminates TLS for `gitea.home.arpa` (plus any temporary SANs in `gitea_extra_names`) using `tls internal` and proxies to `127.0.0.1:3000`.
    - Fetches Caddy's local root CA certificate (`/var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt`) to `ansible/files/ca/gitea-caddy-root.crt` on the controller.
 5. **Firewall (`tasks/firewall.yml`):**
    - Allows `443/tcp` in UFW from the five named lab clients (`master`, `workernode1`, `workernode2`, `gateway`, `mac`). Port `3000` is never opened.
@@ -32,7 +32,7 @@ Deploys and hardens the rebuilt Gitea server on `gitea` (`192.168.1.97`, VMID 12
 | `gitea_sha256` | `"4da93c2c...12d971"` | SHA-256 checksum of `gitea-<version>-linux-amd64` |
 | `gitea_download_url` | `https://dl.gitea.com/...` | Binary download URL |
 | `gitea_domain` | `gitea.home.arpa` | Canonical Gitea hostname |
-| `gitea_extra_names` | `["gitea-new.home.arpa"]` | Extra TLS Subject Alternative Names before cutover |
+| `gitea_extra_names` | `[]` | Temporary extra TLS Subject Alternative Names during a migration |
 | `gitea_http_port` | `3000` | Loopback HTTP port behind Caddy |
 | `gitea_admin_user` | `tunsgit` | Initial admin username |
 | `gitea_admin_email` | `admin@home.arpa` | Initial admin email |
@@ -53,7 +53,7 @@ Deploys and hardens the rebuilt Gitea server on `gitea` (`192.168.1.97`, VMID 12
    ```sh
    ssh gitea 'sudo cat /root/gitea-initial-admin-password'
    ```
-4. Log in at `https://gitea-new.home.arpa/` (or `https://gitea.home.arpa/` after DNS cutover) as `tunsgit`, complete the forced password change, and enable **2FA (TOTP)** in user settings.
+4. Log in at `https://gitea.home.arpa/` as `tunsgit`, complete the forced password change, and enable **2FA (TOTP)** in user settings.
 5. Delete the initial password file from the host:
    ```sh
    ssh gitea 'sudo shred -u /root/gitea-initial-admin-password'
