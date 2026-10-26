@@ -8,7 +8,9 @@ ignoreip = {{ fail2ban_ignoreips | join(' ') }}
 [sshd]
 enabled = true
 port = ssh
+{% if ansible_facts['distribution'] != 'Debian' %}
 logpath = /var/log/auth.log
+{% endif %}
 backend = systemd
 maxretry = {{ fail2ban_sshd_maxretry }}
 bantime = {{ fail2ban_sshd_bantime }}

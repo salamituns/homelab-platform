@@ -1,0 +1,12 @@
+# Deploy and harden Proxmox Backup Server on `pbs` (192.168.1.98, Debian 13 trixie).
+# Usage:
+#   ansible-playbook playbooks/pbs.yml --limit pbs --check --diff
+#   ansible-playbook playbooks/pbs.yml --limit pbs
+- name: Configure Proxmox Backup Server
+  hosts: backup
+  become: true
+  roles:
+    - baseline
+    - internal_dns
+    - firewall
+    - pbs

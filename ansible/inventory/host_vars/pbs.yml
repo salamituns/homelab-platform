@@ -1,0 +1,5 @@
+# Proxmox Backup Server listens on 8007/tcp (HTTPS API + web UI).
+# Only the Proxmox hypervisor (tuns, to push backups) and admin clients may connect.
+firewall_service_rules:
+  - port: 8007
+    clients: "{{ lab_admin_clients + [{'name': 'tuns', 'ip': '192.168.1.181'}] }}"

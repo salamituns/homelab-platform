@@ -1,3 +1,22 @@
+# Debian 13 genericcloud uses netplan + systemd-networkd, and systemd-resolved is a separate
+# package that may not be installed by default. Installing it points /etc/resolv.conf at the
+# 127.0.0.53 stub so the resolved.conf.d drop-in below takes effect.
+- name: Install and enable systemd-resolved on Debian
+  ansible.builtin.apt:
+    name: systemd-resolved
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  when: ansible_facts['distribution'] == 'Debian'
+
+- name: Ensure systemd-resolved service is enabled and running on Debian
+  ansible.builtin.service:
+    name: systemd-resolved
+    state: started
+    enabled: true
+  ignore_errors: "{{ ansible_check_mode }}"
+  when: ansible_facts['distribution'] == 'Debian'
+
 - name: Ensure systemd-resolved drop-in directory exists
   ansible.builtin.file:
     path: /etc/systemd/resolved.conf.d
