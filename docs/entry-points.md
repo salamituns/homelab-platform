@@ -9,7 +9,7 @@ Review when anything network-facing changes. Last reviewed: 2026-10-26.
 |---|---|---|---|---|
 | Router port forwards (NAT/Gaming) | **None defined** (checked 2026-10-25) | n/a | n/a | n/a |
 | Router IP Passthrough | **Off** (checked 2026-10-25) | n/a | n/a | n/a |
-| Cloudflare tunnel (on UbuntuNew) | **Off since 2026-10-25** ([postmortem](postmortems/2026-10-25-gitea-rce-cve-2026-60004.md)). Was: 2 Gitea hostnames, 2 Jenkins hostnames (one to a dead 10.2.0.x origin), **no Cloudflare Access** | Was: anyone | Was: nothing in front | `cloudflared` stopped and disabled; also remove the public hostnames in Cloudflare Zero Trust |
+| Cloudflare tunnel (on UbuntuNew) | **Off since 2026-10-25** ([postmortem](postmortems/2026-10-25-gitea-rce-cve-2026-60004.md)). Was: 2 Gitea hostnames, 2 Jenkins hostnames (one to a dead 10.2.0.x origin), **no Cloudflare Access** | Was: anyone | Was: nothing in front | **Tunnel deleted 2026-10-26** (its credential was on UbuntuNew). No host runs `cloudflared` (checked all running VMs) |
 | Router IPv6 (no NAT: every host has a global 2600:1700:... address) | **Blocked**: Reflexive ACL is On (stateful: only replies to outbound connections get in). Checked 2026-10-25 | n/a | Router Firewall Advanced, Reflexive ACL | Keep it On. Packet Filter rules are examples, all disabled |
 
 ## From the tailnet (your logged-in devices)
@@ -44,7 +44,8 @@ Review when anything network-facing changes. Last reviewed: 2026-10-26.
 ## Open items
 
 - [x] Cloudflare tunnel: listed; it exposed Gitea (exploited) and Jenkins with no gate; now off
-- [ ] Cloudflare Zero Trust: delete the 4 public hostnames (and the tunnel, if nothing else will use it)
+- [x] Cloudflare Zero Trust: tunnel deleted 2026-10-26 (public hostnames go with it); remove leftover DNS CNAMEs to `cfargotunnel.com`
+- [ ] SonarQube, Jenkins, Nexus on DHCP (`.132-.134` since the pool change, DNS still says `.86-.88`); service ports open to the whole LAN; legacy `10.2.0.0/21` ufw rule
 - [x] Router: DHCP pool moved to `.100-.180`; IPv6 inbound blocked by Reflexive ACL
 - [x] VM 100: shut down 2026-10-25
 - [ ] VM 100: `qm destroy 100 --purge` after 2026-11-01
