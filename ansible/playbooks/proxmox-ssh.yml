@@ -1,0 +1,87 @@
+# Make SSH on the Proxmox hypervisor (tuns) key-only via an sshd_config.d drop-in.
+# Never edits /etc/ssh/sshd_config or /root/.ssh/authorized_keys (-> /etc/pve/priv/authorized_keys).
+# Usage:
+#   ansible-playbook playbooks/proxmox-ssh.yml --limit tuns --check --diff
+#   ansible-playbook playbooks/proxmox-ssh.yml --limit tuns
+- name: Harden Proxmox host SSH to key-only authentication
+  hosts: proxmox
+  tasks:
+    # Lock-out guard: /root/.ssh/authorized_keys is a symlink to /etc/pve/priv/authorized_keys
+    # on pmxcfs. Read it with slurp (runs in --check too and never mutates the file) and
+    # verify at least one public key line exists before disabling password authentication.
+    - name: Read /root/.ssh/authorized_keys for pre-flight lock-out check
+      ansible.builtin.slurp:
+        src: /root/.ssh/authorized_keys
+      register: proxmox_root_authorized_keys
+
+    - name: Assert at least one non-comment SSH public key is authorized for root
+      ansible.builtin.assert:
+        that:
+          - >-
+            (
+              proxmox_root_authorized_keys.content | b64decode
+            ).splitlines()
+            | map('trim')
+            | reject('equalto', '')
+            | reject('match', '^#')
+            | list
+            | length > 0
+        fail_msg: >-
+          ABORT: /root/.ssh/authorized_keys has no active public keys. Refusing to disable
+          SSH password authentication on {{ inventory_hostname }} to prevent root lock-out.
+
+    # Debian 13's /etc/ssh/sshd_config includes /etc/ssh/sshd_config.d/*.conf at line 12 before
+    # its own PermitRootLogin directive at line 33, and sshd uses the first value encountered.
+    - name: Deploy key-only SSH drop-in for Proxmox
+      ansible.builtin.copy:
+        dest: /etc/ssh/sshd_config.d/10-homelab.conf
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          # managed by homelab-platform (playbooks/proxmox-ssh.yml)
+          PermitRootLogin prohibit-password
+          PasswordAuthentication no
+          KbdInteractiveAuthentication no
+      notify: Reload ssh
+
+    # Validate the full merged sshd configuration (including /etc/ssh/sshd_config and all
+    # drop-ins) before flushing handlers to reload the running daemon.
+    - name: Validate full sshd configuration before reload
+      ansible.builtin.command:
+        argv:
+          - /usr/sbin/sshd
+          - -t
+      changed_when: false
+      check_mode: false
+
+    - name: Flush handlers so sshd reloads before post-check verification
+      ansible.builtin.meta: flush_handlers
+
+    - name: Read effective sshd configuration
+      ansible.builtin.command:
+        argv:
+          - /usr/sbin/sshd
+          - -T
+      register: proxmox_sshd_effective
+      changed_when: false
+      check_mode: false
+
+    # In --check mode the drop-in was not written to disk on the host, so sshd -T still
+    # reflects the pre-change configuration; only assert effective values on a real run.
+    - name: Assert effective sshd config enforces key-only login
+      ansible.builtin.assert:
+        that:
+          - "'permitrootlogin without-password' in proxmox_sshd_effective.stdout_lines"
+          - "'passwordauthentication no' in proxmox_sshd_effective.stdout_lines"
+        fail_msg: >-
+          Effective sshd configuration on {{ inventory_hostname }} did not apply
+          key-only settings (expected 'permitrootlogin without-password' and
+          'passwordauthentication no' in `sshd -T`).
+      when: not ansible_check_mode
+
+  handlers:
+    - name: Reload ssh
+      ansible.builtin.service:
+        name: ssh
+        state: reloaded
