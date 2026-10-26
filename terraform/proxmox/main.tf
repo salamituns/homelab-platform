@@ -19,6 +19,15 @@ locals {
       disk_gb      = 40
       tags         = ["network", "tailscale"]
     }
+    # Gitea, rebuilt after the 2026-10-25 incident (docs/adr/0005). Replaces UbuntuNew.
+    gitea = {
+      vm_id        = 122
+      ipv4_address = "192.168.1.97"
+      cores        = 2
+      memory_mb    = 2048
+      disk_gb      = 40
+      tags         = ["git", "platform"]
+    }
   }
 }
 
