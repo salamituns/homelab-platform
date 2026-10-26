@@ -66,22 +66,18 @@ proxmox-backup-manager cert info | grep Fingerprint
 
 > **Ownership note:** With `DatastoreBackup`, `pve@pbs!tuns` can only append to backup groups owned by `pve@pbs!tuns`. Do not run test backups as `root@pam` first, or subsequent runs as `pve@pbs!tuns` will fail the owner check (`proxmox-backup-manager datastore change-owner` fixes ownership if needed).
 
-### Step 4: Register `pbs-store1` on `tuns` without the secret touching argv, history or the Mac's disk
-
-PVE keeps a storage's secret in `/etc/pve/priv/storage/<storage-id>.pw` (root-only, on pmxcfs).
-Add the storage without `--password`, then stream the token from `pbs` straight into that file:
+### Step 4: Register `pbs-store1` on `tuns` (from the Mac)
 
 ```sh
-FP="<fingerprint-from-step-3>"
-ssh tuns "pvesm add pbs pbs-store1 --server 192.168.1.98 --datastore store1 \
-  --username 'pve@pbs!tuns' --fingerprint $FP --content backup"
-
-ssh tunsadmin@192.168.1.98 'sudo cat /root/pbs-tuns-token.secret' \
-  | ssh tuns 'umask 077; mkdir -p /etc/pve/priv/storage && cat > /etc/pve/priv/storage/pbs-store1.pw'
-
-ssh tuns 'pvesm status --storage pbs-store1'      # expect: active
-ssh tunsadmin@192.168.1.98 'sudo shred -u /root/pbs-tuns-token.secret'
+scripts/connect-pve-to-pbs.sh      # ends with: OK: pbs-store1 is active; secret file on pbs shredded.
 ```
+
+Why a script: the commands cross three machines (Mac, `tuns`, `pbs`), the token id contains `!` (bash
+history expansion), and PVE's order of operations is not obvious. `pvesm add` test-connects an **enabled**
+PBS storage, which needs the secret, and it **deletes** any existing `.pw` file when `--password` is not
+given. So the script adds the storage disabled, streams the secret from `pbs` into
+`/etc/pve/priv/storage/pbs-store1.pw` (never on the Mac's disk or in argv), then enables it.
+If it fails, the secret stays on `pbs` and the script can simply be re-run.
 
 `TODO(encryption)`: Client-side encryption decision pending (`--encryption-key` on `pvesm add` / offline paper key backup).
 

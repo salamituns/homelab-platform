@@ -35,15 +35,21 @@ storage=$1 server=$2 datastore=$3 token=$4 fp=$5
 if pvesm status --storage "$storage" >/dev/null 2>&1; then
   echo "  $storage already exists, leaving its settings alone"
 else
+  # Added DISABLED: PVE only test-connects an enabled storage on add, and that needs the secret.
   pvesm add pbs "$storage" --server "$server" --datastore "$datastore" \
-    --username "$token" --fingerprint "$fp" --content backup
+    --username "$token" --fingerprint "$fp" --content backup --disable 1
 fi
 EOF
 
 # The secret is written AFTER `pvesm add`: adding a PBS storage without --password clears any .pw file.
+# (Read in /usr/share/perl5/PVE/Storage/PBSPlugin.pm on_add_hook, and API2/Storage/Config.pm create.)
 echo "Streaming the token secret into /etc/pve/priv/storage/$STORAGE.pw..."
 ssh "$PBS_SSH" "sudo cat $SECRET_FILE" |
   ssh "$PVE_HOST" "umask 077; mkdir -p /etc/pve/priv/storage && tr -d '\n' > /etc/pve/priv/storage/$STORAGE.pw"
+
+# `pvesm set` without --password leaves the .pw file alone (on_update_hook only acts if the key is passed).
+echo "Enabling $STORAGE..."
+ssh "$PVE_HOST" "pvesm set $STORAGE --disable 0"
 
 echo "Checking the connection..."
 status="$(ssh "$PVE_HOST" "pvesm status --storage $STORAGE" 2>&1 || true)"
