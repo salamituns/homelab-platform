@@ -31,6 +31,6 @@ See [ROADMAP.md](ROADMAP.md) for the 8-week plan.
 - [Runbook: internal DNS](docs/runbooks/internal-dns.md): `*.home.arpa` names, split DNS over Tailscale
 - [Runbook: Gitea](docs/runbooks/gitea.md): operate, upgrade, trust CA, rotate Argo CD token, restore dump
 - [Entry points](docs/entry-points.md): every way into the lab and how to close it
-- Postmortems: [2026-10-24 hypervisor key](docs/postmortems/2026-10-24-hypervisor-key-exposure.md), [2026-10-25 Gitea RCE](docs/postmortems/2026-10-25-gitea-rce-cve-2026-60004.md)
+- Postmortems: [2026-10-24 hypervisor key](docs/postmortems/2026-10-24-hypervisor-key-exposure.md), [2026-10-25 Gitea RCE](docs/postmortems/2026-10-25-gitea-rce-cve-2026-60004.md), [2026-10-26 DHCP drift](docs/postmortems/2026-10-26-dhcp-drift-k8s-outage.md)
 - [Credential inventory](docs/credentials.md)
 - [ADRs](docs/adr/): architecture decisions

@@ -41,11 +41,12 @@ See [ADR 0002](docs/adr/0002-remote-access-tailscale-subnet-router.md).
 See [postmortem](docs/postmortems/2026-10-25-gitea-rce-cve-2026-60004.md).
 - [x] Rebuild Gitea on a Terraform VM with an Ansible role (TLS, pinned version), migrate repos, and cut over (`gitea`, VMID 122, `.97`; done 2026-10-26)
 - [x] Shut down `UbuntuNew` (2026-10-26, `onboot 0`); [ ] delete after 2026-11-25
-- [ ] Verify SonarQube `admin` password
+- [x] SonarQube `admin` still had the factory password: changed 2026-10-26
 - [x] Re-add the GitHub push mirror with a new fine-grained token (2026-10-26)
 - [x] Stop the DockerApp Actions runner (`restart=no`; it still polled the tunnel hostname with the Docker socket mounted); old runners died with UbuntuNew's DB
 - [x] Delete the Cloudflare tunnel (revokes its credential, which sat on UbuntuNew) (2026-10-26)
-- [ ] SonarQube, Jenkins, Nexus are on DHCP and drifted to `.132-.134` when the pool moved: make them static (`.86-.88`) via Ansible netplan; drop their legacy `10.2.0.0/21` ufw rule and open service ports to named clients only
+- [x] Legacy VMs on DHCP drifted after the pool change and took the k8s API down: pinned to static addresses with `ansible/roles/static_ip` (2026-10-26, [postmortem](docs/postmortems/2026-10-26-dhcp-drift-k8s-outage.md))
+- [ ] SonarQube, Jenkins, Nexus: drop the legacy `10.2.0.0/21` ufw rule; open service ports to named clients only
 
 ## Week 2: State, storage and the platform in git
 - [ ] MinIO on `sectools`, Terraform state moved to an S3 backend with locking

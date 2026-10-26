@@ -45,7 +45,8 @@ Review when anything network-facing changes. Last reviewed: 2026-10-26.
 
 - [x] Cloudflare tunnel: listed; it exposed Gitea (exploited) and Jenkins with no gate; now off
 - [x] Cloudflare Zero Trust: tunnel deleted 2026-10-26 (public hostnames go with it); remove leftover DNS CNAMEs to `cfargotunnel.com`
-- [ ] SonarQube, Jenkins, Nexus on DHCP (`.132-.134` since the pool change, DNS still says `.86-.88`); service ports open to the whole LAN; legacy `10.2.0.0/21` ufw rule
+- [x] Legacy VMs (k8s nodes, SonarQube, Jenkins, Nexus, Tomcat) were on DHCP and drifted: static since 2026-10-26 ([postmortem](postmortems/2026-10-26-dhcp-drift-k8s-outage.md))
+- [ ] SonarQube, Jenkins, Nexus: service ports open to the whole LAN; legacy `10.2.0.0/21` ufw rule
 - [x] Router: DHCP pool moved to `.100-.180`; IPv6 inbound blocked by Reflexive ACL
 - [x] VM 100: shut down 2026-10-25
 - [ ] VM 100: `qm destroy 100 --purge` after 2026-11-01
