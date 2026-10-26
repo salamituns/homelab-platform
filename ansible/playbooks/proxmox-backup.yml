@@ -1,0 +1,398 @@
+# Hypervisor-side Proxmox backups: Gmail SMTP alerts plus one opt-out job to PBS.
+# Does not prune on PVE (PBS owns retention) and does not touch storage backup-3tb.
+# Usage:
+#   read -rs PVE_SMTP_PASSWORD; export PVE_SMTP_PASSWORD
+#   export PVE_SMTP_FROM PVE_SMTP_TO PVE_SMTP_USERNAME   # if host_vars still say CHANGE_ME
+#   ansible-playbook playbooks/proxmox-backup.yml --limit tuns --check --diff
+#   ansible-playbook playbooks/proxmox-backup.yml --limit tuns
+- name: Configure Proxmox hypervisor backup job and Gmail alerts
+  hosts: proxmox
+  gather_facts: false
+  vars:
+    # Env wins when set; otherwise host_vars placeholders (must be replaced before apply).
+    pve_smtp_password: "{{ lookup('ansible.builtin.env', 'PVE_SMTP_PASSWORD') }}"
+    pve_smtp_from_effective: "{{ lookup('ansible.builtin.env', 'PVE_SMTP_FROM') | default(pve_smtp_from_address, true) }}"
+    pve_smtp_to_effective: "{{ lookup('ansible.builtin.env', 'PVE_SMTP_TO') | default(pve_smtp_to_address, true) }}"
+    pve_smtp_username_effective: "{{ lookup('ansible.builtin.env', 'PVE_SMTP_USERNAME') | default(pve_smtp_username, true) }}"
+  tasks:
+    - name: Assert Gmail SMTP password is present in the environment
+      ansible.builtin.assert:
+        that:
+          - pve_smtp_password | trim | length > 0
+        fail_msg: >-
+          PVE_SMTP_PASSWORD is empty. Export a Gmail app password in the environment
+          (see docs/runbooks/proxmox.md). It must not be committed.
+      no_log: true
+
+    - name: Assert SMTP from/to/username are not placeholders
+      ansible.builtin.assert:
+        that:
+          - pve_smtp_from_effective | trim | length > 0
+          - "'@' in pve_smtp_from_effective"
+          - "'CHANGE_ME' not in pve_smtp_from_effective"
+          - pve_smtp_to_effective | trim | length > 0
+          - "'@' in pve_smtp_to_effective"
+          - "'CHANGE_ME' not in pve_smtp_to_effective"
+          - pve_smtp_username_effective | trim | length > 0
+          - pve_smtp_username_effective != 'CHANGE_ME'
+        fail_msg: >-
+          Fill pve_smtp_from_address, pve_smtp_to_address, and pve_smtp_username
+          via PVE_SMTP_FROM / PVE_SMTP_TO / PVE_SMTP_USERNAME, extra-vars, or a
+          gitignored host_vars/*.secret.yml. Do not commit real addresses.
+
+    # pvesh get /nodes/{node}/storage is the JSON form of `pvesm status`.
+    - name: Read Proxmox storage status
+      ansible.builtin.command:
+        argv:
+          - pvesh
+          - get
+          - /nodes/{{ inventory_hostname }}/storage
+          - --output-format
+          - json
+      register: pve_storage_raw
+      changed_when: false
+      check_mode: false
+
+    - name: Assert backup storage exists and is active
+      ansible.builtin.assert:
+        that:
+          - pve_backup_storage_status | length == 1
+          - (pve_backup_storage_status[0].active | default(0) | int) == 1
+        fail_msg: >-
+          Storage '{{ pve_backup_storage }}' is missing or inactive on
+          {{ inventory_hostname }}. Add the Proxmox Backup Server datastore as
+          PVE storage id '{{ pve_backup_storage }}', then confirm `pvesm status`
+          lists it as active before re-running this playbook.
+      vars:
+        pve_backup_storage_status: "{{ pve_storage_raw.stdout | from_json | selectattr('storage', 'equalto', pve_backup_storage) | list }}"
+
+    - name: Read SMTP endpoints, matchers, and vzdump jobs
+      ansible.builtin.command:
+        argv:
+          - pvesh
+          - get
+          - "{{ item.path }}"
+          - --output-format
+          - json
+      loop:
+        - { key: smtp, path: /cluster/notifications/endpoints/smtp }
+        - { key: matchers, path: /cluster/notifications/matchers }
+        - { key: backup, path: /cluster/backup }
+      loop_control:
+        label: "{{ item.path }}"
+      register: pve_cluster_state_raw
+      changed_when: false
+      check_mode: false
+
+    - name: Parse cluster backup and notification state
+      ansible.builtin.set_fact:
+        pve_smtp_endpoints: "{{ (pve_cluster_state_raw.results | selectattr('item.key', 'equalto', 'smtp') | first).stdout | from_json }}"
+        pve_matchers: "{{ (pve_cluster_state_raw.results | selectattr('item.key', 'equalto', 'matchers') | first).stdout | from_json }}"
+        pve_backup_jobs: "{{ (pve_cluster_state_raw.results | selectattr('item.key', 'equalto', 'backup') | first).stdout | from_json }}"
+
+    - name: Compute desired SMTP, matcher, and backup-job drift
+      ansible.builtin.set_fact:
+        pve_smtp_current: "{{ pve_smtp_endpoints | selectattr('name', 'equalto', pve_smtp_endpoint_name) | list | first | default({}) }}"
+        pve_matcher_current: "{{ pve_matchers | selectattr('name', 'equalto', pve_smtp_matcher_name) | list | first | default({}) }}"
+        pve_backup_current: "{{ pve_backup_jobs | selectattr('id', 'equalto', pve_backup_job_id) | list | first | default({}) }}"
+        pve_backup_exclude: "{{ pve_backup_exclude_vmids | map('string') | list | join(',') }}"
+
+    - name: Decide whether SMTP endpoint needs create or update
+      ansible.builtin.set_fact:
+        pve_smtp_exists: "{{ pve_smtp_current.name | default('') == pve_smtp_endpoint_name }}"
+        pve_smtp_server_ok: "{{ pve_smtp_current.server | default('') == pve_smtp_server }}"
+        pve_smtp_port_ok: "{{ (pve_smtp_current.port | default(pve_smtp_port) | int) == (pve_smtp_port | int) }}"
+        pve_smtp_mode_ok: "{{ pve_smtp_current.mode | default('') == pve_smtp_mode }}"
+        pve_smtp_user_ok: "{{ pve_smtp_current.username | default('') == pve_smtp_username_effective }}"
+        pve_smtp_from_ok: "{{ pve_smtp_current['from-address'] | default('') == pve_smtp_from_effective }}"
+        pve_smtp_mailto_ok: "{{ (pve_smtp_current.mailto | default([]) | list | sort) == ([pve_smtp_to_effective] | sort) }}"
+        pve_smtp_enabled_ok: "{{ (pve_smtp_current.disable | default(0) | int) == 0 }}"
+
+    - name: Combine SMTP endpoint drift flags
+      ansible.builtin.set_fact:
+        pve_smtp_needs_change: >-
+          {{ not (pve_smtp_exists and pve_smtp_server_ok and pve_smtp_port_ok
+          and pve_smtp_mode_ok and pve_smtp_user_ok and pve_smtp_from_ok
+          and pve_smtp_mailto_ok and pve_smtp_enabled_ok) }}
+
+    - name: Ensure Gmail SMTP endpoint without putting the password on argv
+      ansible.builtin.command:
+        argv: "{{ pve_smtp_argv }}"
+      vars:
+        pve_smtp_argv: "{{ pve_smtp_argv_set if pve_smtp_exists else pve_smtp_argv_create }}"
+        pve_smtp_argv_create:
+          - pvesh
+          - create
+          - /cluster/notifications/endpoints/smtp
+          - --name
+          - "{{ pve_smtp_endpoint_name }}"
+          - --server
+          - "{{ pve_smtp_server }}"
+          - --port
+          - "{{ pve_smtp_port }}"
+          - --mode
+          - "{{ pve_smtp_mode }}"
+          - --username
+          - "{{ pve_smtp_username_effective }}"
+          - --from-address
+          - "{{ pve_smtp_from_effective }}"
+          - --mailto
+          - "{{ pve_smtp_to_effective }}"
+          - --comment
+          - Gmail SMTP for PVE warning/error alerts
+        pve_smtp_argv_set:
+          - pvesh
+          - set
+          - /cluster/notifications/endpoints/smtp/{{ pve_smtp_endpoint_name }}
+          - --server
+          - "{{ pve_smtp_server }}"
+          - --port
+          - "{{ pve_smtp_port }}"
+          - --mode
+          - "{{ pve_smtp_mode }}"
+          - --username
+          - "{{ pve_smtp_username_effective }}"
+          - --from-address
+          - "{{ pve_smtp_from_effective }}"
+          - --mailto
+          - "{{ pve_smtp_to_effective }}"
+          - --comment
+          - Gmail SMTP for PVE warning/error alerts
+          - --disable
+          - "0"
+      when:
+        - pve_smtp_needs_change
+        - not ansible_check_mode
+      changed_when: true
+
+    - name: Report Gmail SMTP endpoint would change
+      ansible.builtin.debug:
+        msg: >-
+          Would {{ 'update' if pve_smtp_exists else 'create' }}
+          SMTP endpoint {{ pve_smtp_endpoint_name }} (no --password; secret goes to priv/notifications.cfg).
+      changed_when: true
+      when:
+        - pve_smtp_needs_change
+        - ansible_check_mode
+
+    # pvesh has no file/stdin form for --password. Write the documented priv file instead.
+    - name: Ensure Gmail SMTP password in priv notifications.cfg
+      ansible.builtin.script:
+        cmd: ../files/pve-upsert-smtp-password.py
+      environment:
+        PVE_SMTP_ENDPOINT: "{{ pve_smtp_endpoint_name }}"
+        PVE_SMTP_PASSWORD: "{{ pve_smtp_password | trim }}"
+        PVE_SMTP_PRIV_WRITE: "{{ '0' if ansible_check_mode else '1' }}"
+      check_mode: false
+      no_log: true
+      register: pve_smtp_priv
+      changed_when: (pve_smtp_priv.stdout | default('') | trim) == 'changed'
+
+    - name: Decide whether the Gmail matcher needs create or update
+      ansible.builtin.set_fact:
+        pve_matcher_exists: "{{ pve_matcher_current.name | default('') == pve_smtp_matcher_name }}"
+        pve_matcher_mode_ok: "{{ pve_matcher_current.mode | default('') == 'any' }}"
+        pve_matcher_target_ok: "{{ (pve_matcher_current.target | default([]) | list | sort) == [pve_smtp_endpoint_name] }}"
+        pve_matcher_sev_ok: "{{ (pve_matcher_current['match-severity'] | default([]) | list | sort) == (['warning', 'error'] | sort) }}"
+        pve_matcher_enabled_ok: "{{ (pve_matcher_current.disable | default(0) | int) == 0 }}"
+
+    - name: Combine Gmail matcher drift flags
+      ansible.builtin.set_fact:
+        pve_matcher_needs_change: >-
+          {{ not (pve_matcher_exists and pve_matcher_mode_ok
+          and pve_matcher_target_ok and pve_matcher_sev_ok
+          and pve_matcher_enabled_ok) }}
+
+    - name: Ensure warning/error matcher targets Gmail
+      ansible.builtin.command:
+        argv: "{{ pve_matcher_argv }}"
+      vars:
+        pve_matcher_argv: "{{ pve_matcher_argv_set if pve_matcher_exists else pve_matcher_argv_create }}"
+        pve_matcher_argv_create:
+          - pvesh
+          - create
+          - /cluster/notifications/matchers
+          - --name
+          - "{{ pve_smtp_matcher_name }}"
+          - --mode
+          - any
+          - --match-severity
+          - warning
+          - --match-severity
+          - error
+          - --target
+          - "{{ pve_smtp_endpoint_name }}"
+          - --comment
+          - Send warning and error notifications to Gmail SMTP
+        pve_matcher_argv_set:
+          - pvesh
+          - set
+          - /cluster/notifications/matchers/{{ pve_smtp_matcher_name }}
+          - --mode
+          - any
+          - --match-severity
+          - warning
+          - --match-severity
+          - error
+          - --target
+          - "{{ pve_smtp_endpoint_name }}"
+          - --comment
+          - Send warning and error notifications to Gmail SMTP
+          - --disable
+          - "0"
+      when:
+        - pve_matcher_needs_change
+        - not ansible_check_mode
+      changed_when: true
+
+    - name: Report Gmail matcher would change
+      ansible.builtin.debug:
+        msg: >-
+          Would {{ 'update' if pve_matcher_exists else 'create' }}
+          matcher {{ pve_smtp_matcher_name }} (builtin mail-to-root target left alone).
+      changed_when: true
+      when:
+        - pve_matcher_needs_change
+        - ansible_check_mode
+
+    - name: Decide whether backup job daily-all needs create or update
+      ansible.builtin.set_fact:
+        pve_backup_exists: "{{ pve_backup_current.id | default('') == pve_backup_job_id }}"
+        pve_backup_all_ok: "{{ (pve_backup_current.all | default(0) | int) == 1 }}"
+        pve_backup_exclude_ok: "{{ pve_backup_current.exclude | default('') == pve_backup_exclude }}"
+        pve_backup_mode_ok: "{{ pve_backup_current.mode | default('') == pve_backup_mode }}"
+        pve_backup_storage_ok: "{{ pve_backup_current.storage | default('') == pve_backup_storage }}"
+        pve_backup_schedule_ok: "{{ pve_backup_current.schedule | default('') == pve_backup_schedule }}"
+        pve_backup_notify_ok: "{{ pve_backup_current['notification-mode'] | default('') == 'notification-system' }}"
+        pve_backup_enabled_ok: "{{ (pve_backup_current.enabled | default(0) | int) == 1 }}"
+        pve_backup_remove_ok: "{{ (pve_backup_current.remove | default(1) | int) == 0 }}"
+        pve_backup_notes_ok: "{{ pve_backup_current['notes-template'] | default('') == pve_backup_notes_template }}"
+        pve_backup_no_prune: "{{ pve_backup_current['prune-backups'] is not defined }}"
+
+    - name: Combine daily-all backup job drift flags
+      ansible.builtin.set_fact:
+        pve_backup_needs_change: >-
+          {{ not (pve_backup_exists and pve_backup_all_ok
+          and pve_backup_exclude_ok and pve_backup_mode_ok
+          and pve_backup_storage_ok and pve_backup_schedule_ok
+          and pve_backup_notify_ok and pve_backup_enabled_ok
+          and pve_backup_remove_ok and pve_backup_notes_ok
+          and pve_backup_no_prune) }}
+
+    - name: Ensure daily-all vzdump job to PBS
+      ansible.builtin.command:
+        argv: "{{ pve_backup_argv + pve_backup_delete_argv }}"
+      vars:
+        pve_backup_delete_argv: "{{ ['--delete', 'prune-backups'] if pve_backup_exists and pve_backup_current['prune-backups'] is defined else [] }}"
+        pve_backup_argv: "{{ pve_backup_argv_set if pve_backup_exists else pve_backup_argv_create }}"
+        pve_backup_argv_create:
+          - pvesh
+          - create
+          - /cluster/backup
+          - --id
+          - "{{ pve_backup_job_id }}"
+          - --all
+          - "1"
+          - --exclude
+          - "{{ pve_backup_exclude }}"
+          - --mode
+          - "{{ pve_backup_mode }}"
+          - --storage
+          - "{{ pve_backup_storage }}"
+          - --schedule
+          - "{{ pve_backup_schedule }}"
+          - --notification-mode
+          - notification-system
+          - --enabled
+          - "1"
+          - --remove
+          - "0"
+          - --notes-template
+          - "{{ pve_backup_notes_template }}"
+          - --comment
+          - Daily snapshot of all guests except forensic 101 and PBS 123
+        pve_backup_argv_set:
+          - pvesh
+          - set
+          - /cluster/backup/{{ pve_backup_job_id }}
+          - --all
+          - "1"
+          - --exclude
+          - "{{ pve_backup_exclude }}"
+          - --mode
+          - "{{ pve_backup_mode }}"
+          - --storage
+          - "{{ pve_backup_storage }}"
+          - --schedule
+          - "{{ pve_backup_schedule }}"
+          - --notification-mode
+          - notification-system
+          - --enabled
+          - "1"
+          - --remove
+          - "0"
+          - --notes-template
+          - "{{ pve_backup_notes_template }}"
+          - --comment
+          - Daily snapshot of all guests except forensic 101 and PBS 123
+      when:
+        - pve_backup_needs_change
+        - not ansible_check_mode
+      changed_when: true
+
+    - name: Report daily-all backup job would change
+      ansible.builtin.debug:
+        msg: >-
+          Would {{ 'update' if pve_backup_exists else 'create' }}
+          vzdump job {{ pve_backup_job_id }} to storage {{ pve_backup_storage }}.
+      changed_when: true
+      when:
+        - pve_backup_needs_change
+        - ansible_check_mode
+
+    - name: Re-read vzdump jobs after ensuring daily-all
+      ansible.builtin.command:
+        argv:
+          - pvesh
+          - get
+          - /cluster/backup
+          - --output-format
+          - json
+      register: pve_backup_jobs_after_raw
+      changed_when: false
+      check_mode: false
+      when: not ansible_check_mode
+
+    - name: List vzdump job ids after ensure
+      ansible.builtin.set_fact:
+        pve_backup_job_ids_now: "{{ pve_backup_jobs | map(attribute='id') | list }}"
+      when: ansible_check_mode
+
+    - name: List vzdump job ids after ensure (live)
+      ansible.builtin.set_fact:
+        pve_backup_job_ids_now: "{{ pve_backup_jobs_after_raw.stdout | from_json | map(attribute='id') | list }}"
+      when: not ansible_check_mode
+
+    - name: Retire legacy vzdump jobs after daily-all exists
+      ansible.builtin.command:
+        argv:
+          - pvesh
+          - delete
+          - /cluster/backup/{{ item }}
+      loop: "{{ pve_backup_retire_job_ids }}"
+      when:
+        - not ansible_check_mode
+        - pve_backup_job_id in pve_backup_job_ids_now
+        - item in pve_backup_job_ids_now
+      changed_when: true
+
+    - name: Report legacy vzdump jobs that would be retired
+      ansible.builtin.debug:
+        msg: >-
+          Would delete vzdump job {{ item }} after {{ pve_backup_job_id }} exists.
+          Storage backup-3tb and its archives are left in place.
+      loop: "{{ pve_backup_retire_job_ids }}"
+      changed_when: true
+      when:
+        - ansible_check_mode
+        - item in (pve_backup_jobs | map(attribute='id') | list)
