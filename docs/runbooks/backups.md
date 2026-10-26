@@ -21,6 +21,16 @@ ansible-playbook playbooks/pbs.yml --limit pbs --check --diff
 ansible-playbook playbooks/pbs.yml --limit pbs
 ```
 
+Publish the `pbs.home.arpa` record (it is in `group_vars/all/dns.yml`, but only `gateway` serves it):
+
+```sh
+ansible-playbook playbooks/dns.yml --limit gateway
+sudo dscacheutil -flushcache; sudo killall -HUP mDNSResponder   # macOS caches the earlier "no such name"
+```
+
+The UI is `https://` only. Its certificate is self-signed until week 6: before accepting it in the browser,
+compare its SHA-256 fingerprint with `ssh tunsadmin@192.168.1.98 'sudo proxmox-backup-manager cert info'`.
+
 ### Step 2: Set `root@pam` password and enable TOTP on `pbs`
 
 1. Set the Linux `root` password on `pbs` (used only by `root@pam` in the PBS web UI; root SSH remains disabled by `baseline`):
