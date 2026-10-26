@@ -1,0 +1,42 @@
+# Managed by Ansible (homelab-platform, role: gitea). Local edits are overwritten.
+#
+# Systemd sandboxing compatibility notes for git + SQLite:
+# - CapabilityBoundingSet= (empty) is safe because Gitea runs as unprivileged user `git`
+#   and binds 127.0.0.1:{{ gitea_http_port }} (>1024, no CAP_NET_BIND_SERVICE required).
+# - ProtectSystem=strict + ReadWritePaths=/var/lib/gitea keeps /etc/gitea read-only
+#   (preventing a compromised git hook from altering app.ini or secret files) while
+#   allowing SQLite WAL/SHM journal files in /var/lib/gitea/data and git repo writes.
+# - PrivateTmp=true isolates temporary git diff/patch/pack working files in a private /tmp.
+# - NoNewPrivileges=true, RestrictSUIDSGID=true, PrivateDevices=true, ProtectHome=true,
+#   ProtectKernelTunables=true, ProtectKernelModules=true, ProtectControlGroups=true,
+#   and LockPersonality=true do not interfere with /usr/bin/git subprocesses or SQLite.
+[Unit]
+Description=Gitea (Git with a cup of tea)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=git
+Group=git
+WorkingDirectory=/var/lib/gitea
+Environment="GITEA_WORK_DIR=/var/lib/gitea" "GITEA_CUSTOM=/var/lib/gitea/custom" "HOME=/var/lib/gitea" "USER=git"
+ExecStart=/usr/local/bin/gitea web --config /etc/gitea/app.ini
+Restart=on-failure
+RestartSec=5s
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/gitea
+ProtectHome=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

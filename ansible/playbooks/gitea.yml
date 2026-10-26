@@ -1,0 +1,12 @@
+# Deploy and harden the rebuilt Gitea server (ADR 0005).
+# Usage:
+#   ansible-playbook playbooks/gitea.yml --limit gitea --check --diff
+#   ansible-playbook playbooks/gitea.yml --limit gitea
+- name: Configure rebuilt Gitea server
+  hosts: gitea
+  become: true
+  roles:
+    - baseline
+    - internal_dns
+    - firewall
+    - gitea

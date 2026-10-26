@@ -1,0 +1,21 @@
+# Managed by Ansible (homelab-platform, role: gitea). Local edits are overwritten.
+[Unit]
+Description=Dump Gitea database and repositories to {{ gitea_backup_dir }}
+After=gitea.service
+
+[Service]
+Type=oneshot
+User=git
+Group=git
+WorkingDirectory={{ gitea_backup_dir }}
+Environment="GITEA_WORK_DIR=/var/lib/gitea" "GITEA_CUSTOM=/var/lib/gitea/custom" "HOME=/var/lib/gitea" "USER=git"
+ExecStart=/usr/local/bin/gitea dump --config /etc/gitea/app.ini --work-path /var/lib/gitea --tempdir {{ gitea_backup_dir }}
+ExecStartPost=/bin/bash -c 'ls -1t {{ gitea_backup_dir }}/gitea-dump-*.zip 2>/dev/null | tail -n +{{ (gitea_backup_keep | int) + 1 }} | xargs -r rm -f --'
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/gitea {{ gitea_backup_dir }}
+ProtectHome=true
+PrivateDevices=true
+CapabilityBoundingSet=

@@ -1,0 +1,10 @@
+# Only the named lab clients may reach Gitea over HTTPS (443/tcp).
+# Port 3000 is bound to 127.0.0.1 and is never opened in UFW.
+- name: Allow Gitea HTTPS (443/tcp) from named lab clients only
+  community.general.ufw:
+    rule: allow
+    proto: tcp
+    port: "443"
+    src: "{{ item.ip }}"
+    comment: "gitea https from {{ item.name }}"
+  loop: "{{ gitea_https_clients }}"
