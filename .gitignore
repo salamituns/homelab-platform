@@ -15,7 +15,6 @@ tfplan
 # Ansible
 *.retry
 .ansible/
-ansible/inventory/host_vars/*.secret.yml
 
 # Ansible collections (installed from ansible/requirements.yml)
 ansible/collections/

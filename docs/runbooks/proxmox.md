@@ -82,7 +82,7 @@ export PVE_SMTP_TO="you@home.arpa"
 export PVE_SMTP_USERNAME="you@home.arpa"      # Gmail SMTP username is the mailbox
 ```
 
-Or write `ansible/inventory/host_vars/tuns.secret.yml` (gitignored) with `pve_smtp_from_address`, `pve_smtp_to_address`, and `pve_smtp_username`. **Never** put the app password in YAML; it is env-only.
+Put the three `export PVE_SMTP_FROM/TO/USERNAME` lines in your gitignored `.envrc` (see `.envrc.example`). Not a `host_vars/tuns.secret.yml`: Ansible only auto-loads `host_vars/tuns.yml` or `host_vars/tuns/`, so such a file would be silently ignored. **Never** put the app password in a file; it is env-only.
 
 `vars_prompt` is not used: it breaks `--check --diff` and non-interactive runs.
 

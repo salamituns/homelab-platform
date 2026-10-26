@@ -5,8 +5,8 @@ tailscale_tags:
 tailscale_advertise_routes: []
 
 # Hypervisor backups (playbooks/proxmox-backup.yml). Real from/to/username stay out of git:
-# export PVE_SMTP_FROM / PVE_SMTP_TO / PVE_SMTP_USERNAME, or drop a gitignored
-# inventory/host_vars/tuns.secret.yml. Password is env-only: PVE_SMTP_PASSWORD.
+# export PVE_SMTP_FROM / PVE_SMTP_TO / PVE_SMTP_USERNAME from the gitignored .envrc.
+# Password is env-only: PVE_SMTP_PASSWORD.
 pve_smtp_endpoint_name: gmail
 pve_smtp_server: smtp.gmail.com
 # Implicit TLS (PVE default). Gmail accepts 465/tls and 587/starttls; 465 avoids the

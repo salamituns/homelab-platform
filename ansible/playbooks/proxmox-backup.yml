@@ -38,7 +38,7 @@
         fail_msg: >-
           Fill pve_smtp_from_address, pve_smtp_to_address, and pve_smtp_username
           via PVE_SMTP_FROM / PVE_SMTP_TO / PVE_SMTP_USERNAME, extra-vars, or a
-          gitignored host_vars/*.secret.yml. Do not commit real addresses.
+          the gitignored .envrc. Do not commit real addresses.
 
     # pvesh get /nodes/{node}/storage is the JSON form of `pvesm status`.
     - name: Read Proxmox storage status
