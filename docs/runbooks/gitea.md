@@ -98,13 +98,15 @@ sudo systemctl stop gitea
 sudo -u git mkdir -p /var/lib/gitea/restore
 sudo -u git unzip -q /var/backups/gitea/gitea-dump-<timestamp>.zip -d /var/lib/gitea/restore
 
-# Restore SQLite database and repositories
-sudo -u git install -m 0640 /var/lib/gitea/restore/gitea-db.sql /var/lib/gitea/data/gitea-db.sql
-sudo -u git sqlite3 /var/lib/gitea/data/gitea.db < /var/lib/gitea/data/gitea-db.sql
+# Restore into a FRESH database file: importing the SQL into the existing gitea.db fails
+# ("table already exists") or mixes old and restored rows. Keep the current one for rollback.
+sudo apt-get install -y sqlite3
+sudo -u git mv /var/lib/gitea/data/gitea.db /var/lib/gitea/data/gitea.db.pre-restore
+sudo -u git sh -c 'sqlite3 /var/lib/gitea/data/gitea.db < /var/lib/gitea/restore/gitea-db.sql'
 sudo -u git rsync -a --delete /var/lib/gitea/restore/repos/ /var/lib/gitea/data/gitea-repositories/
-sudo -u git rm -rf /var/lib/gitea/restore /var/lib/gitea/data/gitea-db.sql
+sudo -u git rm -rf /var/lib/gitea/restore
 
-# Regenerate git hooks and start Gitea
+# Regenerate git hooks from Gitea's own templates (never trust hooks from an archive: CVE-2026-60004)
 sudo systemctl start gitea
 sudo /usr/sbin/runuser -u git -- /usr/local/bin/gitea admin regenerate hooks \
   --work-path /var/lib/gitea --config /etc/gitea/app.ini
