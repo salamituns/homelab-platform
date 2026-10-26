@@ -46,3 +46,15 @@ client-side-encrypted sync to object storage (offsite). Until then baseline C1 s
 - The old jobs are retired. `backup-3tb` and its March UbuntuNew archive stay until the forensic
   retention ends (2026-11-25).
 - The thin snapshots are reviewed for deletion after the first successful restore drill.
+
+## Implementation notes (2026-10-26)
+
+- Built: template 130 (`scripts/build-debian-template.sh`), VM `pbs` (Terraform), `playbooks/pbs.yml`,
+  `scripts/connect-pve-to-pbs.sh`, `playbooks/proxmox-backup.yml` (`daily-all` at 01:30, Gmail matcher),
+  `scripts/restore-drill.sh`. Old jobs `weekly-critical` and `monthly-important` deleted.
+- First run: 15 VMs, 603 GiB logical, 113 GiB stored. Restore drill of `gitea`: PASS in 370 s.
+- Lessons: a PBS token's rights are its own ACL **intersected** with its user's (grant both);
+  `pvesm add` test-connects an enabled PBS storage and deletes any `.pw` file when no password is given
+  (add disabled, write the secret, then enable); a DNS record in git is not live until
+  `playbooks/dns.yml` runs on `gateway`.
+- Open: stage 2 (second medium); client-side encryption (decide before stage 2, since a cloud copy needs it).

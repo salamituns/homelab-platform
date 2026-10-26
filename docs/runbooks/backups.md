@@ -102,4 +102,34 @@ ssh tuns 'pvesm status | grep pbs'
 
 ## 4. Restore drill
 
-*(Placeholder — to be filled after the live restore drill.)*
+Restore the latest backup of a VM as a new, network-unplugged VM, check it from inside through the guest
+agent, then destroy the copy. The original keeps running.
+
+```sh
+scripts/restore-drill.sh 122 199          # gitea -> drill VM 199; add --keep to inspect before cleanup
+```
+
+Expected ending: `RESULT: PASS` and `Cleaned:  VM 199 destroyed`.
+
+**First drill, 2026-10-26** (backup `pbs-store1:backup/vm/122/2026-10-26T23:28:44Z`): PASS.
+
+| Phase | Time |
+|---|---|
+| Restore from PBS (40 GB disk, ~6 GB used) | 198 s |
+| Boot until the guest agent answered | 146 s |
+| Checks: hostname, writable root, `gitea` active, `git fsck` on all 5 repos | ~26 s |
+| **Total** | **370 s (about 6 minutes)** |
+
+Notes:
+- The copy's hostname came back as `restore-drill-122`: the script renames the VM, and cloud-init sees a
+  new instance and re-runs per-instance steps (hostname, SSH host keys). A real restore that replaces a dead
+  VM keeps the original name and VMID.
+- Boot is slow because the network is unplugged on purpose (systemd waits for it before giving up).
+- Why a new VMID and `link_down=1`: restoring over the original turns a drill into an outage if the backup
+  is bad, and a twin on the network would fight the original for its IP.
+
+## 5. First backup, 2026-10-26
+
+`daily-all` run by hand at 16:48: **TASK OK**, 15 VMs in about 1 h 45 min, 603 GiB logical stored as
+**113 GiB** (zero-skipping, compression, dedup). VMs cloned from template 109 reused 84-90% of their chunks.
+Throughput was 62-78 MiB/s wherever real data moved: VMs and the datastore share the same two disks.
