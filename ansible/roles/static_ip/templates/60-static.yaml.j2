@@ -1,0 +1,14 @@
+# Managed by Ansible (homelab-platform, role: static_ip). Local edits are overwritten.
+# Sorts after 50-cloud-init.yaml, so dhcp4: false here overrides cloud-init's dhcp4: true.
+network:
+  version: 2
+  ethernets:
+    {{ static_ip_interface }}:
+      dhcp4: false
+      addresses:
+        - {{ static_ip_address }}/{{ static_ip_prefix }}
+      routes:
+        - to: default
+          via: {{ static_ip_gateway }}
+      nameservers:
+        addresses: {{ static_ip_nameservers | to_json }}

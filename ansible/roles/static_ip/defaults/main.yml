@@ -1,0 +1,9 @@
+# static_ip: pin a VM to its documented address (static_ip_address, set per host in the inventory).
+# The legacy VMs were on DHCP; when the router pool moved to .100-.180 (2026-10-25) they drifted,
+# which took the Kubernetes control plane down (its certs and etcd are bound to the node IP).
+static_ip_prefix: 24
+static_ip_gateway: 192.168.1.254
+# Same resolver DHCP handed out; *.home.arpa still goes to the gateway via the internal_dns drop-in.
+static_ip_nameservers:
+  - 192.168.1.254
+static_ip_netplan_file: /etc/netplan/60-static.yaml

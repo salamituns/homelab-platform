@@ -1,0 +1,17 @@
+# Pin legacy VMs to their documented addresses (static_ip_address in the inventory).
+# A host that already drifted is reached on its current DHCP address with static_ip_via;
+# HostKeyAlias makes SSH check the key recorded for the documented address (no blind trust).
+# Usage, one host at a time, control plane first:
+#   ansible-playbook playbooks/static-ip.yml --limit Master -e static_ip_via=192.168.1.137 --check --diff
+#   ansible-playbook playbooks/static-ip.yml --limit Master -e static_ip_via=192.168.1.137
+# Recovery if a host loses the network: from tuns,
+#   qm guest exec <vmid> -- sh -c 'rm /etc/netplan/60-static.yaml && netplan apply'
+- name: Pin VMs to static addresses
+  hosts: k8s:cicd:Tomcat   # the legacy DHCP VMs; Terraform-built VMs are static from cloud-init
+  serial: 1   # a bad network change shows up on one host only
+  vars:
+    ansible_host: "{{ static_ip_via | default(inventory_hostname) }}"
+    ansible_ssh_common_args: "-o HostKeyAlias={{ static_ip_address }}"
+  roles:
+    - role: static_ip
+      when: static_ip_address is defined
