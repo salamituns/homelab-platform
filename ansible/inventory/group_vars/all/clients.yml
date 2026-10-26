@@ -1,0 +1,4 @@
+# Named admin clients, reused in firewall allowlists. IPs because ufw matches packets, not names.
+lab_admin_clients:
+  - { name: mac, ip: 192.168.1.121 }       # router fixed allocation
+  - { name: gateway, ip: 192.168.1.96 }    # tailnet clients arrive SNATed from the gateway

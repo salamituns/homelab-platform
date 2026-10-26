@@ -1,4 +1,3 @@
-# NOT applied to any host yet; k8s nodes need 6443, 10250, flannel 8472/udp, NodePorts, before enabling.
 - name: Install ufw
   ansible.builtin.apt:
     name: ufw
@@ -29,6 +28,37 @@
     port: "{{ item | string }}"
     proto: udp
   loop: "{{ firewall_allowed_udp_ports_extra | unique }}"
+
+- name: Allow host services from named clients only
+  community.general.ufw:
+    rule: allow
+    port: "{{ item.0.port | string }}"
+    proto: "{{ item.0.proto | default('tcp') }}"
+    src: "{{ item.1.ip }}"
+    comment: "{{ item.0.port }} from {{ item.1.name }}"
+  loop: "{{ firewall_service_rules | subelements('clients') }}"
+  loop_control:
+    label: "{{ item.0.port }} from {{ item.1.name }}"
+
+# Removed after the allow rules above, so a client never loses access in between.
+- name: Remove old rules
+  community.general.ufw:
+    rule: "{{ item.rule | default('allow') }}"
+    src: "{{ item.src | default(omit) }}"
+    port: "{{ item.port | default(omit) }}"
+    proto: "{{ item.proto | default(omit) }}"
+    delete: true
+  loop: "{{ firewall_delete_rules }}"
+
+- name: Restrict Docker-published ports to named clients (DOCKER-USER)
+  ansible.builtin.blockinfile:
+    path: /etc/ufw/after.rules
+    marker: "# {mark} homelab-platform firewall role: DOCKER-USER"
+    block: "{{ lookup('ansible.builtin.template', 'docker-user.rules.j2') }}"
+  vars:
+    firewall_lan_interface: "{{ ansible_facts['default_ipv4']['interface'] }}"
+  when: firewall_docker_clients | length > 0
+  notify: Reload ufw
 
 - name: Enable UFW
   community.general.ufw:

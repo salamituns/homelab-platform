@@ -1,0 +1,9 @@
+*filter
+:DOCKER-USER - [0:0]
+-A DOCKER-USER -m conntrack --ctstate RELATED,ESTABLISHED -j RETURN
+{% for c in firewall_docker_clients %}
+-A DOCKER-USER -i {{ firewall_lan_interface }} -s {{ c.ip }} -m comment --comment "{{ c.name }}" -j RETURN
+{% endfor %}
+-A DOCKER-USER -i {{ firewall_lan_interface }} -m conntrack --ctstate NEW -j DROP
+-A DOCKER-USER -j RETURN
+COMMIT

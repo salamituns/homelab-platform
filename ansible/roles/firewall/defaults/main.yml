@@ -1,4 +1,5 @@
-# NOT applied to any host yet; k8s nodes need 6443, 10250, flannel 8472/udp, NodePorts, before enabling.
+# Applied to: gitea, cicd (playbooks/cicd-firewall.yml). Not on k8s nodes: they need 6443, 10250,
+# flannel 8472/udp and NodePorts first.
 firewall_default_incoming_policy: deny
 firewall_default_outgoing_policy: allow
 firewall_logging: low
@@ -10,3 +11,14 @@ firewall_allowed_tcp_ports:
 # Per-host or per-group extra ports to open alongside the base list.
 firewall_allowed_tcp_ports_extra: []
 firewall_allowed_udp_ports_extra: []
+
+# Host services reachable from named clients only: [{port, proto, clients: [{name, ip}]}].
+firewall_service_rules: []
+
+# Docker-published ports bypass ufw (Docker DNATs them in PREROUTING, before ufw's INPUT rules).
+# When this list is non-empty, the DOCKER-USER chain lets only these clients open new connections
+# to any published port on this host; everyone else arriving on the LAN interface is dropped.
+firewall_docker_clients: []
+
+# Old rules to remove, as community.general.ufw arguments (e.g. {src: 10.2.0.0/21}, {port: "8080", proto: tcp}).
+firewall_delete_rules: []

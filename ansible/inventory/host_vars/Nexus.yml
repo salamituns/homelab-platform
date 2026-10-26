@@ -1,0 +1,5 @@
+# Nexus runs in Docker (:8081-8085 published): restricted in DOCKER-USER, not by ufw rules.
+firewall_docker_clients: "{{ lab_admin_clients + [{'name': 'jenkins', 'ip': '192.168.1.88'}] }}"   # jenkins: publish artifacts
+firewall_delete_rules:
+  - { src: 10.2.0.0/21 }
+  - { port: "8502", proto: tcp }       # nothing listens
