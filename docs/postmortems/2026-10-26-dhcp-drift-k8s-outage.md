@@ -49,7 +49,7 @@ certificate, etcd and every kubelet are bound to `.90`. BelleShop went down with
 - [ ] Network changes get a "who depends on this, and when does it take effect" line in the change
       notes (DHCP, DNS TTLs, certificates, leases)
 - [ ] When the legacy VMs are rebuilt with Terraform, the address comes from code (`ipv4_address`), like `gitea`
-- [x] SonarQube, Jenkins, Nexus: drop the legacy `10.2.0.0/21` ufw rule; open service ports to named clients only (`playbooks/cicd-firewall.yml`, 2026-10-26)
+- [x] SonarQube, Jenkins, Nexus: drop the legacy `10.2.0.0/21` ufw rule; open service ports to named clients only (`playbooks/service-firewall.yml`, 2026-10-26)
 
 ## Lessons
 

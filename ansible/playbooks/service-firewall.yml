@@ -1,0 +1,10 @@
+# Hosts with network services accept that traffic from named clients only
+# (CI hosts: 2026-10-26 DHCP-drift follow-up; DockerApp: 2026-10-26 baseline H5).
+# Usage, one host at a time:
+#   ansible-playbook playbooks/service-firewall.yml --limit DockerApp --check --diff
+#   ansible-playbook playbooks/service-firewall.yml --limit DockerApp
+- name: Firewall hosts that publish services
+  hosts: cicd:DockerApp
+  serial: 1
+  roles:
+    - firewall

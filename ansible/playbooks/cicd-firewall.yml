@@ -1,9 +1,0 @@
-# CI hosts accept service traffic from named clients only (2026-10-26 DHCP-drift follow-up).
-# Usage, one host at a time:
-#   ansible-playbook playbooks/cicd-firewall.yml --limit Nexus --check --diff
-#   ansible-playbook playbooks/cicd-firewall.yml --limit Nexus
-- name: Firewall the CI hosts
-  hosts: cicd
-  serial: 1
-  roles:
-    - firewall

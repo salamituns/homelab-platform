@@ -1,0 +1,7 @@
+# Postiz, Temporal and the docker-learning stack run in Docker (:4007, :7233, :8233, :8080 published):
+# restricted in DOCKER-USER, not by ufw rules. Postiz reaches Temporal on the Docker network
+# (temporal:7233), so no LAN host needs the published 7233.
+firewall_docker_clients: "{{ lab_admin_clients }}"
+firewall_delete_rules:
+  - { src: 10.2.0.0/21 }
+  - { port: "3000", proto: tcp }       # nothing listens
