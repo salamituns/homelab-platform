@@ -10,8 +10,8 @@
 # The new-server token needs write:repository and write:user (to create repos). Delete it afterwards.
 set -euo pipefail
 
-OLD_URL="${OLD_URL:-http://gitea.home.arpa:3000}"
-NEW_URL="${NEW_URL:-https://gitea-new.home.arpa}"
+OLD_URL="${OLD_URL:-http://ubuntunew.home.arpa:3000}"
+NEW_URL="${NEW_URL:-https://gitea.home.arpa}"
 OWNER="${OWNER:-tunsgit}"
 CA="${CA:-ansible/files/ca/gitea-caddy-root.crt}"   # Caddy internal root, fetched by the gitea role
 WORK="${WORK:-$(mktemp -d)}"

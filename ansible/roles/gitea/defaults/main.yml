@@ -4,17 +4,16 @@ gitea_version: "1.27.3"
 gitea_sha256: "4da93c2c10b6980c359bcb86d5573ebfd7770e2e151756534edee24c8c12d971"
 gitea_download_url: "https://dl.gitea.com/gitea/{{ gitea_version }}/gitea-{{ gitea_version }}-linux-amd64"
 
-# Canonical internal hostname and parallel-operation alias (until UbuntuNew cutover).
+# Canonical internal hostname and optional temporary extra SANs (e.g. during a migration).
 gitea_domain: gitea.home.arpa
-gitea_extra_names:
-  - gitea-new.home.arpa
+gitea_extra_names: []
 gitea_http_port: 3000
 
 # Initial admin account created on first boot only (password written to /root/gitea-initial-admin-password).
 gitea_admin_user: tunsgit
 gitea_admin_email: admin@home.arpa
 
-# Named LAN hosts permitted to reach Caddy on 443/tcp (ADR 0005 / playbooks/gitea-lan.yml).
+# Named LAN hosts permitted to reach Caddy on 443/tcp (ADR 0005).
 # Port 3000 is bound to 127.0.0.1 only and is never opened in UFW.
 gitea_https_clients:
   - { name: master, ip: 192.168.1.90 }        # Argo CD pods egress from node IPs

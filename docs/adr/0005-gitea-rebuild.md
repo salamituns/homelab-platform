@@ -33,4 +33,16 @@ retired subnet in its firewall. Data to carry over is small: 5 repos (116 MB), 1
 - Clients change URL to `https://gitea.home.arpa/` and must trust the Caddy root CA.
 - Repo settings that live in the DB (collaborators, webhooks, branch protection) are re-created
   by hand; there is one webhook today.
-- Backups are still missing until week 2 (MinIO): until then, `gitea dump` to `tuns` by cron.
+- Backups are still missing until week 2 (MinIO): until then, `gitea dump` runs daily via `gitea-backup.timer` into `/var/backups/gitea` (retaining 7 archives).
+
+## Implementation notes (2026-10-26)
+
+- **Done:** `gitea` (VMID 122, `192.168.1.97`) built via Terraform and configured by `ansible/playbooks/gitea.yml` (temporarily serving both `gitea.home.arpa` and `gitea-new.home.arpa` during parallel migration).
+- **All 5 repos migrated and now private:** `scripts/migrate-gitea-repos.sh` mirrored all 5 repos at 2026-10-25 22:14 CDT (`git fsck` clean, no `rce-proof` refs, all branch/tag refs verified equal). All 5 repositories were created as **private** (4 had been public on `UbuntuNew`).
+- **Token-scope lesson (`/repos/search` vs `/user/repos`):** Gitea's `GET /api/v1/user/repos` endpoint requires the `read:user` token scope in addition to repository scope. Using `GET /api/v1/repos/search` in `scripts/migrate-gitea-repos.sh` keeps the laptop token strictly at `write:repository` scope.
+- **Cutover ordering lesson (self-managing Argo CD Application):** Because Argo CD reads its own Application manifest from the BelleShop repo being moved, cutover had to happen in four steps:
+  1. Install the Caddy root CA (`k8s/argocd/argocd-tls-certs-cm.yaml`) and new `read:repository` Secret (`argocd/gitea-belleshop-readonly`) in the cluster.
+  2. Commit and push the `repoURL` change (`https://gitea.home.arpa/tunsgit/BelleShop.git`, commit `ff129bf`) to the **new** Gitea server first.
+  3. Switch DNS (`gitea.home.arpa` -> `192.168.1.97`, `ubuntunew.home.arpa` -> `192.168.1.83`).
+  4. Patch the live Argo CD Application so `selfHeal` reconciles against the new server, where the manifest already matches the new URL (preventing Argo CD from reverting itself back to the old URL).
+- **Old host (`UbuntuNew`, VMID 101, `.83`):** To be shut down with `onboot 0`, retained 30 days (until 2026-11-25) for the forensic snapshot, then deleted.
