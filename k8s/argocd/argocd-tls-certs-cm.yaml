@@ -1,0 +1,24 @@
+# Argo CD trusts the rebuilt Gitea's Caddy internal root CA (ADR 0005), keyed by server name.
+# Public certificate; replaced by the lab CA in week 6. Source: ansible/files/ca/gitea-caddy-root.crt
+# Apply: kubectl apply -f k8s/argocd/argocd-tls-certs-cm.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-tls-certs-cm
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: argocd-tls-certs-cm
+    app.kubernetes.io/part-of: argocd
+data:
+  gitea.home.arpa: |
+    -----BEGIN CERTIFICATE-----
+    MIIBpDCCAUmgAwIBAgIQdPXsIHzvv0nOxfIVa4zCPzAKBggqhkjOPQQDAjAwMS4w
+    LAYDVQQDEyVDYWRkeSBMb2NhbCBBdXRob3JpdHkgLSAyMDI2IEVDQyBSb290MB4X
+    DTI2MTAyNjAxMTYxMVoXDTM2MDkwMzAxMTYxMVowMDEuMCwGA1UEAxMlQ2FkZHkg
+    TG9jYWwgQXV0aG9yaXR5IC0gMjAyNiBFQ0MgUm9vdDBZMBMGByqGSM49AgEGCCqG
+    SM49AwEHA0IABMP/vHZkDSGe28As8w8gTSvr+iOlcxiIX+XC8yCJm/RVuDeHHkZl
+    2MpArxtTbtlLbBgqIYkFXMnuZYV4brcrGLejRTBDMA4GA1UdDwEB/wQEAwIBBjAS
+    BgNVHRMBAf8ECDAGAQH/AgEBMB0GA1UdDgQWBBSosPv0qwkCrwQBKEHd1xljG2ru
+    RTAKBggqhkjOPQQDAgNJADBGAiEAzpeQqCd6p1+XjiMrntriy5N06mPaFuH/quBO
+    YEeGn/MCIQDV43+4hzefhILrn3/tgb/U43PNVKAQeWCRtfHKhVamcw==
+    -----END CERTIFICATE-----

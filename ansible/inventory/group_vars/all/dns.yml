@@ -6,8 +6,8 @@ internal_dns_server_ip: 192.168.1.96   # gateway
 # name: first entry is the canonical name, the rest are aliases (all under the zone).
 internal_dns_records:
   - { names: [proxmox, tuns], ip: 192.168.1.181 }
-  - { names: [gitea, ubuntunew], ip: 192.168.1.83 }    # moves to .97 at cutover (ADR 0005)
-  - { names: [gitea-new], ip: 192.168.1.97 }          # rebuild target until cutover
+  - { names: [gitea, gitea-new], ip: 192.168.1.97 }   # rebuilt Gitea (ADR 0005); gitea-new dropped after cutover
+  - { names: [ubuntunew], ip: 192.168.1.83 }          # old Gitea, shut down after cutover, deleted after 30 days
   - { names: [workernode2], ip: 192.168.1.84 }
   - { names: [tomcat], ip: 192.168.1.85 }
   - { names: [sonar, sonarquality], ip: 192.168.1.86 }
