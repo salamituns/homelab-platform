@@ -14,8 +14,10 @@ pbs_repo_component: pbs-no-subscription
 
 # Dedicated datastore block device and mount point (500 GB thin disk from Terraform).
 pbs_datastore_device: /dev/sdb
-pbs_datastore_path: /srv/pbs-store
+pbs_mount_path: /srv/pbs-store
 pbs_datastore_name: store1
+# A subdirectory, not the mount point: a new ext4 root holds lost+found, and PBS wants to own its directory.
+pbs_datastore_path: "{{ pbs_mount_path }}/{{ pbs_datastore_name }}"
 
 # Server-side maintenance schedules and retention (run on PBS so the PVE token needs
 # DatastoreBackup only and cannot prune or delete backups).

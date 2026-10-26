@@ -107,16 +107,16 @@
 
 - name: Ensure datastore mount directory exists
   ansible.builtin.file:
-    path: "{{ pbs_datastore_path }}"
+    path: "{{ pbs_mount_path }}"
     state: directory
-    owner: backup
-    group: backup
-    mode: "0750"
+    owner: root
+    group: root
+    mode: "0755"
   when: not ansible_check_mode
 
 - name: Mount datastore disk by UUID
   ansible.posix.mount:
-    path: "{{ pbs_datastore_path }}"
+    path: "{{ pbs_mount_path }}"
     src: "UUID={{ pbs_disk_uuid.stdout | trim }}"
     fstype: ext4
     opts: defaults,noatime

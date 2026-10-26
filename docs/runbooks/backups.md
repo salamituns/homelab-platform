@@ -25,7 +25,7 @@ ansible-playbook playbooks/pbs.yml --limit pbs
 
 1. Set the Linux `root` password on `pbs` (used only by `root@pam` in the PBS web UI; root SSH remains disabled by `baseline`):
    ```sh
-   ssh pbs 'sudo passwd root'
+   ssh -t tunsadmin@192.168.1.98 'sudo passwd root'
    ```
 2. Open `https://pbs.home.arpa:8007/`, log in as `root@pam`, go to **Configuration** -> **Access Control** -> **Two Factor**, and add a **TOTP** factor plus offline **Recovery Keys**.
 
@@ -34,7 +34,7 @@ ansible-playbook playbooks/pbs.yml --limit pbs
 Run on `pbs` as `root`:
 
 ```sh
-ssh pbs
+ssh tunsadmin@192.168.1.98
 sudo -i
 
 # Create the pve@pbs user (no password needed; only its API token is used)
@@ -56,23 +56,21 @@ proxmox-backup-manager cert info | grep Fingerprint
 
 > **Ownership note:** With `DatastoreBackup`, `pve@pbs!tuns` can only append to backup groups owned by `pve@pbs!tuns`. Do not run test backups as `root@pam` first, or subsequent runs as `pve@pbs!tuns` will fail the owner check (`proxmox-backup-manager datastore change-owner` fixes ownership if needed).
 
-### Step 4: Register `pbs-store1` on `tuns` without leaking the secret to shell history
+### Step 4: Register `pbs-store1` on `tuns` without the secret touching argv, history or the Mac's disk
 
-Copy `/root/pbs-tuns-token.secret` to `tuns:/root/pbs-tuns-token.secret` (mode `0600`), then on `tuns`:
+PVE keeps a storage's secret in `/etc/pve/priv/storage/<storage-id>.pw` (root-only, on pmxcfs).
+Add the storage without `--password`, then stream the token from `pbs` straight into that file:
 
 ```sh
-# Leading space (with HISTCONTROL=ignorespace/ignoreboth) or reading from the 0600 file
-# keeps the secret out of ~/.bash_history; shred the secret file on both hosts immediately after.
 FP="<fingerprint-from-step-3>"
-pvesm add pbs pbs-store1 \
-  --server 192.168.1.98 \
-  --datastore store1 \
-  --username 'pve@pbs!tuns' \
-  --fingerprint "$FP" \
-  --password "$(cat /root/pbs-tuns-token.secret)"
+ssh tuns "pvesm add pbs pbs-store1 --server 192.168.1.98 --datastore store1 \
+  --username 'pve@pbs!tuns' --fingerprint $FP --content backup"
 
-shred -u /root/pbs-tuns-token.secret
-ssh pbs 'sudo shred -u /root/pbs-tuns-token.secret'
+ssh tunsadmin@192.168.1.98 'sudo cat /root/pbs-tuns-token.secret' \
+  | ssh tuns 'umask 077; mkdir -p /etc/pve/priv/storage && cat > /etc/pve/priv/storage/pbs-store1.pw'
+
+ssh tuns 'pvesm status --storage pbs-store1'      # expect: active
+ssh tunsadmin@192.168.1.98 'sudo shred -u /root/pbs-tuns-token.secret'
 ```
 
 `TODO(encryption)`: Client-side encryption decision pending (`--encryption-key` on `pvesm add` / offline paper key backup).
@@ -82,10 +80,10 @@ ssh pbs 'sudo shred -u /root/pbs-tuns-token.secret'
 On `pbs`:
 
 ```sh
-ssh pbs 'sudo proxmox-backup-manager datastore list'
-ssh pbs 'sudo proxmox-backup-manager prune-job list'
-ssh pbs 'sudo proxmox-backup-manager verify-job list'
-ssh pbs 'sudo proxmox-backup-manager acl list'
+ssh tunsadmin@192.168.1.98 'sudo proxmox-backup-manager datastore list'
+ssh tunsadmin@192.168.1.98 'sudo proxmox-backup-manager prune-job list'
+ssh tunsadmin@192.168.1.98 'sudo proxmox-backup-manager verify-job list'
+ssh tunsadmin@192.168.1.98 'sudo proxmox-backup-manager acl list'
 ```
 
 On `tuns`:
