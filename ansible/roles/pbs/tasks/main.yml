@@ -1,0 +1,328 @@
+- name: Assert target host is Debian 13 (trixie)
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['distribution'] == 'Debian'
+      - ansible_facts['distribution_release'] == 'trixie'
+    fail_msg: >-
+      The pbs role requires Debian 13 (trixie); found
+      {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_release'] }}.
+
+- name: Download Proxmox archive keyring for Debian 13 (trixie) verified by SHA-256
+  ansible.builtin.get_url:
+    url: "{{ pbs_keyring_url }}"
+    dest: "{{ pbs_keyring_path }}"
+    checksum: "sha256:{{ pbs_keyring_sha256 }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Configure Proxmox Backup Server no-subscription repository (deb822)
+  ansible.builtin.deb822_repository:
+    name: pbs-no-subscription
+    types:
+      - deb
+    uris:
+      - "{{ pbs_repo_uri }}"
+    suites:
+      - "{{ pbs_repo_suite }}"
+    components:
+      - "{{ pbs_repo_component }}"
+    signed_by: "{{ pbs_keyring_path }}"
+    state: present
+
+# Install proxmox-backup-server only (NOT the proxmox-backup metapackage, which pulls in
+# the Proxmox kernel and firmware meant for bare-metal ISO installs).
+- name: Install proxmox-backup-server package
+  ansible.builtin.apt:
+    name: proxmox-backup-server
+    state: present
+    update_cache: true
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+
+# The proxmox-backup-server package drops /etc/apt/sources.list.d/pbs-enterprise.sources,
+# which returns 401 Unauthorized without a subscription and breaks subsequent apt updates.
+- name: Remove default pbs-enterprise repository files
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/apt/sources.list.d/pbs-enterprise.sources
+    - /etc/apt/sources.list.d/pbs-enterprise.list
+
+- name: Enable and start Proxmox Backup Server daemons
+  ansible.builtin.service:
+    name: "{{ item }}"
+    state: started
+    enabled: true
+  loop:
+    - proxmox-backup
+    - proxmox-backup-proxy
+  ignore_errors: "{{ ansible_check_mode }}"
+
+- name: Check datastore block device {{ pbs_datastore_device }}
+  ansible.builtin.stat:
+    path: "{{ pbs_datastore_device }}"
+  register: pbs_disk_stat
+
+- name: Assert datastore block device exists
+  ansible.builtin.assert:
+    that:
+      - pbs_disk_stat.stat.exists
+      - pbs_disk_stat.stat.isblk
+    fail_msg: "Datastore block device {{ pbs_datastore_device }} does not exist or is not a block device."
+  when: not ansible_check_mode
+
+# force: false ensures community.general.filesystem is a no-op if a filesystem already exists
+# on /dev/sdb and never reformats an existing datastore disk.
+- name: Create ext4 filesystem on unformatted datastore device
+  community.general.filesystem:
+    fstype: ext4
+    dev: "{{ pbs_datastore_device }}"
+    force: false
+  when:
+    - not ansible_check_mode
+    - pbs_disk_stat.stat.exists | default(false)
+    - pbs_disk_stat.stat.isblk | default(false)
+
+- name: Read filesystem UUID of {{ pbs_datastore_device }}
+  ansible.builtin.command:
+    argv:
+      - /usr/sbin/blkid
+      - -s
+      - UUID
+      - -o
+      - value
+      - "{{ pbs_datastore_device }}"
+  register: pbs_disk_uuid
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Assert datastore filesystem UUID was discovered
+  ansible.builtin.assert:
+    that:
+      - pbs_disk_uuid.stdout | trim | length > 0
+    fail_msg: "Could not read filesystem UUID from {{ pbs_datastore_device }}."
+  when: not ansible_check_mode
+
+- name: Ensure datastore mount directory exists
+  ansible.builtin.file:
+    path: "{{ pbs_mount_path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: not ansible_check_mode
+
+- name: Mount datastore disk by UUID
+  ansible.posix.mount:
+    path: "{{ pbs_mount_path }}"
+    src: "UUID={{ pbs_disk_uuid.stdout | trim }}"
+    fstype: ext4
+    opts: defaults,noatime
+    state: mounted
+  when: not ansible_check_mode
+
+- name: Read configured PBS datastores
+  ansible.builtin.command:
+    argv:
+      - /usr/sbin/proxmox-backup-manager
+      - datastore
+      - list
+      - --output-format
+      - json
+  register: pbs_datastore_list_raw
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Parse PBS datastore list
+  ansible.builtin.set_fact:
+    pbs_datastores: "{{ pbs_datastore_list_raw.stdout | default('[]') | from_json }}"
+  when: not ansible_check_mode
+
+- name: Create PBS datastore if absent
+  ansible.builtin.command:
+    argv:
+      - /usr/sbin/proxmox-backup-manager
+      - datastore
+      - create
+      - "{{ pbs_datastore_name }}"
+      - "{{ pbs_datastore_path }}"
+  changed_when: true
+  when:
+    - not ansible_check_mode
+    - pbs_datastore_name not in (pbs_datastores | map(attribute='name') | list)
+
+- name: Read PBS datastore settings
+  ansible.builtin.command:
+    argv:
+      - /usr/sbin/proxmox-backup-manager
+      - datastore
+      - show
+      - "{{ pbs_datastore_name }}"
+      - --output-format
+      - json
+  register: pbs_datastore_show_raw
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Configure garbage collection schedule on datastore {{ pbs_datastore_name }}
+  ansible.builtin.command:
+    argv:
+      - /usr/sbin/proxmox-backup-manager
+      - datastore
+      - update
+      - "{{ pbs_datastore_name }}"
+      - --gc-schedule
+      - "{{ pbs_gc_schedule }}"
+  changed_when: true
+  when:
+    - not ansible_check_mode
+    - ((pbs_datastore_show_raw.stdout | default('{}') | from_json).get('gc-schedule', '')) != pbs_gc_schedule
+
+- name: Read configured PBS prune jobs
+  ansible.builtin.command:
+    argv:
+      - /usr/sbin/proxmox-backup-manager
+      - prune-job
+      - list
+      - --output-format
+      - json
+  register: pbs_prune_jobs_raw
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Parse PBS prune jobs
+  ansible.builtin.set_fact:
+    pbs_prune_jobs: "{{ pbs_prune_jobs_raw.stdout | default('[]') | from_json }}"
+    pbs_existing_prune_job: >-
+      {{
+        (
+          (pbs_prune_jobs_raw.stdout | default('[]') | from_json)
+          | selectattr('id', 'equalto', pbs_prune_job_id)
+          | list
+          | first
+        ) | default({})
+      }}
+  when: not ansible_check_mode
+
+- name: Create PBS prune job if absent
+  ansible.builtin.command:
+    argv:
+      - /usr/sbin/proxmox-backup-manager
+      - prune-job
+      - create
+      - "{{ pbs_prune_job_id }}"
+      - --store
+      - "{{ pbs_datastore_name }}"
+      - --schedule
+      - "{{ pbs_prune_schedule }}"
+      - --keep-daily
+      - "{{ pbs_keep_daily | string }}"
+      - --keep-weekly
+      - "{{ pbs_keep_weekly | string }}"
+      - --keep-monthly
+      - "{{ pbs_keep_monthly | string }}"
+  changed_when: true
+  when:
+    - not ansible_check_mode
+    - pbs_existing_prune_job | length == 0
+
+- name: Update PBS prune job when settings differ
+  ansible.builtin.command:
+    argv:
+      - /usr/sbin/proxmox-backup-manager
+      - prune-job
+      - update
+      - "{{ pbs_prune_job_id }}"
+      - --store
+      - "{{ pbs_datastore_name }}"
+      - --schedule
+      - "{{ pbs_prune_schedule }}"
+      - --keep-daily
+      - "{{ pbs_keep_daily | string }}"
+      - --keep-weekly
+      - "{{ pbs_keep_weekly | string }}"
+      - --keep-monthly
+      - "{{ pbs_keep_monthly | string }}"
+  changed_when: true
+  when:
+    - not ansible_check_mode
+    - pbs_existing_prune_job | length > 0
+    - >-
+      (pbs_existing_prune_job.get('store', '') != pbs_datastore_name) or
+      (pbs_existing_prune_job.get('schedule', '') != pbs_prune_schedule) or
+      ((pbs_existing_prune_job.get('keep-daily', 0) | int) != (pbs_keep_daily | int)) or
+      ((pbs_existing_prune_job.get('keep-weekly', 0) | int) != (pbs_keep_weekly | int)) or
+      ((pbs_existing_prune_job.get('keep-monthly', 0) | int) != (pbs_keep_monthly | int))
+
+- name: Read configured PBS verify jobs
+  ansible.builtin.command:
+    argv:
+      - /usr/sbin/proxmox-backup-manager
+      - verify-job
+      - list
+      - --output-format
+      - json
+  register: pbs_verify_jobs_raw
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Parse PBS verify jobs
+  ansible.builtin.set_fact:
+    pbs_verify_jobs: "{{ pbs_verify_jobs_raw.stdout | default('[]') | from_json }}"
+    pbs_existing_verify_job: >-
+      {{
+        (
+          (pbs_verify_jobs_raw.stdout | default('[]') | from_json)
+          | selectattr('id', 'equalto', pbs_verify_job_id)
+          | list
+          | first
+        ) | default({})
+      }}
+  when: not ansible_check_mode
+
+- name: Create PBS verify job if absent
+  ansible.builtin.command:
+    argv:
+      - /usr/sbin/proxmox-backup-manager
+      - verify-job
+      - create
+      - "{{ pbs_verify_job_id }}"
+      - --store
+      - "{{ pbs_datastore_name }}"
+      - --schedule
+      - "{{ pbs_verify_schedule }}"
+      - --ignore-verified
+      - "true"
+      - --outdated-after
+      - "{{ pbs_verify_outdated_after | string }}"
+  changed_when: true
+  when:
+    - not ansible_check_mode
+    - pbs_existing_verify_job | length == 0
+
+- name: Update PBS verify job when settings differ
+  ansible.builtin.command:
+    argv:
+      - /usr/sbin/proxmox-backup-manager
+      - verify-job
+      - update
+      - "{{ pbs_verify_job_id }}"
+      - --store
+      - "{{ pbs_datastore_name }}"
+      - --schedule
+      - "{{ pbs_verify_schedule }}"
+      - --ignore-verified
+      - "true"
+      - --outdated-after
+      - "{{ pbs_verify_outdated_after | string }}"
+  changed_when: true
+  when:
+    - not ansible_check_mode
+    - pbs_existing_verify_job | length > 0
+    - >-
+      (pbs_existing_verify_job.get('store', '') != pbs_datastore_name) or
+      (pbs_existing_verify_job.get('schedule', '') != pbs_verify_schedule) or
+      ((pbs_existing_verify_job.get('ignore-verified', true) | bool) is not true) or
+      ((pbs_existing_verify_job.get('outdated-after', 0) | int) != (pbs_verify_outdated_after | int))

@@ -1,0 +1,33 @@
+# Proxmox archive keyring for Debian 13 (trixie) and its official SHA-256 digest
+# (verified against https://pbs.proxmox.com/docs/installation.html and the live file).
+pbs_keyring_url: https://enterprise.proxmox.com/debian/proxmox-archive-keyring-trixie.gpg
+pbs_keyring_path: /usr/share/keyrings/proxmox-archive-keyring.gpg
+pbs_keyring_sha256: "136673be77aba35dcce385b28737689ad64fd785a797e57897589aed08db6e45"
+
+# Official Proxmox PBS 4 no-subscription repository for Debian 13 (trixie).
+# Uses http:// per official Proxmox docs: download.proxmox.com presents a TLS certificate
+# for enterprise.proxmox.com, so https:// fails apt TLS hostname verification; integrity is
+# enforced by OpenPGP signature verification against pbs_keyring_path.
+pbs_repo_uri: http://download.proxmox.com/debian/pbs
+pbs_repo_suite: trixie
+pbs_repo_component: pbs-no-subscription
+
+# Dedicated datastore block device and mount point (500 GB thin disk from Terraform).
+pbs_datastore_device: /dev/sdb
+pbs_mount_path: /srv/pbs-store
+pbs_datastore_name: store1
+# A subdirectory, not the mount point: a new ext4 root holds lost+found, and PBS wants to own its directory.
+pbs_datastore_path: "{{ pbs_mount_path }}/{{ pbs_datastore_name }}"
+
+# Server-side maintenance schedules and retention (run on PBS so the PVE token needs
+# DatastoreBackup only and cannot prune or delete backups).
+pbs_gc_schedule: daily
+pbs_prune_job_id: store1-prune
+pbs_prune_schedule: daily
+pbs_keep_daily: 7
+pbs_keep_weekly: 4
+pbs_keep_monthly: 3
+
+pbs_verify_job_id: store1-verify
+pbs_verify_schedule: weekly
+pbs_verify_outdated_after: 30

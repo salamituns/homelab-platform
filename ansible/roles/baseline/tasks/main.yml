@@ -5,6 +5,26 @@
     update_cache: true
     cache_valid_time: 3600
 
+# Debian 12/13 (trixie) has no rsyslog or /var/log/auth.log by default; fail2ban needs
+# python3-systemd and backend = systemd or fail2ban.service fails to start on sshd jail.
+- name: Install python3-systemd for fail2ban journald backend on Debian
+  ansible.builtin.apt:
+    name: python3-systemd
+    state: present
+  when: ansible_facts['distribution'] == 'Debian'
+
+- name: Configure fail2ban to use systemd journal backend on Debian
+  ansible.builtin.copy:
+    dest: /etc/fail2ban/jail.d/10-systemd-backend.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by Ansible (homelab-platform, role: baseline).
+      [DEFAULT]
+      backend = systemd
+  when: ansible_facts['distribution'] == 'Debian'
+
 - name: Set timezone
   community.general.timezone:
     name: "{{ baseline_timezone }}"
@@ -30,6 +50,21 @@
       APT::Periodic::Update-Package-Lists "1";
       APT::Periodic::Unattended-Upgrade "1";
     mode: "0644"
+
+# Debian unattended-upgrades uses Origins-Pattern with label=Debian-Security rather than
+# Ubuntu's Allowed-Origins "${distro_id}:${distro_codename}-security".
+- name: Configure unattended-upgrades Debian-Security origin on Debian
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/52unattended-upgrades-local
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      // Managed by Ansible (homelab-platform, role: baseline).
+      Unattended-Upgrade::Origins-Pattern {
+          "origin=Debian,codename=${distro_codename}-security,label=Debian-Security";
+      };
+  when: ansible_facts['distribution'] == 'Debian'
 
 - name: Harden SSH
   ansible.builtin.import_tasks: ssh_hardening.yml

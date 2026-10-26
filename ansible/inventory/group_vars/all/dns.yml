@@ -18,6 +18,7 @@ internal_dns_records:
   - { names: [dockerapp], ip: 192.168.1.92 }
   - { names: [sectools], ip: 192.168.1.95 }
   - { names: [gateway], ip: 192.168.1.96 }
+  - { names: [pbs], ip: 192.168.1.98 }                 # Proxmox Backup Server
 
 # Wildcard: anything under apps.home.arpa goes to the ingress-nginx LoadBalancer (MetalLB).
 internal_dns_wildcards:

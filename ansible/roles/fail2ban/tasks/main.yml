@@ -1,6 +1,6 @@
 - name: Install fail2ban
   ansible.builtin.apt:
-    name: fail2ban
+    name: "{{ ['fail2ban', 'python3-systemd'] if ansible_facts['distribution'] == 'Debian' else 'fail2ban' }}"
     state: present
     update_cache: true
     cache_valid_time: 3600
