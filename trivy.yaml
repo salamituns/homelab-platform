@@ -1,4 +1,6 @@
 scan:
   skip-dirs:
     - ansible/collections
+    - ansible/.ansible
     - "**/.terraform"
+    - "**/.ansible"

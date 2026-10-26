@@ -2,3 +2,9 @@
 export PROXMOX_VE_ENDPOINT="https://192.168.1.181:8006/"
 export PROXMOX_VE_API_TOKEN="terraform@pve!homelab=<token-secret>"
 export TS_AUTHKEY="tskey-auth-<single-use, tagged, 1-day expiry; only for enrolling gateway>"
+# PVE Gmail SMTP (playbooks/proxmox-backup.yml). Real addresses stay out of git.
+# Prefer `read -rs PVE_SMTP_PASSWORD; export PVE_SMTP_PASSWORD` so the password
+# never enters shell history. App password, not the Google account password.
+# export PVE_SMTP_FROM="CHANGE_ME@home.arpa"
+# export PVE_SMTP_TO="CHANGE_ME@home.arpa"
+# export PVE_SMTP_USERNAME="CHANGE_ME"

@@ -3,3 +3,29 @@ tailscale_hostname: homelab-breakglass
 tailscale_tags:
   - tag:homelab-breakglass
 tailscale_advertise_routes: []
+
+# Hypervisor backups (playbooks/proxmox-backup.yml). Real from/to/username stay out of git:
+# export PVE_SMTP_FROM / PVE_SMTP_TO / PVE_SMTP_USERNAME from the gitignored .envrc.
+# Password is env-only: PVE_SMTP_PASSWORD.
+pve_smtp_endpoint_name: gmail
+pve_smtp_server: smtp.gmail.com
+# Implicit TLS (PVE default). Gmail accepts 465/tls and 587/starttls; 465 avoids the
+# STARTTLS upgrade and matches PVE's documented default when mode is tls.
+pve_smtp_mode: tls
+pve_smtp_port: 465
+pve_smtp_from_address: CHANGE_ME@home.arpa
+pve_smtp_to_address: CHANGE_ME@home.arpa
+pve_smtp_username: CHANGE_ME
+pve_smtp_matcher_name: warning-error-gmail
+
+pve_backup_storage: pbs-store1
+pve_backup_job_id: daily-all
+pve_backup_schedule: "*-*-* 01:30:00"
+pve_backup_mode: snapshot
+pve_backup_notes_template: "{{ '{{guestname}}' }}"
+pve_backup_exclude_vmids:
+  - 101
+  - 123
+pve_backup_retire_job_ids:
+  - weekly-critical
+  - monthly-important

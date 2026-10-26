@@ -20,6 +20,7 @@ Review this list monthly. A credential that is not on this list should not exist
 | SSH key `~/.ssh/id_rsa` (Mac) | Login as `tunsadmin` on every VM; root on `tuns` | Mac `~/.ssh` | Never | Plan: replace with ed25519, then remove RSA from `authorized_keys` everywhere |
 | SSH key `root@tuns` (`/root/.ssh/id_rsa` on the hypervisor) | Root SSH from the hypervisor. Old key `fZPN...` was authorized on every legacy VM | `tuns` only | Never | Rotated 2026-10-24 (old key exposed, see [postmortem](postmortems/2026-10-24-hypervisor-key-exposure.md)). New key `WcgvLIyj...` must not be authorized on any guest or in Gitea |
 | Ansible Vault `group_vars/all/vault.yml` (legacy, on `tuns`) | Unknown; not reviewed | `tuns:~/ansible` | n/a | Review contents when the legacy project is retired |
+| Gmail app password for PVE SMTP endpoint `gmail` | Sends PVE warning/error notifications to the configured mailbox | Env `PVE_SMTP_PASSWORD` at apply time; on `tuns` in `/etc/pve/priv/notifications.cfg` (root-only pmxcfs) | Until Google rotation | When leaked, when Google revokes app passwords, or yearly |
 
 ## Rules
 
