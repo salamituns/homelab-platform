@@ -37,6 +37,12 @@ See [ADR 0002](docs/adr/0002-remote-access-tailscale-subnet-router.md).
 - **Proof (done 2026-10-24 for access; laptop test in policy):** from a phone hotspot, `ssh Master`, open the Proxmox UI, and `kubectl get nodes` all work,
   and a test in `policy.hujson` shows the gateway cannot connect back to your laptop
 
+## Incident 2026-10-25 follow-ups (before Week 2)
+See [postmortem](docs/postmortems/2026-10-25-gitea-rce-cve-2026-60004.md).
+- [ ] Rebuild Gitea on a Terraform VM with an Ansible role (TLS, pinned version), retire `UbuntuNew`
+- [ ] Re-add the GitHub push mirror with a new token
+- [ ] Delete stale Actions runners; remove Cloudflare public hostnames
+
 ## Week 2: State, storage and the platform in git
 - [ ] MinIO on `sectools`, Terraform state moved to an S3 backend with locking
 - [ ] metrics-server, Longhorn (or grow worker disks via Terraform import)

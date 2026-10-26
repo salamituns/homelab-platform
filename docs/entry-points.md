@@ -9,7 +9,7 @@ Review when anything network-facing changes. Last reviewed: 2026-10-25.
 |---|---|---|---|---|
 | Router port forwards (NAT/Gaming) | **None defined** (checked 2026-10-25) | n/a | n/a | n/a |
 | Router IP Passthrough | **Off** (checked 2026-10-25) | n/a | n/a | n/a |
-| Cloudflare tunnel | Gitea on UbuntuNew (hostnames: _to fill in_) | _To check: anyone, or behind Cloudflare Access?_ | Cloudflare edge; Gitea login | Cloudflare Zero Trust, Tunnels: disable the public hostname, or stop `cloudflared` |
+| Cloudflare tunnel (on UbuntuNew) | **Off since 2026-10-25** ([postmortem](postmortems/2026-10-25-gitea-rce-cve-2026-60004.md)). Was: 2 Gitea hostnames, 2 Jenkins hostnames (one to a dead 10.2.0.x origin), **no Cloudflare Access** | Was: anyone | Was: nothing in front | `cloudflared` stopped and disabled; also remove the public hostnames in Cloudflare Zero Trust |
 | Router IPv6 (no NAT: every host has a global 2600:1700:... address) | **Blocked**: Reflexive ACL is On (stateful: only replies to outbound connections get in). Checked 2026-10-25 | n/a | Router Firewall Advanced, Reflexive ACL | Keep it On. Packet Filter rules are examples, all disabled |
 
 ## From the tailnet (your logged-in devices)
@@ -24,6 +24,7 @@ Review when anything network-facing changes. Last reviewed: 2026-10-25.
 | Range | Use |
 |---|---|
 | `.83-.96` | Lab VMs (static), see `ansible/inventory/group_vars/all/dns.yml` |
+| `.121` | The Mac (router fixed allocation; allowed to Gitea by ufw) |
 | `.100-.180` | Router DHCP pool (phones, laptops, IoT) |
 | `.181` | Proxmox `tuns` (static) |
 | `.240-.243` | MetalLB LoadBalancer IPs |
@@ -33,6 +34,7 @@ Review when anything network-facing changes. Last reviewed: 2026-10-25.
 
 | Exposure | Why it matters | Planned fix |
 |---|---|---|
+| Gitea `http://gitea.home.arpa:3000` (no TLS) | Tokens cross the LAN in clear text | ufw: only k8s nodes, gateway, Mac; TLS with the Gitea rebuild / week 6 |
 | Flat LAN: lab shares 192.168.1.0/24 with IoT, phones, TV | A compromised home device can reach Proxmox UI and SSH on every VM | VLAN for the lab (needs router/switch support); Proxmox firewall (week 6) |
 | Argo CD (.241), Grafana (.242), Rollouts dashboard (.243) on their own LAN IPs | Admin UIs reachable by any home device, without TLS | Behind ingress with TLS, week 6 |
 | VM 100 "LocalAI" (.91), unmanaged local-LLM test VM (also hosted the retired Clawdbot) | Not in inventory, not baselined, missed the 2026-10-24 key revocation | **Shut down 2026-10-25**, `onboot 0`. Delete after 2026-11-01 if nothing missed it |
@@ -40,7 +42,8 @@ Review when anything network-facing changes. Last reviewed: 2026-10-25.
 
 ## Open items
 
-- [ ] Cloudflare tunnel: list public hostnames and whether each is behind Access
+- [x] Cloudflare tunnel: listed; it exposed Gitea (exploited) and Jenkins with no gate; now off
+- [ ] Cloudflare Zero Trust: delete the 4 public hostnames (and the tunnel, if nothing else will use it)
 - [x] Router: DHCP pool moved to `.100-.180`; IPv6 inbound blocked by Reflexive ACL
 - [x] VM 100: shut down 2026-10-25
 - [ ] VM 100: `qm destroy 100 --purge` after 2026-11-01

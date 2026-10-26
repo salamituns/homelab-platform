@@ -1,0 +1,83 @@
+# Incident 2026-10-25 follow-up: Gitea is no longer published through the Cloudflare tunnel.
+# Serve it on the LAN (and over Tailscale) as http://gitea.home.arpa:3000 instead.
+# Temporary until the Gitea rebuild (Terraform VM + role); TLS arrives with cert-manager in week 6.
+# Usage:
+#   ansible-playbook playbooks/gitea-lan.yml --check --diff
+#   ansible-playbook playbooks/gitea-lan.yml
+- name: Serve Gitea on the LAN only
+  hosts: UbuntuNew
+  become: true
+  vars:
+    gitea_ini: /etc/gitea/app.ini
+    gitea_server_settings:
+      HTTP_ADDR: 0.0.0.0
+      DOMAIN: gitea.home.arpa
+      SSH_DOMAIN: gitea.home.arpa
+      ROOT_URL: http://gitea.home.arpa:3000/
+    gitea_lan_clients:
+      - { name: master, ip: 192.168.1.90 }        # Argo CD pods leave the node from its IP
+      - { name: workernode1, ip: 192.168.1.89 }
+      - { name: workernode2, ip: 192.168.1.84 }
+      - { name: gateway, ip: 192.168.1.96 }       # tailnet clients arrive SNATed from the gateway
+      - { name: mac, ip: 192.168.1.121 }          # fixed allocation on the router (IP Allocation)
+  tasks:
+    - name: Set Gitea [server] settings
+      community.general.ini_file:
+        path: "{{ gitea_ini }}"
+        section: server
+        option: "{{ item.key }}"
+        value: "{{ item.value }}"
+        owner: root
+        group: git
+        mode: "0640"
+      loop: "{{ gitea_server_settings | dict2items }}"
+      notify: Restart gitea
+
+    - name: Keep self-registration closed (CVE-2026-60004 entry point)
+      community.general.ini_file:
+        path: "{{ gitea_ini }}"
+        section: service
+        option: DISABLE_REGISTRATION
+        value: "true"
+        owner: root
+        group: git
+        mode: "0640"
+      notify: Restart gitea
+
+    # ufw (default deny, left by the legacy hardening) only lets in the hosts that need Gitea:
+    # not the whole /24, which also holds IoT devices (docs/entry-points.md).
+    - name: Allow Gitea HTTP from lab clients only
+      community.general.ufw:
+        rule: allow
+        proto: tcp
+        port: "3000"
+        src: "{{ item.ip }}"
+        comment: "gitea from {{ item.name }}"
+      loop: "{{ gitea_lan_clients }}"
+
+    - name: Remove the rule for the Mac's old DHCP address
+      community.general.ufw:
+        rule: allow
+        proto: tcp
+        port: "3000"
+        src: 192.168.1.69
+        delete: true
+
+    - name: Remove the rule for the retired 10.2.0.0/21 subnet
+      community.general.ufw:
+        rule: allow
+        src: 10.2.0.0/21
+        comment: Homelab subnet
+        delete: true
+
+    - name: Keep the Cloudflare tunnel off
+      ansible.builtin.service:
+        name: cloudflared
+        state: stopped
+        enabled: false
+
+  handlers:
+    - name: Restart gitea
+      ansible.builtin.service:
+        name: gitea
+        state: restarted

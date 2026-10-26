@@ -30,5 +30,6 @@ See [ROADMAP.md](ROADMAP.md) for the 8-week plan.
 - [Runbook: break-glass access](docs/runbooks/break-glass.md): back door when the gateway is down, with a drill
 - [Runbook: internal DNS](docs/runbooks/internal-dns.md): `*.home.arpa` names, split DNS over Tailscale
 - [Entry points](docs/entry-points.md): every way into the lab and how to close it
+- Postmortems: [2026-10-24 hypervisor key](docs/postmortems/2026-10-24-hypervisor-key-exposure.md), [2026-10-25 Gitea RCE](docs/postmortems/2026-10-25-gitea-rce-cve-2026-60004.md)
 - [Credential inventory](docs/credentials.md)
 - [ADRs](docs/adr/): architecture decisions
