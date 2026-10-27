@@ -21,3 +21,4 @@ ansible/collections/
 
 # Unpublished assessments: findings that are not fixed yet (repo is mirrored publicly)
 /private/
+__pycache__/
