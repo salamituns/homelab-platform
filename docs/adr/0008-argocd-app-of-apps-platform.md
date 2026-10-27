@@ -56,3 +56,24 @@ live cluster showed no change, except MetalLB's runtime `caBundle` (ignored) and
   create, and kubeadm's own `kube-system` ServiceAccounts (`cluster-config` has `kube-system` as a destination).
 - `kubeadm upgrade` rewrites the CoreDNS ConfigMap. On the 1.31 upgrade, expect selfHeal to put the
   git version back; merge any kubeadm change into `cluster-config/coredns-configmap.yaml` first.
+
+## Proof drill (2026-10-27, 15:41 CDT)
+
+`kubectl delete namespace monitoring`, with `grafana-admin` saved to `private/` first.
+
+| Time | What happened |
+|---|---|
+| +1 s | Argo CD (automated, `CreateNamespace=true`) recreated the namespace |
+| +32 s | Admission hook Job done, operator up, new PVCs bound (local-path) |
+| +63 s | 7 of 8 pods Running: Prometheus, Alertmanager, kube-state-metrics, node-exporters |
+| +10 min | Grafana still in `CreateContainerConfigError`: `secret "grafana-admin" not found` |
+| after restore | Secret applied by hand, Grafana started, app Healthy |
+
+Also back, from BelleShop's app: the golden-signals dashboard ConfigMap. The `dev` ServiceMonitor was
+outside the namespace and untouched. LoadBalancer IP `.242` came back the same (MetalLB keeps the address).
+
+Findings:
+- Everything in git returned in about a minute, with no human involved.
+- Not returned: the Grafana admin Secret (Week 5, External Secrets, removes the manual step) and all
+  Prometheus/Alertmanager history (new empty PVCs). Metrics durability is a Week 7 question
+  (remote write or a backed-up volume), not an Argo CD one.

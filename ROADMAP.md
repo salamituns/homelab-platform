@@ -53,7 +53,7 @@ See [postmortem](docs/postmortems/2026-10-25-gitea-rce-cve-2026-60004.md).
 - [x] ~~MinIO~~ SeaweedFS on `sectools` ([ADR 0007](docs/adr/0007-terraform-state-seaweedfs-s3.md); MinIO CE is archived): Terraform state in S3 with native locking, versioning and 30-day Object Lock (done 2026-10-27: lock test refused the second plan with 412; key cannot delete history)
 - [ ] metrics-server, Longhorn (or grow worker disks via Terraform import)
 - [x] ArgoCD "app of apps": MetalLB, ingress, monitoring, rollouts declared in this repo (ADR 0008, adopted 2026-10-27)
-- **Proof:** delete the `monitoring` namespace and watch ArgoCD restore it
+- **Proof:** delete the `monitoring` namespace and watch ArgoCD restore it (done 2026-10-27: objects back in ~60 s; Grafana waited for its hand-restored Secret; metrics history lost)
 
 ## Week 3: Secure CI pipeline
 - [ ] Jenkinsfile for BelleShop: build, test, SonarQube gate, Trivy fs + image scan, SBOM (Syft)
