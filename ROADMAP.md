@@ -52,7 +52,7 @@ See [postmortem](docs/postmortems/2026-10-25-gitea-rce-cve-2026-60004.md).
 - [x] Backups first (baseline C1, [ADR 0006](docs/adr/0006-backups-proxmox-backup-server.md)): Debian 13 template, PBS VM, daily job for every VM, Gmail alerts, restore drill (done 2026-10-26: first backup 15 VMs / 113 GiB, gitea restore drill PASS in 6 min). [ ] Stage 2 (second medium) deferred
 - [x] ~~MinIO~~ SeaweedFS on `sectools` ([ADR 0007](docs/adr/0007-terraform-state-seaweedfs-s3.md); MinIO CE is archived): Terraform state in S3 with native locking, versioning and 30-day Object Lock (done 2026-10-27: lock test refused the second plan with 412; key cannot delete history)
 - [x] metrics-server with verified kubelet TLS, no `--kubelet-insecure-tls` ([ADR 0009](docs/adr/0009-metrics-server-verified-kubelet-tls.md), done 2026-10-27: CA-signed kubelet certs on all 3 nodes, `kubectl top` works)
-- [ ] Longhorn (or grow worker disks via Terraform import)
+- [x] Worker disks grown via Terraform import ([ADR 0010](docs/adr/0010-adopt-k8s-workers-terraform-import.md), done 2026-10-27: 40 -> 80 GB online, WorkerNode1 70% -> 35%, WorkerNode2 83% -> 41%; plan clean). [ ] Longhorn later, if replicated volumes are still wanted
 - [x] ArgoCD "app of apps": MetalLB, ingress, monitoring, rollouts declared in this repo (ADR 0008, adopted 2026-10-27)
 - **Proof:** delete the `monitoring` namespace and watch ArgoCD restore it (done 2026-10-27: objects back in ~60 s; Grafana waited for its hand-restored Secret; metrics history lost)
 

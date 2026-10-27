@@ -36,3 +36,18 @@ but its replicas need free disk, which these workers do not have.
 - The `before-ansible-hardening` snapshots predate the resize; rolling back to them restores a 40 GB disk
   and Terraform would show drift.
 - The `import` blocks stay: with a lost state, an apply re-adopts the VMs instead of failing on "already exists".
+
+## Rollout (2026-10-27)
+
+| Step | Result |
+|---|---|
+| Import apply | `2 imported, 0 changed`; no VM touched |
+| First change apply | ISO ejected live; boot order queued as pending. Disk resize **refused**: the provider rewrote `scsi0` with all defaults spelled out (`aio=io_uring,cache=none,...`), Proxmox queued that as a pending change, and the provider then wanted to power the VM off to resize. `reboot_after_update = false` stopped it from shutting down both workers at once |
+| Resize | Re-applied with only the size left in the plan (or `qm resize <id> scsi0 80G`, which is online); `terraform plan`: No changes |
+| Guest | `grow-root-disk.yml`, one node at a time: WorkerNode1 79G, 35% used; WorkerNode2 79G, 41% used; no DiskPressure, all pods and Argo apps healthy |
+
+Left pending on both VMs until their next drained reboot (harmless): `boot: order=scsi0` and the
+rewritten `scsi0` option string (same values as the defaults).
+
+Lesson: with this provider, a disk resize in the same update as other disk changes needs a power-off.
+Keep resizes in their own apply.
