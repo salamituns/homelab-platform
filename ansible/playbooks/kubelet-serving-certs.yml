@@ -1,0 +1,32 @@
+# Kubelets get their serving certificate from the cluster CA instead of a self-signed one,
+# so metrics-server (and anything else scraping :10250) can verify them. ADR 0009.
+# After a kubelet restarts it asks for a certificate with a CSR; until that CSR is approved
+# `kubectl logs/exec` to that node fail with "tls: internal error". So: one node, approve, next.
+# Usage:
+#   ansible-playbook playbooks/kubelet-serving-certs.yml --check --diff
+#   ansible-playbook playbooks/kubelet-serving-certs.yml --limit Master
+#   ../scripts/approve-kubelet-serving-csrs.py      # check and approve, then the next node
+- name: Kubelet serving certificates from the cluster CA
+  hosts: k8s
+  serial: 1   # a kubelet that does not come back shows up on one node only
+  become: true
+  tasks:
+    - name: Ask the cluster CA for the kubelet serving certificate
+      ansible.builtin.lineinfile:
+        path: /var/lib/kubelet/config.yaml
+        regexp: '^serverTLSBootstrap:'
+        line: 'serverTLSBootstrap: true'
+        insertafter: '^rotateCertificates:'
+      notify: Restart kubelet
+
+  handlers:
+    - name: Restart kubelet
+      ansible.builtin.systemd:
+        name: kubelet
+        state: restarted
+
+    - name: Wait for the kubelet port
+      ansible.builtin.wait_for:
+        port: 10250
+        timeout: 60
+      listen: Restart kubelet

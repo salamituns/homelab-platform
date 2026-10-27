@@ -27,5 +27,6 @@ spec:
     - { group: admissionregistration.k8s.io, kind: ValidatingWebhookConfiguration }
     - { group: networking.k8s.io, kind: IngressClass }
     - { group: storage.k8s.io, kind: StorageClass }
+    - { group: apiregistration.k8s.io, kind: APIService }   # metrics-server
   orphanedResources:
     warn: true   # show live objects in these namespaces that git does not declare
