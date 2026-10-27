@@ -1,0 +1,19 @@
+- name: Create the journald drop-in directory
+  ansible.builtin.file:
+    path: /etc/systemd/journald.conf.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Cap the systemd journal size
+  ansible.builtin.copy:
+    dest: /etc/systemd/journald.conf.d/50-homelab-size.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by Ansible (homelab-platform, role: baseline).
+      [Journal]
+      SystemMaxUse={{ baseline_journald_max_use }}
+  notify: Restart journald

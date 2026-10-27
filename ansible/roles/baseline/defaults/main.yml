@@ -16,3 +16,6 @@ baseline_ssh_revoke_from_users:
   - root
   - tunsadmin
 baseline_revoked_ssh_keys: "{{ lookup('ansible.builtin.file', 'revoked_keys.pub').splitlines() | reject('match', '^#') | list }}"
+# journald's default cap is 10% of the filesystem, up to 4 GB: the k8s nodes sat at 3.9 GB of 40 GB.
+# 1 GB keeps weeks of logs on a quiet VM and days on a k8s node; Loki (Week 7) keeps the long history.
+baseline_journald_max_use: 1G

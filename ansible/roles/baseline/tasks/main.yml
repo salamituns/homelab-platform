@@ -66,6 +66,9 @@
       };
   when: ansible_facts['distribution'] == 'Debian'
 
+- name: Cap the systemd journal
+  ansible.builtin.import_tasks: journald.yml
+
 - name: Harden SSH
   ansible.builtin.import_tasks: ssh_hardening.yml
 
