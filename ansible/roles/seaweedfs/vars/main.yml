@@ -1,0 +1,2 @@
+# `weed shell` against the local master; commands are piped in on stdin.
+seaweedfs_shell: "/usr/local/bin/weed shell -master=127.0.0.1:{{ seaweedfs_master_port }}"

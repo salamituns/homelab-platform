@@ -1,9 +1,17 @@
 # Internal DNS (ADR 0004): server on gateway first, then clients.
 # Usage:
-#   ansible-playbook playbooks/dns.yml --limit gateway            # server
+#   ansible-playbook playbooks/dns.yml --limit gateway            # server only (after a record change)
 #   ansible-playbook playbooks/dns.yml --limit sectools           # one client, check, then the rest
-- name: Internal DNS server and clients
-  hosts: managed
+#
+# Two plays so the server is always done first: with one play and serial: 1, an unreachable client
+# (e.g. a shut-down VM) sorted before gateway ended the run and the new record never went live.
+- name: Internal DNS server
+  hosts: network
+  roles:
+    - internal_dns
+
+- name: Internal DNS clients
+  hosts: managed:!network
   serial: 1   # one host at a time: a bad resolver change shows up on the first host only
   roles:
     - internal_dns

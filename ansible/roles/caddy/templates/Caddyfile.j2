@@ -1,0 +1,7 @@
+# Managed by Ansible (homelab-platform, role: caddy). Local edits are overwritten.
+{% for site in caddy_sites %}
+{{ site.names | join(', ') }} {
+	tls internal
+	reverse_proxy {{ site.upstream }}
+}
+{% endfor %}

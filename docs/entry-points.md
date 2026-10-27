@@ -1,7 +1,7 @@
 # Entry points into the lab
 
 Every way to reach a lab system from outside the home network, who can use it, and how to close it.
-Review when anything network-facing changes. Last reviewed: 2026-10-26.
+Review when anything network-facing changes. Last reviewed: 2026-10-27.
 
 ## From the internet
 
@@ -41,6 +41,7 @@ Review when anything network-facing changes. Last reviewed: 2026-10-26.
 | VM 100 "LocalAI" (.91), unmanaged local-LLM test VM (also hosted the retired Clawdbot) | Not in inventory, not baselined, missed the 2026-10-24 key revocation | **Shut down 2026-10-25**, `onboot 0`. Delete after 2026-11-01 if nothing missed it |
 | SonarQube (`.86:9000`), Nexus (`.87:8081-8085`), Jenkins (`.88:8080`) | CI services: Sonar admin and Nexus artifacts; Jenkins runs code | **Restricted 2026-10-26** (`playbooks/service-firewall.yml`): Sonar and Nexus publish through Docker, which bypasses ufw, so the allowlist is in the `DOCKER-USER` chain (Mac, `gateway`, Jenkins); Jenkins `8080` in ufw (Mac, `gateway`, `gitea`). Legacy `10.2.0.0/21` and dead `8177`/`8502` rules removed. Verified: refused from `sectools` |
 | PBS (`.98`): API and UI `8007` | Holds every VM backup | **Added 2026-10-26** (`playbooks/pbs.yml`): Mac, `gateway`, `tuns` only; root@pam has TOTP; `tuns` uses token `pve@pbs!tuns` with `Datastore.Backup` only. Verified: refused from `sectools` |
+| `sectools` (`.95`): `443` = `https://s3.home.arpa` (Caddy -> SeaweedFS S3) | Terraform state (contains cloud-init passwords) | **Added 2026-10-27** (`playbooks/seaweedfs.yml`, ADR 0007): Mac and `gateway` only; all SeaweedFS ports on 127.0.0.1; S3 key scoped to bucket `tfstate`. Verified: times out from `pbs`; Caddy :80 is listening but closed by ufw |
 | DockerApp (`.92`): Postiz `4007`, Temporal `7233` (gRPC, no auth), Temporal UI `8233`, nginx `8080` | Published by Docker, so ufw did not apply: any home device could drive Temporal workflows | **Restricted 2026-10-26** (`playbooks/service-firewall.yml`, `DOCKER-USER`): Mac and `gateway` only. Verified: refused from `sectools` |
 | Lab static IPs were inside the router DHCP pool (`.64-.253`) | Router could lease `.96` to a phone: gateway and DNS drop off | **Fixed 2026-10-25**: pool is now `.100-.180`, outside `.83-.97`, `.181`, `.240-.243` |
 

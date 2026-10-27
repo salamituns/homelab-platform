@@ -1,0 +1,68 @@
+# Buckets are made on the host with `weed shell` (talks to the master on localhost, no S3 keys needed).
+# The Terraform identity therefore never needs Admin: it cannot create, delete or un-version buckets.
+- name: List existing S3 buckets
+  ansible.builtin.shell:
+    cmd: "set -o pipefail; echo 's3.bucket.list' | {{ seaweedfs_shell }}"
+    executable: /bin/bash
+  register: seaweedfs_bucket_list
+  changed_when: false
+
+- name: Create missing buckets
+  ansible.builtin.shell:
+    cmd: "set -o pipefail; echo 's3.bucket.create -name {{ item.name }}{{ ' -withLock' if item.object_lock | default(false) else '' }}' | {{ seaweedfs_shell }}"
+    executable: /bin/bash
+  loop: "{{ seaweedfs_buckets }}"
+  loop_control:
+    label: "{{ item.name }}"
+  # s3.bucket.list prints "  <name>\tsize:..." per bucket.
+  when: seaweedfs_bucket_list.stdout_lines | select('match', '^\s+' ~ item.name ~ '\t') | list | length == 0
+  register: seaweedfs_bucket_create
+  changed_when: true
+  failed_when: seaweedfs_bucket_create.rc != 0 or 'error' in seaweedfs_bucket_create.stdout | lower
+
+- name: Read bucket versioning status
+  ansible.builtin.shell:
+    cmd: "set -o pipefail; echo 's3.bucket.versioning -name {{ item.name }}' | {{ seaweedfs_shell }}"
+    executable: /bin/bash
+  loop: "{{ seaweedfs_buckets | selectattr('versioning') | list }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: seaweedfs_versioning
+  changed_when: false
+  failed_when: seaweedfs_versioning.rc != 0 or 'Versioning:' not in seaweedfs_versioning.stdout
+
+- name: Enable versioning where it is not enabled yet
+  ansible.builtin.shell:
+    cmd: "set -o pipefail; echo 's3.bucket.versioning -name {{ item.item.name }} -enable' | {{ seaweedfs_shell }}"
+    executable: /bin/bash
+  loop: "{{ seaweedfs_versioning.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when: "'Versioning: Enabled' not in item.stdout"
+  register: seaweedfs_versioning_set
+  changed_when: true
+  failed_when: seaweedfs_versioning_set.rc != 0 or 'versioning set to Enabled' not in seaweedfs_versioning_set.stdout
+
+# Object Lock on an existing bucket (it can be turned on later, never off).
+- name: Read bucket Object Lock status
+  ansible.builtin.shell:
+    cmd: "set -o pipefail; echo 's3.bucket.lock -name {{ item.name }}' | {{ seaweedfs_shell }}"
+    executable: /bin/bash
+  loop: "{{ seaweedfs_buckets | selectattr('object_lock', 'defined') | selectattr('object_lock') | list }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: seaweedfs_lock
+  changed_when: false
+  failed_when: seaweedfs_lock.rc != 0 or 'Object Lock:' not in seaweedfs_lock.stdout
+
+- name: Enable Object Lock where it is not enabled yet (irreversible)
+  ansible.builtin.shell:
+    cmd: "set -o pipefail; echo 's3.bucket.lock -name {{ item.item.name }} -enable' | {{ seaweedfs_shell }}"
+    executable: /bin/bash
+  loop: "{{ seaweedfs_lock.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when: "'Object Lock: Enabled' not in item.stdout"
+  register: seaweedfs_lock_set
+  changed_when: true
+  failed_when: seaweedfs_lock_set.rc != 0 or 'Object Lock enabled successfully' not in seaweedfs_lock_set.stdout

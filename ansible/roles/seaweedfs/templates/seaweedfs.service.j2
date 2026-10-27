@@ -1,0 +1,43 @@
+# Managed by Ansible (homelab-platform, role: seaweedfs). Local edits are overwritten.
+#
+# One process runs master + volume + filer + S3 gateway (single node, no replication).
+# -ip/-ip.bind 127.0.0.1: nothing listens on the LAN; Caddy on 443 is the front door.
+# ProtectSystem=strict + ReadWritePaths: the process can write only its data directory,
+# so a compromised S3 gateway cannot rewrite /etc/seaweedfs/s3.json or its own binary.
+[Unit]
+Description=SeaweedFS (S3 store for Terraform state, ADR 0007)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=seaweedfs
+Group=seaweedfs
+WorkingDirectory={{ seaweedfs_data_dir }}
+ExecStart=/usr/local/bin/weed server \
+  -dir={{ seaweedfs_data_dir }} \
+  -ip=127.0.0.1 -ip.bind=127.0.0.1 \
+  -master.port={{ seaweedfs_master_port }} \
+  -master.volumeSizeLimitMB={{ seaweedfs_volume_size_limit_mb }} \
+  -volume.max={{ seaweedfs_volume_max }} \
+  -filer \
+  -s3 -s3.port={{ seaweedfs_s3_port }} -s3.config=/etc/seaweedfs/s3.json
+Restart=on-failure
+RestartSec=5s
+LimitNOFILE=65536
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths={{ seaweedfs_data_dir }}
+ProtectHome=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

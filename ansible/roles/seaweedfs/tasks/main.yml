@@ -1,0 +1,131 @@
+# Fail before touching the host if the controller has no usable keys or no action list.
+- name: Check S3 identities have keys on the controller and a non-empty action list
+  ansible.builtin.assert:
+    that:
+      - item.actions | length > 0
+      - lookup('ansible.builtin.ini', 'aws_access_key_id', section=item.profile, file=seaweedfs_aws_credentials_file, default='') | length > 0
+      - lookup('ansible.builtin.ini', 'aws_secret_access_key', section=item.profile, file=seaweedfs_aws_credentials_file, default='') | length >= 32
+    fail_msg: >-
+      Identity {{ item.name }}: needs a non-empty `actions` list and keys in [{{ item.profile }}] of
+      {{ seaweedfs_aws_credentials_file }} (secret >= 32 chars). See docs/runbooks/terraform-state.md step 1.
+    quiet: true
+  loop: "{{ seaweedfs_identities }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Ensure seaweedfs system group exists
+  ansible.builtin.group:
+    name: seaweedfs
+    system: true
+    state: present
+
+- name: Ensure seaweedfs system user exists (no login shell)
+  ansible.builtin.user:
+    name: seaweedfs
+    group: seaweedfs
+    system: true
+    shell: /usr/sbin/nologin
+    home: "{{ seaweedfs_data_dir }}"
+    create_home: false
+    state: present
+
+- name: Create SeaweedFS data directory
+  ansible.builtin.file:
+    path: "{{ seaweedfs_data_dir }}"
+    state: directory
+    owner: seaweedfs
+    group: seaweedfs
+    mode: "0750"
+
+# Root-owned and only group-readable: the service reads its config but cannot change it.
+- name: Create SeaweedFS configuration directory
+  ansible.builtin.file:
+    path: /etc/seaweedfs
+    state: directory
+    owner: root
+    group: seaweedfs
+    mode: "0750"
+
+- name: Create versioned install directory
+  ansible.builtin.file:
+    path: "/opt/seaweedfs/{{ seaweedfs_version }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Download pinned SeaweedFS release verified by SHA-256
+  ansible.builtin.get_url:
+    url: "{{ seaweedfs_download_url }}"
+    dest: "/opt/seaweedfs/seaweedfs-{{ seaweedfs_version }}-linux_amd64.tar.gz"
+    checksum: "sha256:{{ seaweedfs_sha256 }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Unpack the weed binary
+  ansible.builtin.unarchive:
+    src: "/opt/seaweedfs/seaweedfs-{{ seaweedfs_version }}-linux_amd64.tar.gz"
+    dest: "/opt/seaweedfs/{{ seaweedfs_version }}"
+    remote_src: true
+    include: [weed]
+    owner: root
+    group: root
+    creates: "/opt/seaweedfs/{{ seaweedfs_version }}/weed"
+
+# Upgrade = new version dir + this link moves; the old dir stays for a quick rollback.
+- name: Point /usr/local/bin/weed at the pinned version
+  ansible.builtin.file:
+    src: "/opt/seaweedfs/{{ seaweedfs_version }}/weed"
+    dest: /usr/local/bin/weed
+    state: link
+    force: true   # also lets --check pass before the binary exists
+  notify: Restart seaweedfs
+
+- name: Deploy S3 identities (secrets; not logged, no diff)
+  ansible.builtin.template:
+    src: s3.json.j2
+    dest: /etc/seaweedfs/s3.json
+    owner: root
+    group: seaweedfs
+    mode: "0640"
+  no_log: true
+  diff: false
+  notify: Restart seaweedfs
+
+- name: Deploy hardened seaweedfs.service systemd unit
+  ansible.builtin.template:
+    src: seaweedfs.service.j2
+    dest: /etc/systemd/system/seaweedfs.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart seaweedfs
+
+- name: Enable and start seaweedfs service
+  ansible.builtin.systemd_service:
+    name: seaweedfs
+    state: started
+    enabled: true
+    daemon_reload: true
+  ignore_errors: "{{ ansible_check_mode }}"
+
+- name: Flush handlers so SeaweedFS runs with the new config before bucket setup
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait for the S3 gateway on localhost
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ seaweedfs_s3_port }}"
+    timeout: 60
+  when: not ansible_check_mode
+
+- name: Import bucket bootstrap (create buckets, enable versioning)
+  ansible.builtin.import_tasks: buckets.yml
+  when: not ansible_check_mode
+
+- name: Import default retention setup (only with -e seaweedfs_set_retention=true)
+  ansible.builtin.import_tasks: retention.yml
+  when:
+    - not ansible_check_mode
+    - seaweedfs_set_retention | default(false) | bool

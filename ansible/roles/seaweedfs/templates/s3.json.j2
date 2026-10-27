@@ -1,0 +1,15 @@
+{#- Managed by Ansible (homelab-platform, role: seaweedfs). Holds S3 secrets: 0640 root:seaweedfs, never in git. -#}
+{%- set identities = [] -%}
+{%- for i in seaweedfs_identities -%}
+{%-   set _ = identities.append({
+        'name': i.name,
+        'credentials': [{
+          'accessKey': lookup('ansible.builtin.ini', 'aws_access_key_id', section=i.profile, file=seaweedfs_aws_credentials_file),
+          'secretKey': lookup('ansible.builtin.ini', 'aws_secret_access_key', section=i.profile, file=seaweedfs_aws_credentials_file),
+        }],
+        'actions': i.actions,
+      }) -%}
+{%- endfor -%}
+{#- Short-lived identities with keys generated in memory (tasks/retention.yml); empty normally. -#}
+{%- set identities = identities + seaweedfs_ephemeral_identities | default([]) -%}
+{{ {'identities': identities} | to_nice_json(indent=2) }}

@@ -1,0 +1,6 @@
+# Sites served over HTTPS with Caddy's own local CA (`tls internal`).
+# Each site: {names: [first is canonical, rest are aliases], upstream: "127.0.0.1:<port>"}.
+caddy_sites: []
+
+# Controller path where Caddy's local root CA is fetched, so clients can trust it.
+caddy_ca_fetch_dest: "{{ playbook_dir }}/../files/ca/{{ inventory_hostname }}-caddy-root.crt"

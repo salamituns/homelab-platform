@@ -16,7 +16,7 @@ internal_dns_records:
   - { names: [workernode1], ip: 192.168.1.89 }
   - { names: [master, k8s-api], ip: 192.168.1.90 }
   - { names: [dockerapp], ip: 192.168.1.92 }
-  - { names: [sectools], ip: 192.168.1.95 }
+  - { names: [sectools, s3], ip: 192.168.1.95 }        # s3: Terraform state store (ADR 0007)
   - { names: [gateway], ip: 192.168.1.96 }
   - { names: [pbs], ip: 192.168.1.98 }                 # Proxmox Backup Server
 

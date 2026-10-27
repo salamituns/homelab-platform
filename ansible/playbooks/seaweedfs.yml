@@ -1,0 +1,13 @@
+# S3 store for Terraform state on sectools (ADR 0007): SeaweedFS on localhost, Caddy TLS on 443.
+# Usage:
+#   ansible-playbook playbooks/seaweedfs.yml --limit sectools --check --diff
+#   ansible-playbook playbooks/seaweedfs.yml --limit sectools
+- name: Configure the Terraform state store
+  hosts: devsecops
+  become: true
+  roles:
+    - baseline
+    - internal_dns
+    - firewall
+    - seaweedfs
+    - caddy

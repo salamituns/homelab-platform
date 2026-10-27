@@ -1,0 +1,8 @@
+# Caddy (443/tcp) fronts the SeaweedFS S3 gateway: https://s3.home.arpa (ADR 0007).
+# Only admin clients run Terraform; nothing else may reach the state store.
+firewall_service_rules:
+  - port: 443
+    clients: "{{ lab_admin_clients }}"
+
+caddy_sites:
+  - { names: [s3.home.arpa], upstream: "127.0.0.1:8333" }

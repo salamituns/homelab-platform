@@ -1,0 +1,114 @@
+# Default retention can only be set over the S3 API (PutObjectLockConfiguration), which no standing
+# identity may call. So for a few seconds this run adds a lock-admin identity whose key exists only in
+# Ansible's memory and in s3.json, uses it from the controller, then removes it again (always block).
+# Run: ansible-playbook playbooks/seaweedfs.yml --limit sectools -e seaweedfs_set_retention=true
+- name: Set default Object Lock retention with a short-lived admin key
+  block:
+    - name: Generate a short-lived lock-admin key in memory
+      ansible.builtin.set_fact:
+        seaweedfs_ephemeral_identities:
+          - name: lock-admin-ephemeral
+            credentials:
+              - accessKey: "lockadmin{{ lookup('ansible.builtin.password', '/dev/null', chars=['ascii_lowercase', 'digits'], length=12) }}"
+                secretKey: "{{ lookup('ansible.builtin.password', '/dev/null', chars=['ascii_letters', 'digits'], length=48) }}"
+            actions: "{{ seaweedfs_buckets | selectattr('object_lock', 'defined') | selectattr('object_lock')
+              | map(attribute='name') | map('regex_replace', '^(.*)$', 'PutBucketObjectLockConfiguration:\\1') | list
+              + seaweedfs_buckets | selectattr('object_lock', 'defined') | selectattr('object_lock')
+              | map(attribute='name') | map('regex_replace', '^(.*)$', 'GetBucketObjectLockConfiguration:\\1') | list }}"
+      no_log: true
+
+    - name: Deploy S3 identities with the lock-admin key added
+      ansible.builtin.template:
+        src: s3.json.j2
+        dest: /etc/seaweedfs/s3.json
+        owner: root
+        group: seaweedfs
+        mode: "0640"
+      no_log: true
+      diff: false
+
+    - name: Restart seaweedfs to load the lock-admin identity
+      ansible.builtin.systemd_service:
+        name: seaweedfs
+        state: restarted
+
+    - name: Wait for the S3 gateway
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: "{{ seaweedfs_s3_port }}"
+        timeout: 60
+
+    # From the controller, through Caddy: the same path Terraform uses.
+    - name: Put default retention on locked buckets
+      ansible.builtin.command:
+        argv:
+          - aws
+          - --endpoint-url
+          - "{{ seaweedfs_public_endpoint }}"
+          - --ca-bundle
+          - "{{ seaweedfs_ca_bundle }}"
+          - --region
+          - us-east-1
+          - s3api
+          - put-object-lock-configuration
+          - --bucket
+          - "{{ item.name }}"
+          - --object-lock-configuration
+          - >-
+            {{ {'ObjectLockEnabled': 'Enabled', 'Rule': {'DefaultRetention':
+            {'Mode': item.retention_mode, 'Days': item.retention_days | int}}} | to_json }}
+      environment:
+        AWS_ACCESS_KEY_ID: "{{ seaweedfs_ephemeral_identities[0].credentials[0].accessKey }}"
+        AWS_SECRET_ACCESS_KEY: "{{ seaweedfs_ephemeral_identities[0].credentials[0].secretKey }}"
+      delegate_to: localhost
+      become: false
+      loop: "{{ seaweedfs_buckets | selectattr('object_lock', 'defined') | selectattr('object_lock') | list }}"
+      loop_control:
+        label: "{{ item.name }} {{ item.retention_mode }} {{ item.retention_days }}d"
+      changed_when: true
+      no_log: true
+
+    - name: Read the default retention back
+      ansible.builtin.command:
+        argv: [aws, --endpoint-url, "{{ seaweedfs_public_endpoint }}", --ca-bundle, "{{ seaweedfs_ca_bundle }}", --region, us-east-1,
+               s3api, get-object-lock-configuration, --bucket, "{{ item.name }}", --output, json]
+      environment:
+        AWS_ACCESS_KEY_ID: "{{ seaweedfs_ephemeral_identities[0].credentials[0].accessKey }}"
+        AWS_SECRET_ACCESS_KEY: "{{ seaweedfs_ephemeral_identities[0].credentials[0].secretKey }}"
+      delegate_to: localhost
+      become: false
+      loop: "{{ seaweedfs_buckets | selectattr('object_lock', 'defined') | selectattr('object_lock') | list }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: seaweedfs_retention
+      changed_when: false
+      failed_when: >-
+        (seaweedfs_retention.stdout | from_json).ObjectLockConfiguration.Rule.DefaultRetention
+        != {'Mode': item.retention_mode, 'Days': item.retention_days | int}
+
+    - name: Show the retention that is now set
+      ansible.builtin.debug:
+        msg: "{{ item.item.name }}: {{ (item.stdout | from_json).ObjectLockConfiguration.Rule.DefaultRetention }}"
+      loop: "{{ seaweedfs_retention.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+
+  always:
+    - name: Forget the lock-admin key
+      ansible.builtin.set_fact:
+        seaweedfs_ephemeral_identities: []
+
+    - name: Deploy S3 identities without the lock-admin key
+      ansible.builtin.template:
+        src: s3.json.j2
+        dest: /etc/seaweedfs/s3.json
+        owner: root
+        group: seaweedfs
+        mode: "0640"
+      no_log: true
+      diff: false
+
+    - name: Restart seaweedfs so the lock-admin identity is gone
+      ansible.builtin.systemd_service:
+        name: seaweedfs
+        state: restarted
