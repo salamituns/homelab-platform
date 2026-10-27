@@ -27,7 +27,6 @@ but its replicas need free disk, which these workers do not have.
 - NIC `firewall = false` stays (the vm module uses `true`). The Proxmox firewall is off cluster-wide
   (`enable: 0`), so `true` filters nothing, and changing it re-plugs the NIC: a link drop on a k8s node.
   It is turned on, with rules, for every VM in Week 6.
-- MasterNode (108) is not imported; same steps when it needs it.
 - The journal (~4 GB per worker) should be capped by the baseline role (`SystemMaxUse`).
 
 ## Consequences
@@ -43,11 +42,15 @@ but its replicas need free disk, which these workers do not have.
 |---|---|
 | Import apply | `2 imported, 0 changed`; no VM touched |
 | First change apply | ISO ejected live; boot order queued as pending. Disk resize **refused**: the provider rewrote `scsi0` with all defaults spelled out (`aio=io_uring,cache=none,...`), Proxmox queued that as a pending change, and the provider then wanted to power the VM off to resize. `reboot_after_update = false` stopped it from shutting down both workers at once |
-| Resize | Re-applied with only the size left in the plan (or `qm resize <id> scsi0 80G`, which is online); `terraform plan`: No changes |
+| Resize | Second `terraform apply`, with only the size left in the plan: resized online, no power-off; `terraform plan`: No changes |
 | Guest | `grow-root-disk.yml`, one node at a time: WorkerNode1 79G, 35% used; WorkerNode2 79G, 41% used; no DiskPressure, all pods and Argo apps healthy |
 
 Left pending on both VMs until their next drained reboot (harmless): `boot: order=scsi0` and the
 rewritten `scsi0` option string (same values as the defaults).
+
+MasterNode (108) imported the same day: resource renamed `k8s_worker` -> `k8s_node` (`moved` blocks, workers
+unchanged), plan `1 to import, 1 to change` (ISO ejected, boot order pending), disk left at 40 GB.
+Journal capped at 1 GB by the baseline role on every managed VM (k8s nodes: 3.9 GB -> ~950 MB).
 
 Lesson: with this provider, a disk resize in the same update as other disk changes needs a power-off.
 Keep resizes in their own apply.
