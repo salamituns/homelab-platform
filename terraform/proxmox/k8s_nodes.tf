@@ -1,22 +1,34 @@
-# The two k8s workers were built by hand from the Ubuntu ISO (2025) and adopted by import (ADR 0010),
+# The k8s VMs were built by hand from the Ubuntu ISO (2025) and adopted by import (ADR 0010),
 # so their sizing lives in git. Not the vm module: its clone block on an existing VM would plan a replace.
 # Imported exactly as they were (0 to change), then hardened in the open: ISO ejected, disk-only boot.
 locals {
-  k8s_workers = {
-    WorkerNode1 = { vm_id = 107, mac = "BC:24:11:85:62:B1", disk_gb = 80 }
-    WorkerNode2 = { vm_id = 102, mac = "BC:24:11:E5:C7:C3", disk_gb = 80 }
+  # startup: the control plane boots first, the workers join it after
+  k8s_nodes = {
+    MasterNode  = { vm_id = 108, mac = "BC:24:11:67:AC:73", disk_gb = 40, boot_order = 2, up_delay = 30 }
+    WorkerNode1 = { vm_id = 107, mac = "BC:24:11:85:62:B1", disk_gb = 80, boot_order = 3, up_delay = 15 }
+    WorkerNode2 = { vm_id = 102, mac = "BC:24:11:E5:C7:C3", disk_gb = 80, boot_order = 3, up_delay = 15 }
   }
+}
+
+# Renamed from k8s_worker when the master joined: without these, the rename plans destroy + create.
+moved {
+  from = proxmox_virtual_environment_vm.k8s_worker["WorkerNode1"]
+  to   = proxmox_virtual_environment_vm.k8s_node["WorkerNode1"]
+}
+moved {
+  from = proxmox_virtual_environment_vm.k8s_worker["WorkerNode2"]
+  to   = proxmox_virtual_environment_vm.k8s_node["WorkerNode2"]
 }
 
 # Kept after the import: with a lost state, `terraform apply` re-adopts the VMs instead of failing.
 import {
-  for_each = local.k8s_workers
-  to       = proxmox_virtual_environment_vm.k8s_worker[each.key]
+  for_each = local.k8s_nodes
+  to       = proxmox_virtual_environment_vm.k8s_node[each.key]
   id       = "tuns/${each.value.vm_id}"
 }
 
-resource "proxmox_virtual_environment_vm" "k8s_worker" {
-  for_each = local.k8s_workers
+resource "proxmox_virtual_environment_vm" "k8s_node" {
+  for_each = local.k8s_nodes
 
   name          = each.key
   node_name     = "tuns"
@@ -71,12 +83,12 @@ resource "proxmox_virtual_environment_vm" "k8s_worker" {
   }
 
   startup {
-    order    = 3
-    up_delay = 15
+    order    = each.value.boot_order
+    up_delay = each.value.up_delay
   }
 
   lifecycle {
-    # A worker holds local-path PVs: a plan that destroys or replaces one must fail, not run.
+    # The master holds etcd, a worker holds local-path PVs: a plan that destroys or replaces one must fail.
     prevent_destroy = true
   }
 }
