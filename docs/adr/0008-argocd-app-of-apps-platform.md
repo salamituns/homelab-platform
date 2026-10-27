@@ -28,7 +28,7 @@ A survey on 2026-10-27 found more:
 | Project | AppProject `platform`: this repo + the prometheus chart repo, 7 namespaces, 8 cluster-scoped kinds | A bad commit in one add-on cannot create arbitrary cluster objects |
 | Ownership | Platform objects leave BelleShop; app-specific monitoring (ServiceMonitor, dashboard) joins BelleShop | Each object has exactly one owner, and it is the right one |
 | Root app sync | Automated, selfHeal, **prune off** | Removing an add-on must be deliberate |
-| Child sync | Manual for the first adoption sync, then automated with selfHeal + prune | Look at the first diff before trusting automation |
+| Child sync | Manual for the first adoption sync, then automated with selfHeal + prune. `cluster-config`: selfHeal, **no prune** | Look at the first diff before trusting automation. Deleting the CoreDNS or Argo CD CA file by mistake must not break DNS or cut Argo CD off from git |
 | Not managed (yet) | Argo CD itself; flannel; kube-proxy | Argo CD self-management needs a bootstrap story; the CNI is kubeadm's |
 
 Verified before writing: `kubectl diff` of every vendored manifest and the rendered chart against the
@@ -41,3 +41,18 @@ live cluster showed no change, except MetalLB's runtime `caBundle` (ignored) and
 - Secrets and data are not in git: deleting `monitoring` brings back every object, but not
   `grafana-admin` (Week 5: External Secrets) and not the Prometheus/Alertmanager PVC data.
 - Week 4 (Kyverno) should stop any Application outside `k8s/platform/apps` from using project `platform`.
+
+## Implementation notes (2026-10-27)
+
+- First diffs (`argocd app diff <app> --core --server-side-generate`): metadata only on every app, the
+  tracking annotation, plus `Prune=false` -> `sync-wave` on the MetalLB pool/L2. No spec change.
+- Handover order: BelleShop removed the four platform files first (commit `888191e`); `Prune=false`
+  made it skip them ("requires pruning"). Only then were the platform apps synced. Syncing first would
+  have made BelleShop's selfHeal take the objects back, and the two apps would fight.
+- Synced one at a time: local-path, ingress-nginx, cluster-config, argo-rollouts, monitoring, metallb.
+  No pod restarted; all four LoadBalancer IPs (.240-.243) unchanged.
+- BelleShop now tracks its own ServiceMonitor (`dev`) and Grafana dashboard (`monitoring`).
+- Orphan warnings that are expected: `grafana-admin`, the admission webhook Secrets the hook Jobs
+  create, and kubeadm's own `kube-system` ServiceAccounts (`cluster-config` has `kube-system` as a destination).
+- `kubeadm upgrade` rewrites the CoreDNS ConfigMap. On the 1.31 upgrade, expect selfHeal to put the
+  git version back; merge any kubeadm change into `cluster-config/coredns-configmap.yaml` first.

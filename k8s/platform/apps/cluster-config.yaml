@@ -12,3 +12,7 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: kube-system
+  syncPolicy:
+    automated:   # no prune: CoreDNS config and the Argo CD CA must never vanish with a file
+      prune: false
+      selfHeal: true

@@ -19,10 +19,21 @@ Why: [ADR 0008](../adr/0008-argocd-app-of-apps-platform.md). Layout: `k8s/platfo
 2. Root app: `kubectl apply -f k8s/platform/bootstrap/root.yaml`. It creates the `platform` AppProject
    and the child Applications. Children start without automated sync.
 
-3. For each child: check it shows **Synced** (no diff) or only expected differences, then sync it once
-   (UI "Sync", or `kubectl -n argocd patch application <name> --type merge -p '{"operation":{"sync":{}}}'`).
+3. For each child: look at the diff, then sync it once. The CLI's `--core` mode uses your kubeconfig,
+   no Argo CD login (`brew install argocd`; needs the current kubectl namespace to be `argocd`):
 
-4. Turn on automated sync (`syncPolicy.automated: {prune: true, selfHeal: true}`) for the children in git.
+   ```bash
+   kubectl config set-context --current --namespace=argocd
+   argocd app diff <app> --core --server-side-generate   # adoption: only tracking-id lines
+   argocd app sync <app> --core --timeout 300
+   kubectl config set-context --current --namespace=default
+   ```
+
+   An object another app still declares shows "is part of applications ..." Remove it from the old
+   app's git first (with `Prune=false` on the live object), then sync the new owner.
+
+4. In git the children have `automated` sync (selfHeal + prune; `cluster-config` without prune).
+   On a fresh cluster they sync on their own once the root exists.
 
 ## Day to day
 

@@ -52,7 +52,7 @@ See [postmortem](docs/postmortems/2026-10-25-gitea-rce-cve-2026-60004.md).
 - [x] Backups first (baseline C1, [ADR 0006](docs/adr/0006-backups-proxmox-backup-server.md)): Debian 13 template, PBS VM, daily job for every VM, Gmail alerts, restore drill (done 2026-10-26: first backup 15 VMs / 113 GiB, gitea restore drill PASS in 6 min). [ ] Stage 2 (second medium) deferred
 - [x] ~~MinIO~~ SeaweedFS on `sectools` ([ADR 0007](docs/adr/0007-terraform-state-seaweedfs-s3.md); MinIO CE is archived): Terraform state in S3 with native locking, versioning and 30-day Object Lock (done 2026-10-27: lock test refused the second plan with 412; key cannot delete history)
 - [ ] metrics-server, Longhorn (or grow worker disks via Terraform import)
-- [ ] ArgoCD "app of apps": MetalLB, ingress, monitoring, rollouts declared in this repo
+- [x] ArgoCD "app of apps": MetalLB, ingress, monitoring, rollouts declared in this repo (ADR 0008, adopted 2026-10-27)
 - **Proof:** delete the `monitoring` namespace and watch ArgoCD restore it
 
 ## Week 3: Secure CI pipeline

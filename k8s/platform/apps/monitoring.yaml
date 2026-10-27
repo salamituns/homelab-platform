@@ -25,6 +25,9 @@ spec:
     server: https://kubernetes.default.svc
     namespace: monitoring
   syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
     syncOptions:
       - ServerSideApply=true   # Prometheus Operator CRDs are too big for client-side apply
       - CreateNamespace=true
