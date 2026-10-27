@@ -1,0 +1,47 @@
+# After Terraform grows a VM's disk (ADR 0010), grow the partition and filesystem inside the guest.
+# Online, no reboot. Layout this expects: root is ext4 on /dev/sda2, no LVM (the hand-built k8s VMs).
+# Usage (from ansible/):
+#   ansible-playbook playbooks/grow-root-disk.yml --limit WorkerNode1 --check
+#   ansible-playbook playbooks/grow-root-disk.yml --limit WorkerNode1
+- name: Grow the root partition and filesystem to fill the disk
+  hosts: k8s
+  serial: 1
+  become: true
+  vars:
+    root_disk: sda
+    root_part: 2
+  tasks:
+    - name: Check the root filesystem is ext4 on the expected partition
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['mounts'] | selectattr('mount', 'equalto', '/') | map(attribute='device') | first == '/dev/' ~ root_disk ~ root_part
+          - ansible_facts['mounts'] | selectattr('mount', 'equalto', '/') | map(attribute='fstype') | first == 'ext4'
+        fail_msg: "Root is not ext4 on /dev/{{ root_disk }}{{ root_part }}: grow it by hand"
+
+    - name: Make the kernel re-read the disk size (Proxmox resized it underneath)
+      ansible.builtin.shell: echo 1 > /sys/class/block/{{ root_disk }}/device/rescan
+      changed_when: false
+      when: not ansible_check_mode
+
+    - name: Grow the partition into the new space
+      ansible.builtin.command: growpart /dev/{{ root_disk }} {{ root_part }}
+      register: growpart
+      # rc 1 + NOCHANGE = already full size, which is fine on a re-run
+      failed_when: growpart.rc != 0 and 'NOCHANGE' not in growpart.stdout
+      changed_when: growpart.rc == 0
+      when: not ansible_check_mode
+
+    - name: Grow the ext4 filesystem to the partition (online)
+      ansible.builtin.command: resize2fs /dev/{{ root_disk }}{{ root_part }}
+      register: resize2fs
+      changed_when: "'Nothing to do' not in resize2fs.stderr"
+      when: not ansible_check_mode
+
+    - name: Show the result
+      ansible.builtin.command: df -h /
+      register: df_root
+      changed_when: false
+
+    - name: Root filesystem now
+      ansible.builtin.debug:
+        msg: "{{ df_root.stdout_lines }}"
