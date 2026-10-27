@@ -1,0 +1,7 @@
+# MetalLB v0.14.8, native (L2) mode. Upstream file pinned by SHA-256 in ../VENDOR.md.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - vendor/metallb-native-v0.14.8.yaml
+  - ipaddresspool.yaml
+  - l2advertisement.yaml

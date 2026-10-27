@@ -1,0 +1,31 @@
+# The platform's Argo CD project: which repos may be deployed, to which namespaces, and which
+# cluster-wide kinds they may create. Least privilege: the 8 cluster-scoped kinds the add-ons use.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: platform
+  namespace: argocd
+spec:
+  description: Cluster add-ons managed from homelab-platform (ADR 0008)
+  sourceRepos:
+    - https://gitea.home.arpa/tunsgit/homelab-platform.git
+    - https://prometheus-community.github.io/helm-charts
+  destinations:
+    - { server: https://kubernetes.default.svc, namespace: argocd }
+    - { server: https://kubernetes.default.svc, namespace: kube-system }
+    - { server: https://kubernetes.default.svc, namespace: metallb-system }
+    - { server: https://kubernetes.default.svc, namespace: ingress-nginx }
+    - { server: https://kubernetes.default.svc, namespace: argo-rollouts }
+    - { server: https://kubernetes.default.svc, namespace: local-path-storage }
+    - { server: https://kubernetes.default.svc, namespace: monitoring }
+  clusterResourceWhitelist:
+    - { group: "", kind: Namespace }
+    - { group: apiextensions.k8s.io, kind: CustomResourceDefinition }
+    - { group: rbac.authorization.k8s.io, kind: ClusterRole }
+    - { group: rbac.authorization.k8s.io, kind: ClusterRoleBinding }
+    - { group: admissionregistration.k8s.io, kind: MutatingWebhookConfiguration }
+    - { group: admissionregistration.k8s.io, kind: ValidatingWebhookConfiguration }
+    - { group: networking.k8s.io, kind: IngressClass }
+    - { group: storage.k8s.io, kind: StorageClass }
+  orphanedResources:
+    warn: true   # show live objects in these namespaces that git does not declare

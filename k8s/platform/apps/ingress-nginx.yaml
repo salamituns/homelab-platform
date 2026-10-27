@@ -1,0 +1,14 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ingress-nginx
+  namespace: argocd
+spec:
+  project: platform
+  source:
+    repoURL: https://gitea.home.arpa/tunsgit/homelab-platform.git
+    targetRevision: main
+    path: k8s/platform/ingress-nginx
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ingress-nginx

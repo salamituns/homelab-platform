@@ -1,8 +1,8 @@
 # CoreDNS config, kubeadm default plus a stub domain for the lab zone (ADR 0004).
 # Without the home.arpa block, CoreDNS forwards to the node's resolv.conf, which also lists the
 # router; the router answers NXDOMAIN for *.home.arpa, so pod lookups fail at random.
-# Apply: kubectl apply -f k8s/kube-system/coredns-configmap.yaml  (CoreDNS reloads within ~30s)
-# Week 2: managed by Argo CD from this path.
+# Managed by Argo CD (app cluster-config): change it in git; CoreDNS reloads within ~30s.
+# selfHeal also undoes a kubeadm upgrade that resets the Corefile.
 apiVersion: v1
 kind: ConfigMap
 metadata:

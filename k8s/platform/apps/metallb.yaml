@@ -1,0 +1,27 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: metallb
+  namespace: argocd
+spec:
+  project: platform
+  source:
+    repoURL: https://gitea.home.arpa/tunsgit/homelab-platform.git
+    targetRevision: main
+    path: k8s/platform/metallb
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: metallb-system
+  # MetalLB rewrites the CRD conversion caBundle at runtime (it rotates its own webhook cert):
+  # ignore it in the diff, and do not overwrite it on sync.
+  ignoreDifferences:
+    - group: apiextensions.k8s.io
+      kind: CustomResourceDefinition
+      jqPathExpressions:
+        - .spec.conversion.webhook.clientConfig.caBundle
+  syncPolicy:
+    syncOptions:
+      - RespectIgnoreDifferences=true
+    retry:   # the address pool waits for the controller's webhook on a fresh cluster
+      limit: 5
+      backoff: { duration: 10s, factor: 2, maxDuration: 3m }

@@ -1,0 +1,14 @@
+# LoadBalancer IPs handed out by MetalLB. .240 = ingress-nginx (apps.home.arpa wildcard, ADR 0004).
+# Outside the router's DHCP pool (.100-.180).
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: homelab-pool
+  namespace: metallb-system
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"   # after the CRDs and the controller's webhook
+spec:
+  addresses:
+    - 192.168.1.240-192.168.1.250
+  autoAssign: true
+  avoidBuggyIPs: false

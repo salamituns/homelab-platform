@@ -1,0 +1,14 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cluster-config
+  namespace: argocd
+spec:
+  project: platform
+  source:
+    repoURL: https://gitea.home.arpa/tunsgit/homelab-platform.git
+    targetRevision: main
+    path: k8s/platform/cluster-config
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-system

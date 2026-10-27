@@ -1,0 +1,30 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: monitoring
+  namespace: argocd
+spec:
+  project: platform
+  # Chart from the Helm repo, values from this git repo. releaseName keeps every object name the same
+  # as the old `helm install prometheus-stack`, so Argo CD adopts the live objects instead of duplicating them.
+  sources:
+    - repoURL: https://prometheus-community.github.io/helm-charts
+      chart: kube-prometheus-stack
+      targetRevision: 88.3.0
+      helm:
+        releaseName: prometheus-stack
+        valueFiles:
+          - $values/k8s/platform/monitoring/values.yaml
+    - repoURL: https://gitea.home.arpa/tunsgit/homelab-platform.git
+      targetRevision: main
+      ref: values
+    - repoURL: https://gitea.home.arpa/tunsgit/homelab-platform.git
+      targetRevision: main
+      path: k8s/platform/monitoring/manifests   # extras next to the chart (Grafana ingress)
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    syncOptions:
+      - ServerSideApply=true   # Prometheus Operator CRDs are too big for client-side apply
+      - CreateNamespace=true

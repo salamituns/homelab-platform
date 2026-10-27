@@ -1,0 +1,5 @@
+# Rancher local-path-provisioner v0.0.28: the default StorageClass `local-path` (node-local disks, no replication).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - vendor/local-path-storage-v0.0.28.yaml

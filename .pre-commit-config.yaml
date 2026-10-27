@@ -24,6 +24,10 @@ repos:
     rev: v6.0.0
     hooks:
       - id: check-yaml
+        args: [--allow-multiple-documents]   # Kubernetes manifests hold many documents
+      # Vendored upstream manifests stay byte-for-byte (SHA-256 in k8s/platform/VENDOR.md).
       - id: end-of-file-fixer
+        exclude: ^k8s/platform/.*/vendor/
       - id: trailing-whitespace
+        exclude: ^k8s/platform/.*/vendor/
       - id: detect-private-key

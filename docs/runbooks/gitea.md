@@ -54,10 +54,12 @@ git config --global http."https://gitea.home.arpa/".sslCAInfo \
 
 ### Argo CD (`argocd-tls-certs-cm` ConfigMap)
 
-Declared in `k8s/argocd/argocd-tls-certs-cm.yaml` (keyed by `gitea.home.arpa`):
+Declared in `k8s/platform/cluster-config/argocd-tls-certs-cm.yaml` (keyed by `gitea.home.arpa`).
+Since 2026-10-27 the Argo CD app `cluster-config` applies it: change the file, commit and push (ADR 0008).
+Break-glass, if Argo CD cannot reach Gitea because this very CA is wrong:
 
 ```sh
-kubectl apply -f k8s/argocd/argocd-tls-certs-cm.yaml
+kubectl apply -f k8s/platform/cluster-config/argocd-tls-certs-cm.yaml
 ```
 
 ## 4. Rotate the Argo CD repository token

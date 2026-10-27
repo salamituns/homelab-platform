@@ -1,0 +1,21 @@
+# The one object applied by hand (once): it makes Argo CD manage everything in k8s/platform/apps,
+# including the platform AppProject. After this, change the platform through git only.
+#   kubectl apply -f k8s/platform/bootstrap/root.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform-root
+  namespace: argocd
+spec:
+  project: default   # must exist before the platform project does; it only creates Applications + the AppProject
+  source:
+    repoURL: https://gitea.home.arpa/tunsgit/homelab-platform.git
+    targetRevision: main
+    path: k8s/platform/apps
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: false     # deleting a child Application must be a deliberate act, not a side effect of a bad commit
+      selfHeal: true

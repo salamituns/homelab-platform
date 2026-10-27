@@ -1,6 +1,6 @@
 # Argo CD trusts the rebuilt Gitea's Caddy internal root CA (ADR 0005), keyed by server name.
 # Public certificate; replaced by the lab CA in week 6. Source: ansible/files/ca/gitea-caddy-root.crt
-# Apply: kubectl apply -f k8s/argocd/argocd-tls-certs-cm.yaml
+# Managed by Argo CD (app cluster-config, k8s/platform/apps/cluster-config.yaml): change it in git.
 apiVersion: v1
 kind: ConfigMap
 metadata:

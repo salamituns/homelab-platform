@@ -1,0 +1,58 @@
+# kube-prometheus-stack values (chart 88.3.0, release prometheus-stack). Taken from the live Helm release 2026-10-27.
+# Grafana's admin login is the Secret monitoring/grafana-admin, created OUTSIDE git (ADR 0008).
+alertmanager:
+  alertmanagerSpec:
+    retention: 120h
+    storage:
+      volumeClaimTemplate:
+        spec:
+          accessModes:
+          - ReadWriteOnce
+          resources:
+            requests:
+              storage: 2Gi
+          storageClassName: local-path
+  enabled: true
+defaultRules:
+  create: true
+global:
+  rbac:
+    create: true
+grafana:
+  admin:
+    existingSecret: grafana-admin
+    passwordKey: admin-password
+    userKey: admin-user
+  enabled: true
+  service:
+    annotations: {}
+    type: LoadBalancer
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      labelValue: "1"
+      searchNamespace: ALL
+    datasources:
+      defaultDatasourceEnabled: true
+      enabled: true
+kubeStateMetrics:
+  enabled: true
+nodeExporter:
+  enabled: true
+prometheus:
+  enabled: true
+  prometheusSpec:
+    podMonitorSelectorNilUsesHelmValues: false
+    retention: 7d
+    ruleSelectorNilUsesHelmValues: false
+    serviceMonitorSelectorNilUsesHelmValues: false
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes:
+          - ReadWriteOnce
+          resources:
+            requests:
+              storage: 5Gi
+          storageClassName: local-path
