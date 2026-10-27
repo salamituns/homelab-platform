@@ -1,13 +1,14 @@
 # The two k8s workers were built by hand from the Ubuntu ISO (2025) and adopted by import (ADR 0010),
 # so their sizing lives in git. Not the vm module: its clone block on an existing VM would plan a replace.
-# This resource describes the VMs as they are (no cloud-init, NIC firewall off, ISO still in ide2).
+# Imported exactly as they were (0 to change), then hardened in the open: ISO ejected, disk-only boot.
 locals {
   k8s_workers = {
-    WorkerNode1 = { vm_id = 107, mac = "BC:24:11:85:62:B1", disk_gb = 40 }
-    WorkerNode2 = { vm_id = 102, mac = "BC:24:11:E5:C7:C3", disk_gb = 40 }
+    WorkerNode1 = { vm_id = 107, mac = "BC:24:11:85:62:B1", disk_gb = 80 }
+    WorkerNode2 = { vm_id = 102, mac = "BC:24:11:E5:C7:C3", disk_gb = 80 }
   }
 }
 
+# Kept after the import: with a lost state, `terraform apply` re-adopts the VMs instead of failing.
 import {
   for_each = local.k8s_workers
   to       = proxmox_virtual_environment_vm.k8s_worker[each.key]
@@ -22,8 +23,10 @@ resource "proxmox_virtual_environment_vm" "k8s_worker" {
   vm_id         = each.value.vm_id
   pool_id       = "terraform"
   on_boot       = true
-  boot_order    = ["scsi0", "ide2", "net0"]
+  boot_order    = ["scsi0"] # disk only: no fallback to the installer ISO or to PXE on the LAN
   scsi_hardware = "virtio-scsi-single"
+  # Never reboot a k8s node from an apply: changes that need one wait for a drained, planned reboot
+  reboot_after_update = false
 
   agent {
     enabled = true
@@ -49,6 +52,14 @@ resource "proxmox_virtual_environment_vm" "k8s_worker" {
     file_format  = "raw"
   }
 
+  # Installer ISO ejected; the empty drive stays so the VM's hardware does not change
+  cdrom {
+    interface = "ide2"
+    file_id   = "none"
+  }
+
+  # firewall = false like before the import. The Proxmox firewall is off cluster-wide, so true would filter
+  # nothing and re-plugging the NIC drops a k8s node's link. Turned on with rules for all VMs in Week 6.
   network_device {
     bridge      = "vmbr0"
     mac_address = each.value.mac # the MAC is the node's identity on the LAN (static IP, MetalLB L2)
