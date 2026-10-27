@@ -31,3 +31,16 @@ CPU numbers, which HPAs then act on.
 - An unavailable metrics API breaks API discovery: kubectl warnings, and namespace deletion hangs.
   So the kubelet certificates come first, metrics-server second.
 - A new node joined with kubeadm inherits `serverTLSBootstrap` from the ConfigMap; approve its CSR.
+
+## Rollout (2026-10-27)
+
+| Step | Result |
+|---|---|
+| kubeadm `kubelet-config` ConfigMap | `serverTLSBootstrap: true` added (new nodes inherit it) |
+| Playbook, one node at a time (Master, WorkerNode1, WorkerNode2) | kubelet restarted; a CSR appeared within seconds |
+| Approval script | 3 CSRs, each asking only for its own hostname and InternalIP, approved |
+| Check per node | `openssl s_client -CAfile <cluster CA> -verify_ip <node IP>`: `Verify return code: 0 (ok)`; issuer `CN=kubernetes`, expires 2027-10-27 |
+| metrics-server app | Synced/Healthy; APIService `v1beta1.metrics.k8s.io` Available; no x509 errors in the logs |
+
+Gotcha: run the playbook from `ansible/`. From the repo root Ansible does not find `ansible.cfg`, so it has
+no inventory, matches no hosts, and exits 0 without doing anything.
