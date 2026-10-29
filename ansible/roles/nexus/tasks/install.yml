@@ -1,0 +1,50 @@
+- name: Create the nexus system user
+  ansible.builtin.user:
+    name: nexus
+    system: true
+    shell: /usr/sbin/nologin
+    home: "{{ nexus_data_mount }}"
+    create_home: false
+
+- name: Create the data directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: nexus
+    group: nexus
+    mode: "0750"
+  loop:
+    - "{{ nexus_data_mount }}"
+    - "{{ nexus_data_dir }}"
+    - "{{ nexus_data_dir }}/etc"
+    - "{{ nexus_data_dir }}/log"
+    - "{{ nexus_data_dir }}/tmp"
+
+- name: Download the pinned Nexus archive (SHA-256 verified)
+  ansible.builtin.get_url:
+    url: "{{ nexus_download_url }}"
+    dest: "/var/cache/nexus-{{ nexus_version }}.tar.gz"
+    checksum: "sha256:{{ nexus_sha256 }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+# The archive also holds an empty sonatype-work/; only the program directory is unpacked.
+# Owned by root: the nexus process can read its program but never rewrite it.
+- name: Unpack Nexus into /opt/nexus-<version>
+  ansible.builtin.unarchive:
+    src: "/var/cache/nexus-{{ nexus_version }}.tar.gz"
+    dest: "{{ nexus_install_root }}"
+    remote_src: true
+    owner: root
+    group: root
+    include: ["nexus-{{ nexus_version }}/*"]
+    creates: "{{ nexus_install_root }}/nexus-{{ nexus_version }}/bin/nexus"
+  notify: Restart nexus
+
+- name: Point /opt/nexus at the pinned version
+  ansible.builtin.file:
+    src: "{{ nexus_install_root }}/nexus-{{ nexus_version }}"
+    dest: "{{ nexus_home }}"
+    state: link
+  notify: Restart nexus

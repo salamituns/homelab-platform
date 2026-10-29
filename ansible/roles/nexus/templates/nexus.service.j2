@@ -1,0 +1,32 @@
+# Managed by Ansible (homelab-platform, role: nexus). Local edits are overwritten.
+[Unit]
+Description=Nexus Repository {{ nexus_version }}
+After=network-online.target
+Wants=network-online.target
+RequiresMountsFor={{ nexus_data_mount }}
+
+[Service]
+Type=simple
+User=nexus
+Group=nexus
+# `run` keeps Nexus in the foreground, so systemd sees the real process and restarts it.
+ExecStart={{ nexus_home }}/bin/nexus run
+Restart=on-failure
+TimeoutStartSec=600
+LimitNOFILE=65536
+
+# Sandboxing: the program is read-only, only the data disk is writable.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths={{ nexus_data_mount }}
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

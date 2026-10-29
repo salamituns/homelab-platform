@@ -1,0 +1,37 @@
+# Same pattern as roles/pbs: format only an empty disk, mount by UUID (device names can change between boots).
+- name: Check the data disk exists
+  ansible.builtin.stat:
+    path: "{{ nexus_data_device }}"
+  register: nexus_disk_stat
+
+- name: Assert the data disk is a block device
+  ansible.builtin.assert:
+    that:
+      - nexus_disk_stat.stat.exists
+      - nexus_disk_stat.stat.isblk
+    fail_msg: "{{ nexus_data_device }} is missing: Terraform gives nexus a second disk (data_disks)."
+  when: not ansible_check_mode
+
+# force: false never reformats a disk that already has a filesystem.
+- name: Create ext4 on the empty data disk
+  community.general.filesystem:
+    fstype: ext4
+    dev: "{{ nexus_data_device }}"
+    force: false
+  when: not ansible_check_mode
+
+- name: Read the data disk UUID
+  ansible.builtin.command:
+    argv: [/usr/sbin/blkid, -s, UUID, -o, value, "{{ nexus_data_device }}"]
+  register: nexus_disk_uuid
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Mount the data disk by UUID
+  ansible.posix.mount:
+    path: "{{ nexus_data_mount }}"
+    src: "UUID={{ nexus_disk_uuid.stdout | trim }}"
+    fstype: ext4
+    opts: defaults,noatime
+    state: mounted
+  when: not ansible_check_mode

@@ -1,0 +1,12 @@
+# Nexus Repository CE: data disk, pinned install, localhost-only service, then a bootstrap through the REST API.
+- name: Prepare the data disk
+  ansible.builtin.import_tasks: disk.yml
+
+- name: Install Nexus
+  ansible.builtin.import_tasks: install.yml
+
+- name: Configure and start Nexus
+  ansible.builtin.import_tasks: service.yml
+
+- name: Bootstrap security and repositories
+  ansible.builtin.import_tasks: bootstrap.yml

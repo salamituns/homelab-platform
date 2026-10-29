@@ -1,0 +1,6 @@
+# Managed by Ansible (homelab-platform, role: nexus). Local edits are overwritten.
+# Overrides of etc/nexus-default.properties. Only Caddy on this host connects (ADR 0011).
+application-host=127.0.0.1
+application-port={{ nexus_http_port }}
+# Groovy scripts through the API run as admin on the JVM: keep them off.
+nexus.scripts.allowCreation=false

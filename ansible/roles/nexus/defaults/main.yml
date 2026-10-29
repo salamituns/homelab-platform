@@ -1,0 +1,32 @@
+# Pinned Nexus Repository Community Edition (ADR 0011). Bump both values together: the checksum is published
+# next to the archive (<download url>.sha256). Checked 2026-10-29. The archive bundles its own JDK (Temurin 21).
+nexus_version: "3.97.2-02"
+nexus_sha256: "cda1837b8fde687989af423dabf00be471695679e736e3c527e35b6fcd88c2f5"
+nexus_download_url: "https://download.sonatype.com/nexus/3/nexus-{{ nexus_version }}-linux-x86_64.tar.gz"
+
+nexus_install_root: /opt
+nexus_home: "{{ nexus_install_root }}/nexus"   # symlink to nexus-<version>: an upgrade is a new dir + relink
+# Data (database, blobs, logs) lives on its own disk, so PBS backs it up and a reinstall of /opt keeps it.
+nexus_data_device: /dev/sdb
+nexus_data_mount: /var/lib/nexus
+nexus_data_dir: "{{ nexus_data_mount }}/nexus3"
+
+# 6 GB VM: Sonatype's minimum is 2.7 GB heap + matching direct memory; leaves ~1 GB for the OS and Caddy.
+nexus_heap: 2703m
+nexus_direct_memory: 2703m
+
+# Only Caddy on the same host talks to these ports (127.0.0.1). The LAN sees 443 only.
+nexus_http_port: 8081
+nexus_admin_password_file: /root/nexus-admin-password
+nexus_secrets_dir: /etc/nexus/secrets
+
+# Docker hosted repositories. Each one gets its own localhost connector, published by Caddy as registry.home.arpa.
+# write_policy allow_once = a tag can never be overwritten: belleshop-backend:v42 always means the same image.
+nexus_docker_repos:
+  - { name: belleshop, http_port: 8082, write_policy: allow_once }
+
+# Least privilege: CI may push to its repo only; the cluster may only pull. Passwords are generated on the host
+# into {{ nexus_secrets_dir }}/<user> and handed to Jenkins / Kubernetes by the owner.
+nexus_service_users:
+  - { name: ci-push, repo: belleshop, actions: [read, browse, add, edit] }
+  - { name: k8s-pull, repo: belleshop, actions: [read, browse] }

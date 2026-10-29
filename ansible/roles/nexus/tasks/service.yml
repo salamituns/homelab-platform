@@ -1,0 +1,58 @@
+# nexus.vmoptions ships with the release and gains options between versions, so only the lines that matter
+# here are changed: heap size and the data paths (relative ../sonatype-work by default).
+- name: Set JVM memory and data paths in nexus.vmoptions
+  ansible.builtin.lineinfile:
+    path: "{{ nexus_home }}/bin/nexus.vmoptions"
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+  loop:
+    - { regexp: '^-Xms', line: "-Xms{{ nexus_heap }}" }
+    - { regexp: '^-Xmx', line: "-Xmx{{ nexus_heap }}" }
+    - { regexp: '^-XX:MaxDirectMemorySize=', line: "-XX:MaxDirectMemorySize={{ nexus_direct_memory }}" }
+    - { regexp: '^-XX:LogFile=', line: "-XX:LogFile={{ nexus_data_dir }}/log/jvm.log" }
+    - { regexp: '^-Dkaraf.data=', line: "-Dkaraf.data={{ nexus_data_dir }}" }
+    - { regexp: '^-Dkaraf.log=', line: "-Dkaraf.log={{ nexus_data_dir }}/log" }
+    - { regexp: '^-Djava.io.tmpdir=', line: "-Djava.io.tmpdir={{ nexus_data_dir }}/tmp" }
+  when: not ansible_check_mode
+  notify: Restart nexus
+
+# Overrides go in the data dir; etc/nexus-default.properties says "DO NOT EDIT". Binds 127.0.0.1 (default 0.0.0.0).
+- name: Deploy nexus.properties
+  ansible.builtin.template:
+    src: nexus.properties.j2
+    dest: "{{ nexus_data_dir }}/etc/nexus.properties"
+    owner: root
+    group: nexus
+    mode: "0640"
+  notify: Restart nexus
+
+- name: Deploy the systemd unit
+  ansible.builtin.template:
+    src: nexus.service.j2
+    dest: /etc/systemd/system/nexus.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart nexus
+
+- name: Enable and start nexus
+  ansible.builtin.systemd_service:
+    name: nexus
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: not ansible_check_mode
+
+- name: Apply pending restarts before talking to the API
+  ansible.builtin.meta: flush_handlers
+
+# First start creates the database and takes a few minutes on a small VM.
+- name: Wait until Nexus accepts writes
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ nexus_http_port }}/service/rest/v1/status/writable"
+    status_code: 200
+  register: nexus_writable
+  until: nexus_writable.status == 200
+  retries: 60
+  delay: 10
+  when: not ansible_check_mode

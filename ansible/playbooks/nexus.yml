@@ -1,0 +1,13 @@
+# Nexus Repository CE and the Docker registry on `nexus` (ADR 0011).
+# Usage:
+#   ansible-playbook playbooks/nexus.yml --limit nexus --check --diff
+#   ansible-playbook playbooks/nexus.yml --limit nexus
+- name: Configure the artifact repository and registry
+  hosts: nexus
+  become: true
+  roles:
+    - baseline
+    - internal_dns
+    - firewall
+    - nexus
+    - caddy

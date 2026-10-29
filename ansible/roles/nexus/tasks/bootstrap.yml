@@ -1,0 +1,210 @@
+# Everything an admin would click in the setup wizard, done through the REST API so a rebuild ends up identical.
+# All calls go to 127.0.0.1 on the Nexus host; credentials never leave it.
+
+# --- admin password -----------------------------------------------------------------------------------------
+# On first start Nexus writes a random admin password to admin.password. Replace it with our own, keep it in
+# /root (0600), and delete the file. Later runs find no admin.password and read our file instead.
+- name: Look for the first-start admin password
+  ansible.builtin.stat:
+    path: "{{ nexus_data_dir }}/admin.password"
+  register: nexus_initial_pw_file
+
+- name: Change the first-start admin password
+  when:
+    - not ansible_check_mode
+    - nexus_initial_pw_file.stat.exists
+  no_log: true
+  block:
+    - name: Read the first-start admin password
+      ansible.builtin.slurp:
+        src: "{{ nexus_data_dir }}/admin.password"
+      register: nexus_initial_pw
+
+    - name: Generate the new admin password
+      ansible.builtin.set_fact:
+        nexus_new_admin_pw: "{{ lookup('ansible.builtin.password', '/dev/null', length=32, chars=['ascii_letters', 'digits']) }}"
+
+    - name: Set the new admin password
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ nexus_http_port }}/service/rest/v1/security/users/admin/change-password"
+        method: PUT
+        user: admin
+        password: "{{ nexus_initial_pw.content | b64decode | trim }}"
+        force_basic_auth: true
+        headers: { Content-Type: text/plain }
+        body: "{{ nexus_new_admin_pw }}"
+        status_code: 204
+
+    - name: Save the admin password for the owner and for later runs
+      ansible.builtin.copy:
+        content: "{{ nexus_new_admin_pw }}\n"
+        dest: "{{ nexus_admin_password_file }}"
+        owner: root
+        group: root
+        mode: "0600"
+
+    - name: Remove the first-start password file
+      ansible.builtin.file:
+        path: "{{ nexus_data_dir }}/admin.password"
+        state: absent
+
+- name: Read the admin password
+  ansible.builtin.slurp:
+    src: "{{ nexus_admin_password_file }}"
+  register: nexus_admin_pw_raw
+  no_log: true
+  when: not ansible_check_mode
+
+- name: Keep the admin password in a fact for the API calls
+  ansible.builtin.set_fact:
+    nexus_admin_pw: "{{ nexus_admin_pw_raw.content | b64decode | trim }}"
+  no_log: true
+  when: not ansible_check_mode
+
+# --- security settings ----------------------------------------------------------------------------------------
+- name: Turn anonymous access off and enable the Docker bearer-token realm
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ nexus_http_port }}/service/rest/v1/security/{{ item.path }}"
+    method: PUT
+    user: admin
+    password: "{{ nexus_admin_pw }}"
+    force_basic_auth: true
+    body_format: json
+    body: "{{ item.body }}"
+    status_code: [200, 204]
+  loop:
+    - path: anonymous
+      body: { enabled: false, userId: anonymous, realmName: NexusAuthorizingRealm }
+    # DockerToken: `docker login` gets a token instead of sending the password with every layer request.
+    - path: realms/active
+      body: [NexusAuthenticatingRealm, DockerToken]
+  loop_control:
+    label: "{{ item.path }}"
+  changed_when: false   # PUT of the desired state; the API does not say whether anything changed
+  when: not ansible_check_mode
+
+# --- Docker repositories --------------------------------------------------------------------------------------
+- name: Look up the Docker hosted repositories
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ nexus_http_port }}/service/rest/v1/repositories/docker/hosted/{{ item.name }}"
+    user: admin
+    password: "{{ nexus_admin_pw }}"
+    force_basic_auth: true
+    status_code: [200, 404]
+  loop: "{{ nexus_docker_repos }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: nexus_repo_lookup
+  when: not ansible_check_mode
+
+- name: Create or update the Docker hosted repositories
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ nexus_http_port }}/service/rest/v1/repositories/docker/hosted{{ '' if item.status == 404 else '/' ~ item.item.name }}"
+    method: "{{ 'POST' if item.status == 404 else 'PUT' }}"
+    user: admin
+    password: "{{ nexus_admin_pw }}"
+    force_basic_auth: true
+    body_format: json
+    body:
+      name: "{{ item.item.name }}"
+      online: true
+      storage:
+        blobStoreName: default
+        strictContentTypeValidation: true
+        writePolicy: "{{ item.item.write_policy }}"
+      docker:
+        v1Enabled: false
+        forceBasicAuth: true      # no anonymous pulls, even if anonymous access is switched back on
+        httpPort: "{{ item.item.http_port }}"
+    status_code: [201, 204]
+  loop: "{{ nexus_repo_lookup.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  changed_when: item.status == 404
+  when: not ansible_check_mode
+
+# --- service users --------------------------------------------------------------------------------------------
+- name: Create one role per service user
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ nexus_http_port }}/service/rest/v1/security/roles{{ '' if item.0 == 'POST' else '/' ~ item.1.name }}"
+    method: "{{ item.0 }}"
+    user: admin
+    password: "{{ nexus_admin_pw }}"
+    force_basic_auth: true
+    body_format: json
+    body:
+      id: "{{ item.1.name }}"
+      name: "{{ item.1.name }}"
+      description: "{{ item.1.actions | join(', ') }} on docker repo {{ item.1.repo }} (ADR 0011)"
+      privileges: "{{ item.1.actions | map('regex_replace', '^', 'nx-repository-view-docker-' ~ item.1.repo ~ '-') | list }}"
+    status_code: [200, 204, 400]
+  # POST creates; when it already exists (400) the PUT that follows sets the privileges to exactly this list.
+  loop: "{{ ['POST', 'PUT'] | product(nexus_service_users) | list }}"
+  loop_control:
+    label: "{{ item.0 }} {{ item.1.name }}"
+  register: nexus_role_result
+  changed_when: item.0 == 'POST' and nexus_role_result.status == 200
+  when: not ansible_check_mode
+
+- name: Generate a password per service user (once, on the host)
+  ansible.builtin.shell: |
+    set -o pipefail
+    install -d -m 0700 {{ nexus_secrets_dir }}
+    umask 077
+    openssl rand -base64 33 | tr -d '/+=\n' > {{ nexus_secrets_dir }}/{{ item.name }}
+  args:
+    executable: /bin/bash
+    creates: "{{ nexus_secrets_dir }}/{{ item.name }}"
+  loop: "{{ nexus_service_users }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: nexus_user_pw_created
+  when: not ansible_check_mode
+
+- name: Read the service user passwords
+  ansible.builtin.slurp:
+    src: "{{ nexus_secrets_dir }}/{{ item.name }}"
+  loop: "{{ nexus_service_users }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: nexus_user_pw
+  no_log: true
+  when: not ansible_check_mode
+
+- name: Look up the service users
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ nexus_http_port }}/service/rest/v1/security/users?userId={{ item.name }}"
+    user: admin
+    password: "{{ nexus_admin_pw }}"
+    force_basic_auth: true
+  loop: "{{ nexus_service_users }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: nexus_user_lookup
+  no_log: true
+  when: not ansible_check_mode
+
+- name: Create the service users that do not exist yet
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ nexus_http_port }}/service/rest/v1/security/users"
+    method: POST
+    user: admin
+    password: "{{ nexus_admin_pw }}"
+    force_basic_auth: true
+    body_format: json
+    body:
+      userId: "{{ item.0.name }}"
+      firstName: "{{ item.0.name }}"
+      lastName: service
+      emailAddress: "{{ item.0.name }}@nexus.home.arpa"
+      password: "{{ item.1.content | b64decode | trim }}"
+      status: active
+      roles: ["{{ item.0.name }}"]
+    status_code: 200
+  loop: "{{ nexus_service_users | zip(nexus_user_pw.results) | list }}"
+  loop_control:
+    label: "{{ item.0.name }}"
+  when:
+    - not ansible_check_mode
+    - (nexus_user_lookup.results | selectattr('item.name', 'equalto', item.0.name) | first).json | length == 0
+  no_log: true
