@@ -1,0 +1,23 @@
+# Jenkins controller + inbound Docker agent (ADR 0011).
+# The agent play runs second: it downloads agent.jar from the controller over HTTPS.
+# Usage:
+#   ansible-playbook playbooks/jenkins.yml --check --diff
+#   ansible-playbook playbooks/jenkins.yml
+- name: Configure Jenkins controller
+  hosts: jenkins
+  become: true
+  roles:
+    - baseline
+    - internal_dns
+    - firewall
+    - jenkins
+    - caddy
+
+- name: Configure Jenkins inbound agent
+  hosts: ci-agent
+  become: true
+  roles:
+    - baseline
+    - internal_dns
+    - firewall
+    - ci_agent

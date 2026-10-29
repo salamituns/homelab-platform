@@ -1,0 +1,104 @@
+# /etc/jenkins is root-owned and group-readable by jenkins so a compromised Jenkins
+# process cannot rewrite the password file or plugins.txt.
+- name: Create Jenkins secrets directory
+  ansible.builtin.file:
+    path: /etc/jenkins/secrets
+    state: directory
+    owner: root
+    group: jenkins
+    mode: "0750"
+  ignore_errors: "{{ ansible_check_mode }}"
+
+- name: Create JCasC directory
+  ansible.builtin.file:
+    path: "{{ jenkins_casc_dir }}"
+    state: directory
+    owner: jenkins
+    group: jenkins
+    mode: "0750"
+  ignore_errors: "{{ ansible_check_mode }}"
+
+- name: Create systemd drop-in directory for Jenkins
+  ansible.builtin.file:
+    path: /etc/systemd/system/jenkins.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# Generated on the host once. umask 0077 then chmod 0640 so jenkins can read it for
+# JCasC ${readFile:...} without the value ever sitting in git or in Ansible logs.
+- name: Generate Jenkins admin password on first run
+  ansible.builtin.shell:
+    cmd: |
+      set -euo pipefail
+      umask 0077
+      openssl rand -base64 32 | tr -d '\n' > {{ jenkins_admin_password_file | quote }}
+      chown root:jenkins {{ jenkins_admin_password_file | quote }}
+      chmod 0640 {{ jenkins_admin_password_file | quote }}
+    executable: /bin/bash
+    creates: "{{ jenkins_admin_password_file }}"
+  no_log: true
+  when: not ansible_check_mode
+  notify: Restart jenkins
+
+- name: Ensure Jenkins admin password permissions
+  ansible.builtin.file:
+    path: "{{ jenkins_admin_password_file }}"
+    owner: root
+    group: jenkins
+    mode: "0640"
+  no_log: true
+  when: not ansible_check_mode
+
+- name: Copy initial admin password for the operator
+  ansible.builtin.copy:
+    src: "{{ jenkins_admin_password_file }}"
+    dest: "{{ jenkins_initial_admin_password_dest }}"
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  diff: false
+  when: not ansible_check_mode
+
+- name: Deploy JCasC jenkins.yaml
+  ansible.builtin.template:
+    src: jenkins.yaml.j2
+    dest: "{{ jenkins_casc_dir }}/jenkins.yaml"
+    owner: root
+    group: jenkins
+    mode: "0640"
+  ignore_errors: "{{ ansible_check_mode }}"
+  notify: Restart jenkins
+
+- name: Deploy Jenkins systemd drop-in (loopback + JCasC)
+  ansible.builtin.template:
+    src: override.conf.j2
+    dest: /etc/systemd/system/jenkins.service.d/override.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart jenkins
+
+- name: Enable and start Jenkins
+  ansible.builtin.systemd_service:
+    name: jenkins
+    state: started
+    enabled: true
+    daemon_reload: true
+  ignore_errors: "{{ ansible_check_mode }}"
+
+- name: Flush handlers so Jenkins is running before the health wait
+  ansible.builtin.meta: flush_handlers
+
+- name: Wait for Jenkins HTTP on loopback
+  ansible.builtin.uri:
+    url: "http://{{ jenkins_listen_address }}:{{ jenkins_http_port }}/login"
+    status_code: 200
+  register: jenkins_login
+  until: jenkins_login.status == 200
+  retries: 60
+  delay: 5
+  when: not ansible_check_mode

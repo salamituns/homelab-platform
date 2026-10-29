@@ -1,0 +1,6 @@
+- name: Restart jenkins
+  ansible.builtin.systemd_service:
+    name: jenkins
+    state: restarted
+    daemon_reload: true
+  ignore_errors: "{{ ansible_check_mode }}"

@@ -1,0 +1,44 @@
+- name: Install Java 21 and fontconfig before the Jenkins package
+  ansible.builtin.apt:
+    name: "{{ jenkins_java_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+# ASCII-armored key (jenkins.io-2026.key). Saving as .asc matches roles/caddy so apt
+# can verify the repo without a gpg --dearmor pipe.
+- name: Download Jenkins debian-stable apt signing key
+  ansible.builtin.get_url:
+    url: "{{ jenkins_apt_key_url }}"
+    dest: "{{ jenkins_apt_key_dest }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Add Jenkins debian-stable apt repository
+  ansible.builtin.apt_repository:
+    repo: "{{ jenkins_apt_repo }}"
+    filename: jenkins
+    state: present
+
+- name: Install the pinned Jenkins LTS package
+  ansible.builtin.apt:
+    name: "jenkins={{ jenkins_version }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+# Hold so a later apt upgrade cannot move the controller off the JCasC/plugin pin set.
+- name: Hold the Jenkins package at the pinned version
+  ansible.builtin.dpkg_selections:
+    name: jenkins
+    selection: hold
+  ignore_errors: "{{ ansible_check_mode }}"
+
+# The package starts Jenkins immediately. Stop it until plugins and JCasC are in place,
+# otherwise the setup wizard can race the first boot.
+- name: Stop Jenkins until plugins and JCasC are installed
+  ansible.builtin.systemd_service:
+    name: jenkins
+    state: stopped
+  ignore_errors: "{{ ansible_check_mode }}"

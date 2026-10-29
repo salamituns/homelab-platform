@@ -1,0 +1,19 @@
+- name: Restart docker
+  ansible.builtin.systemd_service:
+    name: docker
+    state: restarted
+    daemon_reload: true
+  ignore_errors: "{{ ansible_check_mode }}"
+
+- name: Restart jenkins-agent
+  ansible.builtin.systemd_service:
+    name: jenkins-agent
+    state: restarted
+    daemon_reload: true
+  ignore_errors: "{{ ansible_check_mode }}"
+
+- name: Update CA certificates
+  ansible.builtin.command:
+    argv:
+      - /usr/sbin/update-ca-certificates
+  changed_when: true

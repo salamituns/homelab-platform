@@ -1,0 +1,8 @@
+# Caddy (443/tcp) fronts Jenkins on loopback. Admin clients use the UI; the agent
+# connects inbound over WebSocket; Gitea will POST webhooks later (jobs not in this role).
+firewall_service_rules:
+  - port: 443
+    clients: "{{ lab_admin_clients + [{'name': 'ci-agent', 'ip': '192.168.1.93'}, {'name': 'gitea', 'ip': '192.168.1.97'}] }}"
+
+caddy_sites:
+  - { names: [jenkins.home.arpa], upstream: "127.0.0.1:8080" }

@@ -1,0 +1,25 @@
+- name: Check whether the Nexus Caddy root CA is already on the controller
+  ansible.builtin.stat:
+    path: "{{ ci_agent_nexus_ca_src }}"
+  delegate_to: localhost
+  become: false
+  register: ci_agent_nexus_ca
+
+- name: Create Docker registry trust directory
+  ansible.builtin.file:
+    path: "/etc/docker/certs.d/{{ ci_agent_registry_hostname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: ci_agent_nexus_ca.stat.exists
+
+- name: Install the Nexus Caddy root CA for registry.home.arpa
+  ansible.builtin.copy:
+    src: "{{ ci_agent_nexus_ca_src }}"
+    dest: "{{ ci_agent_registry_ca_dest }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart docker
+  when: ci_agent_nexus_ca.stat.exists

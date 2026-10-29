@@ -1,0 +1,201 @@
+# Jenkins LTS 2.580.2 (debian-stable, 2026-10-27). Changelog:
+# https://www.jenkins.io/changelog-stable/ — tested JDKs 21 and 25.
+# Apt package version is exactly this string; held after install so unattended-upgrades
+# cannot float the controller.
+jenkins_version: "2.580.2"
+jenkins_apt_key_url: https://pkg.jenkins.io/debian-stable/jenkins.io-2026.key
+jenkins_apt_key_dest: /usr/share/keyrings/jenkins-keyring.asc
+jenkins_apt_repo: "deb [signed-by={{ jenkins_apt_key_dest }}] https://pkg.jenkins.io/debian-stable binary/"
+
+# OpenJDK 21 is the LTS Jenkins documents for this line (fontconfig for the bundled fonts).
+jenkins_java_packages:
+  - openjdk-21-jre-headless
+  - fontconfig
+
+jenkins_listen_address: 127.0.0.1
+jenkins_http_port: 8080
+jenkins_url: https://jenkins.home.arpa/
+jenkins_home: /var/lib/jenkins
+jenkins_war_path: /usr/share/java/jenkins.war
+jenkins_casc_dir: /var/lib/jenkins/casc
+jenkins_admin_user: admin
+jenkins_admin_password_file: /etc/jenkins/secrets/admin-password
+jenkins_initial_admin_password_dest: /root/jenkins-initial-admin-password
+
+# Permanent inbound node. Builds run here, never on the controller (numExecutors: 0).
+jenkins_agent_name: ci-agent
+jenkins_agent_label: docker
+jenkins_agent_remote_fs: /var/lib/jenkins-agent
+jenkins_agent_executors: 2
+
+# plugin-installation-manager-tool 2.15.0 (GitHub release 2026-05-08).
+# SHA-256 from jenkins-plugin-manager-2.15.0.jar.sha256 on that release (checked 2026-10-29).
+jenkins_plugin_manager_version: "2.15.0"
+jenkins_plugin_manager_sha256: "a86853ec2e2933f37a4b471ba65099b61e03c87a80c2ef8fe2315eb135672d43"
+jenkins_plugin_manager_rel: https://github.com/jenkinsci/plugin-installation-manager-tool/releases/download
+jenkins_plugin_manager_jar: "jenkins-plugin-manager-{{ jenkins_plugin_manager_version }}.jar"
+jenkins_plugin_manager_url: "{{ jenkins_plugin_manager_rel }}/{{ jenkins_plugin_manager_version }}/{{ jenkins_plugin_manager_jar }}"
+jenkins_plugin_manager_dest: "/opt/jenkins-plugin-manager/{{ jenkins_plugin_manager_jar }}"
+
+# Top-level plugins from the brief, plus every non-optional dependency resolved from
+# https://updates.jenkins.io/stable/update-center.actual.json (core 2.580.2) on 2026-10-29.
+# Do not add jobs, credentials, or Gitea Branch Source here; those land in JCasC later.
+
+# id/ver maps (not name:ver) so gitleaks does not treat incrementals as API keys.
+jenkins_plugins:
+  - id: antisamy-markup-formatter
+    ver: "173.v680e3a_b_69ff3"  # gitleaks:allow
+  - id: apache-httpcomponents-client-4-api
+    ver: "4.5.14-269.vfa_2321039a_83"  # gitleaks:allow
+  - id: asm-api
+    ver: "9.11.1-226.vff833a_e4c58e"  # gitleaks:allow
+  - id: authentication-tokens
+    ver: "1.144.v5ff4a_5ec5c33"  # gitleaks:allow
+  - id: bootstrap5-api
+    ver: "5.3.8-1048.va_c299057e35c"  # gitleaks:allow
+  - id: bouncycastle-api
+    ver: "2.30.1.86.2-310.v4655f6742752"  # gitleaks:allow
+  - id: branch-api
+    ver: "2.1303.v9f3b_95dc329d"  # gitleaks:allow
+  - id: caffeine-api
+    ver: "3.3.1-214.v18eb_56b_34920"  # gitleaks:allow
+  - id: checks-api
+    ver: "434.va_a_3dd79d7723"  # gitleaks:allow
+  - id: cloudbees-folder
+    ver: "6.1107.v31f8955765c8"  # gitleaks:allow
+  - id: commons-lang3-api
+    ver: "3.21.0-122.v6a_ea_4fd34049"  # gitleaks:allow
+  - id: commons-text-api
+    ver: "1.15.0-218.va_61573470393"  # gitleaks:allow
+  - id: configuration-as-code
+    ver: "2143.vc78d4eb_d4174"  # gitleaks:allow
+  - id: credentials
+    ver: "1514.vb_01eb_014e7d4"  # gitleaks:allow
+  - id: credentials-binding
+    ver: "728.v902a_273b_8947"  # gitleaks:allow
+  - id: display-url-api
+    ver: "2.217.va_6b_de84cc74b_"  # gitleaks:allow
+  - id: durable-task
+    ver: "686.v80ff80875b_82"  # gitleaks:allow
+  - id: echarts-api
+    ver: "6.1.0-1321.v86c4c5114494"  # gitleaks:allow
+  - id: font-awesome-api
+    ver: "7.3.1-1013.v0835a_879ec6d"  # gitleaks:allow
+  - id: git
+    ver: "5.11.0"  # gitleaks:allow
+  - id: git-client
+    ver: "6.6.1"  # gitleaks:allow
+  - id: gitea
+    ver: "286.v0740a_413c1eb_"  # gitleaks:allow
+  - id: gson-api
+    ver: "2.15.0-212.v085f60a_8093b_"  # gitleaks:allow
+  - id: handy-uri-templates-2-api
+    ver: "2.1.8-38.vcea_5d521d5f3"  # gitleaks:allow
+  - id: instance-identity
+    ver: "203.v15e81a_1b_7a_38"  # gitleaks:allow
+  - id: ionicons-api
+    ver: "94.vcc3065403257"  # gitleaks:allow
+  - id: jackson-annotations2-api
+    ver: "2.22-19.v10a_a_582ea_26e"  # gitleaks:allow
+  - id: jackson2-api
+    ver: "2.22.4-449.v4ee9f4ec4123"  # gitleaks:allow
+  - id: jackson3-api
+    ver: "3.2.4-103.vf5a_b_3f4ea_cec"  # gitleaks:allow
+  - id: jakarta-activation-api
+    ver: "2.1.4-1"  # gitleaks:allow
+  - id: jakarta-mail-api
+    ver: "2.1.5-1"  # gitleaks:allow
+  - id: jakarta-xml-bind-api
+    ver: "4.0.9-19.v2b_a_5b_44d9a_1c"  # gitleaks:allow
+  - id: javax-activation-api
+    ver: "1.2.0-8"  # gitleaks:allow
+  - id: jaxb
+    ver: "2.3.9-143.v5979df3304e6"  # gitleaks:allow
+  - id: joda-time-api
+    ver: "2.15.1-211.ve499f52b_da_33"  # gitleaks:allow
+  - id: jquery3-api
+    ver: "3.7.1-687.v68d468e40b_30"  # gitleaks:allow
+  - id: json-api
+    ver: "20260814-226.v20f9685d642c"  # gitleaks:allow
+  - id: junit
+    ver: "1455.v5c1b_eed56292"  # gitleaks:allow
+  - id: mailer
+    ver: "534.v1b_36f5864073"  # gitleaks:allow
+  - id: matrix-auth
+    ver: "3.3"  # gitleaks:allow
+  - id: matrix-project
+    ver: "928.v1effc3f3a_236"  # gitleaks:allow
+  - id: mina-sshd-api-common
+    ver: "2.19.0-192.v2b_a_7b_2c1dc71"  # gitleaks:allow
+  - id: mina-sshd-api-core
+    ver: "2.19.0-192.v2b_a_7b_2c1dc71"  # gitleaks:allow
+  - id: okhttp-api
+    ver: "5.5.0-242.v1482d48d3ea_3"  # gitleaks:allow
+  - id: pipeline-build-step
+    ver: "601.v6d4c6d1a_9dc7"  # gitleaks:allow
+  - id: pipeline-groovy-lib
+    ver: "822.vc95f70dea_db_7"  # gitleaks:allow
+  - id: pipeline-input-step
+    ver: "560.v56198a_642157"  # gitleaks:allow
+  - id: pipeline-milestone-step
+    ver: "152.v6e22b_8cfc66c"  # gitleaks:allow
+  - id: pipeline-model-api
+    ver: "2.2293.v6e7193cec599"  # gitleaks:allow
+  - id: pipeline-model-definition
+    ver: "2.2293.v6e7193cec599"  # gitleaks:allow
+  - id: pipeline-model-extensions
+    ver: "2.2293.v6e7193cec599"  # gitleaks:allow
+  - id: pipeline-stage-step
+    ver: "345.va_96187909426"  # gitleaks:allow
+  - id: pipeline-stage-tags-metadata
+    ver: "2.2293.v6e7193cec599"  # gitleaks:allow
+  - id: plain-credentials
+    ver: "199.v9f8e1f741799"  # gitleaks:allow
+  - id: plugin-util-api
+    ver: "7.1403.vd380b_c42e90c"  # gitleaks:allow
+  - id: prism-api
+    ver: "1.30.0-741.v034eb_0b_0a_a_fa_"  # gitleaks:allow
+  - id: resource-disposer
+    ver: "0.25"  # gitleaks:allow
+  - id: scm-api
+    ver: "728.vc30dcf7a_0df5"  # gitleaks:allow
+  - id: script-security
+    ver: "1436.v1082791135e4"  # gitleaks:allow
+  - id: snakeyaml-api
+    ver: "2.7-152.vc672728cf536"  # gitleaks:allow
+  - id: snakeyaml-engine-api
+    ver: "3.2-18.v885ed7ff698f"  # gitleaks:allow
+  - id: sonar
+    ver: "2.19.0"  # gitleaks:allow
+  - id: ssh-credentials
+    ver: "372.va_250881b_08cd"  # gitleaks:allow
+  - id: structs
+    ver: "362.va_b_695ef4fdf9"  # gitleaks:allow
+  - id: timestamper
+    ver: "1.30"  # gitleaks:allow
+  - id: variant
+    ver: "70.va_d9f17f859e0"  # gitleaks:allow
+  - id: woodstox-core-api
+    ver: "7.3.0-16.v017f30ed004c"  # gitleaks:allow
+  - id: workflow-aggregator
+    ver: "608.v67378e9d3db_1"  # gitleaks:allow
+  - id: workflow-api
+    ver: "1429.v7a_1b_efb_a_f7c5"  # gitleaks:allow
+  - id: workflow-basic-steps
+    ver: "1129.v60e3c7e6654d"  # gitleaks:allow
+  - id: workflow-cps
+    ver: "4395.v738456a_5da_6b_"  # gitleaks:allow
+  - id: workflow-durable-task-step
+    ver: "1479.v56e587f413a_7"  # gitleaks:allow
+  - id: workflow-job
+    ver: "1622.vc41c189cb_e5f"  # gitleaks:allow
+  - id: workflow-multibranch
+    ver: "842.v3a_b_59b_57b_e6e"  # gitleaks:allow
+  - id: workflow-scm-step
+    ver: "487.v41313a_96b_65d"  # gitleaks:allow
+  - id: workflow-step-api
+    ver: "724.v538c2362b_dfb_"  # gitleaks:allow
+  - id: workflow-support
+    ver: "1028.vc22910142650"  # gitleaks:allow
+  - id: ws-cleanup
+    ver: "0.49"  # gitleaks:allow
