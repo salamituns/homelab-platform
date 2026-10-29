@@ -38,7 +38,7 @@
     remote_src: true
     owner: root
     group: root
-    include: ["nexus-{{ nexus_version }}/*"]
+    include: ["nexus-{{ nexus_version }}"]   # a directory member: tar extracts it recursively (globs need --wildcards)
     creates: "{{ nexus_install_root }}/nexus-{{ nexus_version }}/bin/nexus"
   notify: Restart nexus
 
