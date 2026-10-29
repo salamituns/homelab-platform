@@ -1,0 +1,19 @@
+# Registries the k8s nodes must be able to pull from (ADR 0011). Per registry the role writes:
+#   <certs_d>/<host>/ca.crt      the registry's TLS CA (Caddy's local root, fetched by the nexus role)
+#   <certs_d>/<host>/hosts.toml  tells containerd's CRI plugin to use that CA for pulls
+# ca_src is a path on the controller (copy src), not on the node.
+# The plural name is mandated by the role brief; noqa keeps var-naming happy.
+containerd_registries:  # noqa: var-naming[no-role-prefix]
+  - host: registry.home.arpa
+    ca_src: "{{ playbook_dir }}/../files/ca/nexus-caddy-root.crt"
+
+# Where containerd 2.x looks for per-registry hosts.toml files. Must match the CRI registry
+# config_path that the role checks (and sets if missing) in /etc/containerd/config.toml.
+containerd_registry_certs_d: /etc/containerd/certs.d
+
+# Regexes against /etc/containerd/config.toml (containerd 2.x, config version 3). The CRI v1
+# images plugin's registry section is where config_path lives; its value may be a colon-separated
+# list (these nodes ship '/etc/containerd/certs.d:/etc/docker/certs.d'). Kept as variables so the
+# findall checks and the replace edit share one spelling of the section name.
+containerd_registry_section_re: "\\[plugins\\.'io\\.containerd\\.cri\\.v1\\.images'\\.registry\\]"
+containerd_registry_config_path_re: "\\[plugins\\.'io\\.containerd\\.cri\\.v1\\.images'\\.registry\\][^\\[]*?config_path\\s*=\\s*'([^']*)'"

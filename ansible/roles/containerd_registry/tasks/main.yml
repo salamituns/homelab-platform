@@ -1,0 +1,97 @@
+# Make containerd on the k8s nodes trust the lab registry's TLS CA, so pods can pull from
+# registry.home.arpa (Caddy fronts Nexus with `tls internal`; ADR 0011). The nodes only pull -
+# authentication is the k8s-pull imagePullSecret, created out-of-band, not this role.
+# Nothing is installed or downloaded here, so there is no version pin or checksum.
+
+- name: Create the per-registry directory under certs.d
+  ansible.builtin.file:
+    path: "{{ containerd_registry_certs_d }}/{{ item.host }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop: "{{ containerd_registries }}"
+  loop_control:
+    label: "{{ item.host }}"
+
+- name: Install the registry CA certificate
+  ansible.builtin.copy:
+    src: "{{ item.ca_src }}"
+    dest: "{{ containerd_registry_certs_d }}/{{ item.host }}/ca.crt"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ containerd_registries }}"
+  loop_control:
+    label: "{{ item.host }}"
+
+- name: Deploy the per-registry hosts.toml
+  ansible.builtin.template:
+    src: hosts.toml.j2
+    dest: "{{ containerd_registry_certs_d }}/{{ item.host }}/hosts.toml"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ containerd_registries }}"
+  loop_control:
+    label: "{{ item.host }}"
+
+# --- config_path check -----------------------------------------------------------------------------------
+# hosts.toml files are only read if the CRI plugin's config_path includes the certs.d directory.
+# All three nodes (checked 2026-10-29, containerd.io 2.2.1) already ship
+# config_path = '/etc/containerd/certs.d:/etc/docker/certs.d', so the three edit tasks below
+# normally do nothing. They are a safety net for a node configured differently.
+- name: Read containerd's config.toml
+  ansible.builtin.slurp:
+    src: /etc/containerd/config.toml
+  register: containerd_registry_config_raw
+
+- name: Find the CRI registry section and its config_path
+  ansible.builtin.set_fact:
+    # findall returns [] when the section or the key is absent, [''] when the key is empty,
+    # otherwise the current value (possibly a colon-separated list).
+    containerd_registry_sections: "{{ containerd_registry_config_raw.content
+      | b64decode | regex_findall(containerd_registry_section_re) }}"
+    containerd_registry_config_paths: "{{ containerd_registry_config_raw.content
+      | b64decode | regex_findall(containerd_registry_config_path_re) }}"
+
+- name: Split the current config_path into directories
+  ansible.builtin.set_fact:
+    containerd_registry_current_dirs: "{{ containerd_registry_config_paths | first | default('')
+      | split(':') | reject('equalto', '') | list }}"
+
+- name: Keep the certs.d directory first in the config_path we would set
+  ansible.builtin.set_fact:
+    containerd_registry_certs_d_configured: "{{ containerd_registry_certs_d in containerd_registry_current_dirs }}"
+    containerd_registry_desired_config_path: "{{ ([containerd_registry_certs_d]
+      + (containerd_registry_current_dirs | reject('equalto', containerd_registry_certs_d) | list)) | join(':') }}"
+
+- name: Repoint the existing config_path at the certs.d directory
+  ansible.builtin.replace:
+    path: /etc/containerd/config.toml
+    regexp: "({{ containerd_registry_section_re }}[^\\[]*?config_path\\s*=\\s*)'[^']*'"
+    replace: "\\g<1>'{{ containerd_registry_desired_config_path }}'"
+  when:
+    - containerd_registry_config_paths | length > 0   # the key exists, only its value changes
+    - not containerd_registry_certs_d_configured
+  notify: Restart containerd
+
+- name: Add the missing config_path key to the registry section
+  ansible.builtin.lineinfile:
+    path: /etc/containerd/config.toml
+    insertafter: "{{ containerd_registry_section_re }}"
+    line: "      config_path = '{{ containerd_registry_desired_config_path }}'"
+  when:
+    - containerd_registry_sections | length > 0
+    - containerd_registry_config_paths | length == 0
+  notify: Restart containerd
+
+- name: Add the missing registry section with config_path
+  ansible.builtin.blockinfile:
+    path: /etc/containerd/config.toml
+    marker: "# {mark} ansible-managed: containerd_registry"
+    block: |
+      [plugins.'io.containerd.cri.v1.images'.registry]
+        config_path = '{{ containerd_registry_desired_config_path }}'
+  when: containerd_registry_sections | length == 0
+  notify: Restart containerd
