@@ -21,6 +21,8 @@ gitea_https_clients:
   - { name: workernode2, ip: 192.168.1.84 }
   - { name: gateway, ip: 192.168.1.96 }       # Tailscale subnet-router SNAT address
   - { name: mac, ip: 192.168.1.121 }          # Workstation fixed DHCP allocation
+  - { name: jenkins, ip: 192.168.1.88 }       # ADR 0011: branch indexing, Jenkinsfile reads
+  - { name: ci-agent, ip: 192.168.1.93 }      # ADR 0011: git clone in builds
 
 # Local dump directory and retention count for gitea-backup.timer.
 gitea_backup_dir: /var/backups/gitea
