@@ -1,0 +1,49 @@
+# Managed by Ansible (homelab-platform, role: sonarqube). Local edits are overwritten.
+#
+# Systemd resource limit and sandboxing notes for SonarQube + embedded Elasticsearch:
+# - Elasticsearch runs bootstrap checks at startup and refuses to start unless
+#   LimitNOFILE >= 131072, LimitNPROC >= 4096 (8192 here), and sysctl vm.max_map_count >= 262144.
+# - ProtectSystem=strict + ReadWritePaths=/var/lib/sonarqube /var/log/sonarqube keeps
+#   /opt/sonarqube and /etc/sonarqube read-only to the `sonar` process while allowing
+#   ES index segments, temp/sharedmemory files, PID file, and logs.
+# - CapabilityBoundingSet= (empty) is safe because SonarQube runs as unprivileged `sonar`
+#   and binds 127.0.0.1:{{ sonarqube_web_port }} and ES 127.0.0.1:9001 (>1024).
+# - MemoryDenyWriteExecute is intentionally NOT set because the OpenJDK 21 JIT compiler
+#   requires writable+executable (W^X) code cache mappings and crashes at startup with it enabled.
+[Unit]
+Description=SonarQube Community Build
+After=network-online.target postgresql.service
+Wants=network-online.target
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=sonar
+Group=sonar
+WorkingDirectory=/opt/sonarqube
+Environment="SONAR_JAVA_PATH={{ sonarqube_java_bin }}" "PIDDIR={{ sonarqube_temp_dir }}" "HOME=/var/lib/sonarqube"
+ExecStart=/opt/sonarqube/bin/linux-x86-64/sonar.sh console
+SuccessExitStatus=143
+TimeoutStopSec=120
+Restart=on-failure
+RestartSec=10s
+
+# Required by embedded Elasticsearch bootstrap checks (ES refuses to start without them).
+LimitNOFILE={{ sonarqube_limit_nofile }}
+LimitNPROC={{ sonarqube_limit_nproc }}
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/sonarqube {{ sonarqube_log_dir }}
+ProtectHome=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

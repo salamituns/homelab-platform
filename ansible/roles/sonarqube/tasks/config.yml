@@ -1,0 +1,81 @@
+# Read the host-generated DB password so it can be rendered into sonar.properties.
+# check_mode: false on stat + slurp lets --check --diff succeed both on a fresh host
+# (falls back to a placeholder) and on an already-provisioned host (reads the real file).
+- name: Check if SonarQube database password file exists on host
+  ansible.builtin.stat:
+    path: "{{ sonarqube_db_password_file }}"
+  register: sonarqube_db_password_stat
+  check_mode: false
+
+- name: Read SonarQube database password from host
+  ansible.builtin.slurp:
+    src: "{{ sonarqube_db_password_file }}"
+  register: sonarqube_db_password_slurp
+  no_log: true
+  check_mode: false
+  when: sonarqube_db_password_stat.stat.exists
+
+- name: Render sonar.properties configuration (secrets; not logged, no diff)
+  ansible.builtin.template:
+    src: sonar.properties.j2
+    dest: /etc/sonarqube/sonar.properties
+    owner: root
+    group: sonar
+    mode: "0640"
+  vars:
+    sonarqube_db_password: >-
+      {{
+        (sonarqube_db_password_slurp.content | b64decode | trim)
+        if (sonarqube_db_password_stat.stat.exists and 'content' in sonarqube_db_password_slurp)
+        else 'CHECK_MODE_PLACEHOLDER'
+      }}
+  no_log: true
+  diff: false
+  notify: Restart sonarqube
+
+# SonarQube's AppSettingsLoader reads ${homeDir}/conf/sonar.properties. Pointing it at
+# /etc/sonarqube/sonar.properties keeps the root:sonar 0640 config across version upgrades.
+- name: Link SonarQube conf/sonar.properties to /etc/sonarqube/sonar.properties
+  ansible.builtin.file:
+    src: /etc/sonarqube/sonar.properties
+    dest: "/opt/sonarqube-{{ sonarqube_version }}/conf/sonar.properties"
+    state: link
+    force: true
+  notify: Restart sonarqube
+  when: not ansible_check_mode
+
+- name: Deploy hardened sonarqube.service systemd unit
+  ansible.builtin.template:
+    src: sonarqube.service.j2
+    dest: /etc/systemd/system/sonarqube.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart sonarqube
+
+- name: Enable and start sonarqube service
+  ansible.builtin.systemd_service:
+    name: sonarqube
+    state: started
+    enabled: true
+    daemon_reload: true
+  # In --check on a fresh host the archive and secret files are not present yet.
+  ignore_errors: "{{ ansible_check_mode }}"
+
+- name: Flush handlers so SonarQube is running before health check and admin password rotation
+  ansible.builtin.meta: flush_handlers
+
+# First boot initializes Elasticsearch indices and runs PostgreSQL schema migrations,
+# moving status from STARTING / DB_MIGRATION_RUNNING to UP in ~45-90s.
+- name: Wait for SonarQube api/system/status to report UP on localhost
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ sonarqube_web_port }}/api/system/status"
+    return_content: true
+    status_code: 200
+  register: sonarqube_system_status
+  until:
+    - sonarqube_system_status.status == 200
+    - (sonarqube_system_status.json.status | default('')) == 'UP'
+  retries: 60
+  delay: 5
+  when: not ansible_check_mode

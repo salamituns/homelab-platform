@@ -1,0 +1,17 @@
+- name: Configure kernel limits required by embedded Elasticsearch
+  ansible.builtin.import_tasks: sysctl.yml
+
+- name: Install Java, SonarQube Community Build archive, user, and directories
+  ansible.builtin.import_tasks: install.yml
+
+- name: Install and configure local PostgreSQL database for SonarQube
+  ansible.builtin.import_tasks: database.yml
+
+- name: Configure sonar.properties and hardened sonarqube systemd service
+  ansible.builtin.import_tasks: config.yml
+
+- name: Rotate default SonarQube admin password on first run
+  ansible.builtin.import_tasks: admin.yml
+
+- name: Configure daily SonarQube PostgreSQL dump systemd timer
+  ansible.builtin.import_tasks: backup.yml

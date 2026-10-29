@@ -1,0 +1,28 @@
+# Managed by Ansible (homelab-platform, role: sonarqube). Local edits are overwritten.
+
+# PostgreSQL 16 on localhost only (password generated on host in {{ sonarqube_db_password_file }}).
+sonar.jdbc.username={{ sonarqube_db_user }}
+sonar.jdbc.password={{ sonarqube_db_password }}
+sonar.jdbc.url=jdbc:postgresql://127.0.0.1:5432/{{ sonarqube_db_name }}
+
+# Bind HTTP to loopback only; Caddy terminates TLS on 443/tcp in front of this port.
+sonar.web.host={{ sonarqube_web_host }}
+sonar.web.port={{ sonarqube_web_port }}
+
+# Block unauthenticated access to UI and project APIs (ADR 0011).
+sonar.forceAuthentication=true
+
+# Keep mutable state and logs outside /opt/sonarqube-<version> for clean upgrades.
+sonar.path.data={{ sonarqube_data_dir }}
+sonar.path.temp={{ sonarqube_temp_dir }}
+sonar.path.logs={{ sonarqube_log_dir }}
+
+# Heap settings sized for a 4 GB (4096 MB) VM shared with PostgreSQL 16 and Caddy:
+# Web 512 MB + Compute Engine 1024 MB + Elasticsearch 1024 MB (+ 512 MB direct memory)
+# = 2560 MB max heap, leaving ~1.5 GB for PostgreSQL, off-heap/metaspace, and OS page cache.
+sonar.web.javaOpts={{ sonarqube_web_java_opts }}
+sonar.ce.javaOpts={{ sonarqube_ce_java_opts }}
+sonar.search.javaOpts={{ sonarqube_search_java_opts }}
+
+# Disable outbound telemetry in the internal lab.
+sonar.telemetry.enable=false

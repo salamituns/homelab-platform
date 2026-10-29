@@ -1,0 +1,15 @@
+# Caddy (443/tcp) fronts SonarQube on localhost:9000 (ADR 0011).
+# The scanner runs on ci-agent (uploads analysis reports), the Jenkins controller
+# polls the quality gate / receives the webhook, and admin clients use the web UI.
+firewall_service_rules:
+  - port: 443
+    clients: >-
+      {{
+        lab_admin_clients + [
+          {'name': 'jenkins', 'ip': '192.168.1.88'},
+          {'name': 'ci-agent', 'ip': '192.168.1.93'},
+        ]
+      }}
+
+caddy_sites:
+  - { names: [sonarqube.home.arpa, sonar.home.arpa], upstream: "127.0.0.1:9000" }

@@ -1,0 +1,64 @@
+# Detect whether the built-in default admin/admin login is still active.
+# /api/authentication/validate is exempt from sonar.forceAuthentication and returns
+# {"valid": true} when admin/admin works or {"valid": false} once the password has been rotated.
+- name: Check whether default SonarQube admin login is still active
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ sonarqube_web_port }}/api/authentication/validate"
+    method: GET
+    user: admin
+    password: "{{ sonarqube_default_admin_password }}"
+    force_basic_auth: true
+    return_content: true
+    status_code:
+      - 200
+      - 401
+  register: sonarqube_default_auth_check
+  changed_when: false
+  no_log: true
+  when: not ansible_check_mode
+
+# SonarQube 26.x ChangePasswordAction requires >= 12 characters with at least one uppercase letter,
+# one lowercase letter, one digit, and one special character.
+- name: Generate random initial SonarQube admin password on host
+  ansible.builtin.shell:
+    cmd: |
+      set -euo pipefail
+      umask 0077
+      rand_tail="$(openssl rand -base64 24 | tr -dc 'A-Za-z0-9' | head -c 20)"
+      printf 'Sq1!%s\n' "$rand_tail" > {{ sonarqube_initial_admin_password_file | quote }}
+      chown root:root {{ sonarqube_initial_admin_password_file | quote }}
+      chmod 0600 {{ sonarqube_initial_admin_password_file | quote }}
+    executable: /bin/bash
+  no_log: true
+  changed_when: true
+  when:
+    - not ansible_check_mode
+    - (sonarqube_default_auth_check.json.valid | default(false)) | bool
+
+- name: Read generated SonarQube initial admin password from host
+  ansible.builtin.slurp:
+    src: "{{ sonarqube_initial_admin_password_file }}"
+  register: sonarqube_admin_password_slurp
+  no_log: true
+  when:
+    - not ansible_check_mode
+    - (sonarqube_default_auth_check.json.valid | default(false)) | bool
+
+- name: Rotate default SonarQube admin password through Web API
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ sonarqube_web_port }}/api/users/change_password"
+    method: POST
+    user: admin
+    password: "{{ sonarqube_default_admin_password }}"
+    force_basic_auth: true
+    body_format: form-urlencoded
+    body:
+      login: admin
+      previousPassword: "{{ sonarqube_default_admin_password }}"
+      password: "{{ sonarqube_admin_password_slurp.content | b64decode | trim }}"
+    status_code: 204
+  no_log: true
+  changed_when: true
+  when:
+    - not ansible_check_mode
+    - (sonarqube_default_auth_check.json.valid | default(false)) | bool

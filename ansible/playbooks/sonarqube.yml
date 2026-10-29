@@ -1,0 +1,14 @@
+# Deploy and harden the rebuilt SonarQube server (ADR 0011):
+# SonarQube Community Build + PostgreSQL on localhost, Caddy TLS on 443.
+# Usage:
+#   ansible-playbook playbooks/sonarqube.yml --limit sonarqube --check --diff
+#   ansible-playbook playbooks/sonarqube.yml --limit sonarqube
+- name: Configure rebuilt SonarQube server
+  hosts: sonarqube
+  become: true
+  roles:
+    - baseline
+    - internal_dns
+    - firewall
+    - sonarqube
+    - caddy
