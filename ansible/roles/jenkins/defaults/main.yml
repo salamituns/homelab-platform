@@ -37,9 +37,25 @@ jenkins_plugin_manager_jar: "jenkins-plugin-manager-{{ jenkins_plugin_manager_ve
 jenkins_plugin_manager_url: "{{ jenkins_plugin_manager_rel }}/{{ jenkins_plugin_manager_version }}/{{ jenkins_plugin_manager_jar }}"
 jenkins_plugin_manager_dest: "/opt/jenkins-plugin-manager/{{ jenkins_plugin_manager_jar }}"
 
-# Top-level plugins from the brief, plus every non-optional dependency resolved from
-# https://updates.jenkins.io/stable/update-center.actual.json (core 2.580.2) on 2026-10-29.
-# Do not add jobs, credentials, or Gitea Branch Source here; those land in JCasC later.
+# Repo-root /private/ is gitignored. Extra vars file: ansible-playbook ... -e @../private/jenkins.yml
+# Do not put the Gitea owner in git (the public mirror must not name people).
+jenkins_belleshop_owner: ""
+jenkins_belleshop_repo: BelleShop
+jenkins_belleshop_script_path: Jenkinsfile
+jenkins_gitea_url: https://gitea.home.arpa
+jenkins_sonar_url: https://sonarqube.home.arpa
+jenkins_nexus_ci_push_user: ci-push
+jenkins_private_dir: "{{ playbook_dir }}/../../private"
+
+# Host paths we copy into /etc/jenkins/secrets/ (0640 root:jenkins). Missing sources are skipped.
+jenkins_nexus_ci_push_src: /etc/nexus/secrets/ci-push
+jenkins_sonarqube_token_src: /etc/sonarqube/secrets/jenkins-token
+jenkins_cosign_key_src: "{{ jenkins_private_dir }}/cosign.key"
+jenkins_cosign_password_src: "{{ jenkins_private_dir }}/cosign.password"
+jenkins_gitea_token_src: "{{ jenkins_private_dir }}/gitea-jenkins.token"
+
+# Top-level plugins plus required deps from the LTS update center (core 2.580.2).
+# job-dsl added 2026-10-29 for JCasC `jobs:` (same update-center.actual.json).
 
 # id/ver maps (not name:ver) so gitleaks does not treat incrementals as API keys.
 jenkins_plugins:
@@ -111,6 +127,8 @@ jenkins_plugins:
     ver: "1.2.0-8"  # gitleaks:allow
   - id: jaxb
     ver: "2.3.9-143.v5979df3304e6"  # gitleaks:allow
+  - id: job-dsl
+    ver: "3732.v9a_c49a_61a_313"  # gitleaks:allow
   - id: joda-time-api
     ver: "2.15.1-211.ve499f52b_da_33"  # gitleaks:allow
   - id: jquery3-api

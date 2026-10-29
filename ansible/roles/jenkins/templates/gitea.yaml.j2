@@ -1,0 +1,8 @@
+# Managed by Ansible (homelab-platform, role: jenkins). Local edits are overwritten.
+unclassified:
+  giteaServers:
+    servers:
+      - displayName: gitea
+        serverUrl: "{{ jenkins_gitea_url }}"
+        credentialsId: gitea-jenkins
+        manageHooks: true

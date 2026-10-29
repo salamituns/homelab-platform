@@ -1,0 +1,89 @@
+- name: Deploy JCasC credentials.yaml
+  ansible.builtin.template:
+    src: credentials.yaml.j2
+    dest: "{{ jenkins_casc_dir }}/credentials.yaml"
+    owner: root
+    group: jenkins
+    mode: "0640"
+  no_log: true
+  diff: false
+  notify: Restart jenkins
+  when:
+    - not ansible_check_mode
+    - jenkins_has_nexus_ci_push | bool
+      or jenkins_has_sonarqube_token | bool
+      or jenkins_has_cosign_key | bool
+      or jenkins_has_cosign_password | bool
+      or jenkins_has_gitea_token | bool
+
+- name: Remove credentials.yaml when no secrets are present
+  ansible.builtin.file:
+    path: "{{ jenkins_casc_dir }}/credentials.yaml"
+    state: absent
+  notify: Restart jenkins
+  when: >-
+    not (
+      jenkins_has_nexus_ci_push | bool
+      or jenkins_has_sonarqube_token | bool
+      or jenkins_has_cosign_key | bool
+      or jenkins_has_cosign_password | bool
+      or jenkins_has_gitea_token | bool
+    )
+
+- name: Deploy JCasC sonar.yaml
+  ansible.builtin.template:
+    src: sonar.yaml.j2
+    dest: "{{ jenkins_casc_dir }}/sonar.yaml"
+    owner: root
+    group: jenkins
+    mode: "0640"
+  notify: Restart jenkins
+  when:
+    - not ansible_check_mode
+    - jenkins_has_sonarqube_token | bool
+
+- name: Remove sonar.yaml when the SonarQube token is absent
+  ansible.builtin.file:
+    path: "{{ jenkins_casc_dir }}/sonar.yaml"
+    state: absent
+  notify: Restart jenkins
+  when: not jenkins_has_sonarqube_token | bool
+
+- name: Deploy JCasC gitea.yaml
+  ansible.builtin.template:
+    src: gitea.yaml.j2
+    dest: "{{ jenkins_casc_dir }}/gitea.yaml"
+    owner: root
+    group: jenkins
+    mode: "0640"
+  notify: Restart jenkins
+  when:
+    - not ansible_check_mode
+    - jenkins_has_gitea_token | bool
+
+- name: Remove gitea.yaml when the Gitea token is absent
+  ansible.builtin.file:
+    path: "{{ jenkins_casc_dir }}/gitea.yaml"
+    state: absent
+  notify: Restart jenkins
+  when: not jenkins_has_gitea_token | bool
+
+- name: Deploy JCasC jobs.yaml
+  ansible.builtin.template:
+    src: jobs.yaml.j2
+    dest: "{{ jenkins_casc_dir }}/jobs.yaml"
+    owner: root
+    group: jenkins
+    mode: "0640"
+  notify: Restart jenkins
+  when:
+    - not ansible_check_mode
+    - jenkins_has_gitea_token | bool
+    - jenkins_belleshop_owner | length > 0
+
+- name: Remove jobs.yaml when the Gitea token or owner is absent
+  ansible.builtin.file:
+    path: "{{ jenkins_casc_dir }}/jobs.yaml"
+    state: absent
+  notify: Restart jenkins
+  when: not jenkins_has_gitea_token | bool or jenkins_belleshop_owner | length == 0

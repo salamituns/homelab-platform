@@ -1,7 +1,8 @@
 # Managed by Ansible (homelab-platform, role: jenkins). Local edits are overwritten.
 #
-# No credentials, jobs, or Gitea Branch Source yet. Those belong in extra YAML
-# under {{ jenkins_casc_dir }} in a later step (see the role README).
+# Credentials, SonarQube, Gitea, and jobs live in sibling YAML next to this file
+# (credentials.yaml, sonar.yaml, gitea.yaml, jobs.yaml) so a missing secret can
+# omit that fragment instead of breaking ${readFile:...}.
 jenkins:
   numExecutors: 0
   mode: EXCLUSIVE

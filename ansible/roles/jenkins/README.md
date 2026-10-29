@@ -29,6 +29,13 @@ Deploys the rebuilt Jenkins **controller** on `jenkins` (`192.168.1.88`) per
      node `ci-agent` (label `docker`, inbound WebSocket).
    - systemd drop-in: listen `127.0.0.1:8080`, setup wizard off,
      `CASC_JENKINS_CONFIG=/var/lib/jenkins/casc`.
+4. **Secrets + extra JCasC (`tasks/secrets.yml`, `tasks/casc_extra.yml`)**
+   - Copies optional secrets into `/etc/jenkins/secrets/<name>` (`0640
+     root:jenkins`) from Nexus, SonarQube, or gitignored `private/` files.
+   - Missing sources are **skipped** (debug warning), never invented.
+   - Writes sibling YAML only for secrets that exist: `credentials.yaml`,
+     `sonar.yaml`, `gitea.yaml`, `jobs.yaml`. A credential whose file is absent
+     is omitted so JCasC does not `${readFile}` a missing path.
 
 Caddy (playbook, after this role) terminates TLS. The Caddy root CA is fetched
 to `ansible/files/ca/jenkins-caddy-root.crt` by `roles/caddy`.
@@ -39,21 +46,30 @@ to `ansible/files/ca/jenkins-caddy-root.crt` by `roles/caddy`.
 |---|---|---|
 | Jenkins LTS | 2.580.2 | `debian-stable` (`get.jenkins.io/debian-stable/`, 2026-10-27) |
 | plugin-manager jar | 2.15.0 | GitHub `jenkins-plugin-manager-2.15.0.jar.sha256` |
-| Plugins | see `defaults/main.yml` | `updates.jenkins.io/stable/update-center.actual.json` (core 2.580.2), required deps only |
+| Plugins | see `defaults/main.yml` | LTS update-center; **job-dsl 3732.v9a_c49a_61a_313** added 2026-10-29 (deps already pinned) |
 | Java | OpenJDK 21 | Ubuntu 24.04 apt (not held; security updates stay on) |
 
-## What is deliberately missing
+## Secrets the owner must create by hand
 
-No credentials, jobs, or Gitea configuration. Next step: extra YAML next to
-`jenkins.yaml` (or another file in `CASC_JENKINS_CONFIG`) for:
+The role only **moves** files. Create these before you want the matching
+Jenkins credential / job. The playbook still succeeds if they are missing.
 
-- Gitea Branch Source / webhook credentials
-- folder + multibranch jobs
-- registry / SonarQube / Cosign credentials (from files on the host, never git)
+| Credential id | Type | Create |
+|---|---|---|
+| `nexus-ci-push` | username/password (`ci-push`) | Run the Nexus playbook. Password is `/etc/nexus/secrets/ci-push` on `nexus`. |
+| `sonarqube-token` | secret text | On SonarQube, create a token for Jenkins and write it to `/etc/sonarqube/secrets/jenkins-token` on `sonarqube` (`0640`). |
+| `cosign-key` | secret file `cosign.key` | On the Mac: `cosign generate-key-pair` (passphrase prompted). Move `cosign.key` to `private/cosign.key`. Keep `cosign.pub` for Week 4. |
+| `cosign-password` | secret text | Same passphrase, one line, `private/cosign.password`. |
+| `gitea-jenkins` | Gitea PAT | In Gitea: Settings → Applications → generate a token (repo + hook). Save as `private/gitea-jenkins.token`. |
+| BelleShop owner | extra var | Copy `extra-vars.example.yml` to `private/jenkins.yml` and set `jenkins_belleshop_owner` (the Gitea user/org that owns `BelleShop`). Pass `-e @../private/jenkins.yml`. Never commit that file. |
+
+`private/` is gitignored. Cosign and Gitea files are read from the Ansible controller, not from the Jenkins VM.
+
+Jenkins must trust the Caddy CAs for `gitea.home.arpa` and `sonarqube.home.arpa` (system + JVM) or SCM/Sonar API calls fail. That is outside this role.
 
 ## First-run operator steps
 
-1. `cd ~/homelab-platform/ansible && ansible-playbook playbooks/jenkins.yml`
+1. `cd ~/homelab-platform/ansible && ansible-playbook playbooks/jenkins.yml -e @../private/jenkins.yml`
 2. Trust `ansible/files/ca/jenkins-caddy-root.crt` on the Mac.
 3. `ssh jenkins 'sudo cat /root/jenkins-initial-admin-password'` and log in at
    `https://jenkins.home.arpa/` as `admin`. Change the password in the UI (JCasC
