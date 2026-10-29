@@ -27,11 +27,14 @@ by `roles/caddy` on `jenkins`).
 3. **Scanners (`tasks/scanners.yml`)**
    - Pinned trivy, syft, cosign, gitleaks under `/opt/ci-scanners/<ver>/`,
      linked from `/usr/local/bin`. SHA-256 from each vendor's checksums file.
-4. **Registry CA (`tasks/registry.yml`)**
+4. **Gates (`tasks/gates.yml`)**
+   - Copies `ci/gates/*.sh` to `/opt/ci-gates/` (`root:root` 0755). Pipelines
+     call these; the agent user can run them but cannot edit them.
+5. **Registry CA (`tasks/registry.yml`)**
    - If `ansible/files/ca/nexus-caddy-root.crt` exists, copy it to
      `/etc/docker/certs.d/registry.home.arpa/ca.crt`. Skip if Nexus is not built
      yet (`ci_agent_registry_hostname` is the directory name).
-5. **Agent (`tasks/agent.yml`)**
+6. **Agent (`tasks/agent.yml`)**
    - `agent.jar` from `https://jenkins.home.arpa/jnlpJars/agent.jar`.
    - **Secret:** GET `http://127.0.0.1:8080/computer/ci-agent/jenkins-agent.jnlp`
      on the controller (delegated, basic auth as `admin`, `no_log`). The first
