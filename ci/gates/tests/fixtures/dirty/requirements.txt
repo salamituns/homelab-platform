@@ -1,0 +1,2 @@
+# Intentionally old pin: Trivy reports HIGH/CRITICAL with a fix (deps.sh must fail).
+PyYAML==5.3

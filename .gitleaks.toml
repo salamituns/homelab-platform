@@ -1,0 +1,14 @@
+# Extends the default rule set. A root .gitleaks.toml without useDefault
+# would replace it and miss real leaks.
+title = "homelab-platform"
+
+[extend]
+useDefault = true
+
+# The dirty fixture contains a fake AWS key on purpose so secrets.sh can prove
+# it fails. Path-scoped: only files under ci/gates/tests/fixtures/.
+[allowlist]
+description = "Intentional leak fixtures for ci/gates tests (not real credentials)"
+paths = [
+  '''(^|/)ci/gates/tests/fixtures/''',
+]

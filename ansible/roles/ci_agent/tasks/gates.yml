@@ -1,0 +1,26 @@
+# Same scripts pipelines call from git. Installed root-owned so a job running as
+# jenkins-agent can execute them but cannot rewrite the gate.
+- name: Create /opt/ci-gates
+  ansible.builtin.file:
+    path: "{{ ci_agent_gates_dest }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Require at least one gate script on the controller
+  ansible.builtin.assert:
+    that:
+      - lookup('fileglob', ci_agent_gates_src ~ '/*.sh', wantlist=True) | length > 0
+    fail_msg: "No ci/gates/*.sh found at {{ ci_agent_gates_src }}"
+
+- name: Install gate scripts from ci/gates
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "{{ ci_agent_gates_dest }}/{{ item | basename }}"
+    owner: root
+    group: root
+    mode: "0755"
+  loop: "{{ lookup('fileglob', ci_agent_gates_src ~ '/*.sh', wantlist=True) }}"
+  loop_control:
+    label: "{{ item | basename }}"

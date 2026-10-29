@@ -7,6 +7,9 @@
 - name: Install pinned scanners into /usr/local/bin
   ansible.builtin.import_tasks: scanners.yml
 
+- name: Install paved-road gate scripts to /opt/ci-gates
+  ansible.builtin.import_tasks: gates.yml
+
 - name: Trust the Nexus registry CA when the controller already has it
   ansible.builtin.import_tasks: registry.yml
 
