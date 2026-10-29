@@ -1,0 +1,14 @@
+# SonarQube embeds Elasticsearch for indexing issues, rules, and components.
+# Elasticsearch runs bootstrap checks at startup and refuses to start unless
+# vm.max_map_count >= 262144 (524288 recommended for mmap-backed Lucene segments)
+# and fs.file-max >= 131072.
+- name: Set kernel sysctl parameters required by embedded Elasticsearch
+  ansible.posix.sysctl:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    sysctl_file: /etc/sysctl.d/99-sonarqube.conf
+    state: present
+    reload: true
+  loop:
+    - { name: vm.max_map_count, value: "{{ sonarqube_sysctl_vm_max_map_count | string }}" }
+    - { name: fs.file-max, value: "{{ sonarqube_sysctl_fs_file_max | string }}" }

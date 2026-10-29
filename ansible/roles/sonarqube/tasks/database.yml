@@ -1,0 +1,112 @@
+- name: Install PostgreSQL 16 from Ubuntu apt
+  ansible.builtin.apt:
+    name:
+      - "postgresql-{{ sonarqube_postgresql_version }}"
+      - "postgresql-client-{{ sonarqube_postgresql_version }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+# Ensure PostgreSQL listens on 127.0.0.1 only; SonarQube runs on the same host
+# and no external client ever connects to port 5432.
+- name: Bind PostgreSQL to 127.0.0.1 only
+  ansible.builtin.lineinfile:
+    path: "/etc/postgresql/{{ sonarqube_postgresql_version }}/main/postgresql.conf"
+    regexp: "^#?\\s*listen_addresses\\s*="
+    line: "listen_addresses = '127.0.0.1'"
+  notify: Restart postgresql
+  when: not ansible_check_mode
+
+- name: Enable and start postgresql service
+  ansible.builtin.systemd_service:
+    name: postgresql
+    state: started
+    enabled: true
+  ignore_errors: "{{ ansible_check_mode }}"
+
+- name: Flush handlers so PostgreSQL is listening on localhost before role/DB provisioning
+  ansible.builtin.meta: flush_handlers
+
+# Generate the database password directly on the host once into /etc/sonarqube/secrets/db_password
+# (root:sonar 0640) so it never lives in git or controller logs.
+- name: Generate SonarQube PostgreSQL password on first run
+  ansible.builtin.shell:
+    cmd: |
+      set -euo pipefail
+      umask 0027
+      openssl rand -hex 24 > {{ sonarqube_db_password_file | quote }}
+      chown root:sonar {{ sonarqube_db_password_file | quote }}
+      chmod 0640 {{ sonarqube_db_password_file | quote }}
+    executable: /bin/bash
+    creates: "{{ sonarqube_db_password_file }}"
+  no_log: true
+  notify: Restart sonarqube
+
+- name: Ensure SonarQube PostgreSQL password file ownership and permissions
+  ansible.builtin.file:
+    path: "{{ sonarqube_db_password_file }}"
+    owner: root
+    group: sonar
+    mode: "0640"
+  no_log: true
+  when: not ansible_check_mode
+
+- name: Check whether SonarQube PostgreSQL role exists
+  ansible.builtin.command:
+    argv:
+      - /usr/sbin/runuser
+      - -u
+      - postgres
+      - --
+      - /usr/bin/psql
+      - -tAc
+      - "SELECT 1 FROM pg_roles WHERE rolname = '{{ sonarqube_db_user }}'"
+  register: sonarqube_pg_role_check
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Create SonarQube PostgreSQL role with host-generated password
+  ansible.builtin.shell:
+    cmd: |
+      set -euo pipefail
+      db_pass="$(cat {{ sonarqube_db_password_file | quote }})"
+      /usr/sbin/runuser -u postgres -- /usr/bin/psql -v ON_ERROR_STOP=1 \
+        -v db_user={{ sonarqube_db_user | quote }} \
+        -v db_pass="$db_pass" \
+        -c "CREATE ROLE :\"db_user\" WITH LOGIN PASSWORD :'db_pass';"
+    executable: /bin/bash
+  no_log: true
+  changed_when: true
+  when:
+    - not ansible_check_mode
+    - (sonarqube_pg_role_check.stdout | default('') | trim) != '1'
+
+- name: Check whether SonarQube PostgreSQL database exists
+  ansible.builtin.command:
+    argv:
+      - /usr/sbin/runuser
+      - -u
+      - postgres
+      - --
+      - /usr/bin/psql
+      - -tAc
+      - "SELECT 1 FROM pg_database WHERE datname = '{{ sonarqube_db_name }}'"
+  register: sonarqube_pg_db_check
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Create SonarQube PostgreSQL database
+  ansible.builtin.command:
+    argv:
+      - /usr/sbin/runuser
+      - -u
+      - postgres
+      - --
+      - /usr/bin/createdb
+      - "--owner={{ sonarqube_db_user }}"
+      - --encoding=UTF8
+      - "{{ sonarqube_db_name }}"
+  changed_when: true
+  when:
+    - not ansible_check_mode
+    - (sonarqube_pg_db_check.stdout | default('') | trim) != '1'

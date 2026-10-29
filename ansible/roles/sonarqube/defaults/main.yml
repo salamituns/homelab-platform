@@ -1,0 +1,52 @@
+# Pinned SonarQube Community Build release (ADR 0011).
+# Checksum source: https://binaries.sonarsource.com/Distribution/sonarqube/sonarqube-26.10.0.133078.zip.sha256
+# (checked 2026-10-29; matches GitHub release tag 26.10.0.133078 in SonarSource/sonarqube).
+sonarqube_version: "26.10.0.133078"
+sonarqube_sha256: "a23716457a73e44fff57c51d8999d97e59f4deee24cefb333918fe6c1ddb62c1"
+sonarqube_download_url: "https://binaries.sonarsource.com/Distribution/sonarqube/sonarqube-{{ sonarqube_version }}.zip"
+
+# SonarQube 26.x requires Java 21 (build.gradle: JavaVersion.VERSION_21).
+sonarqube_java_package: openjdk-21-jre-headless
+sonarqube_java_bin: /usr/lib/jvm/java-21-openjdk-amd64/bin/java
+
+# PostgreSQL 16 from Ubuntu 24.04 apt, bound to 127.0.0.1 only.
+sonarqube_postgresql_version: "16"
+sonarqube_db_name: sonarqube
+sonarqube_db_user: sonar
+sonarqube_db_password_file: /etc/sonarqube/secrets/db_password
+
+# Loopback HTTP listener behind Caddy (443/tcp). Never exposed directly on the LAN.
+sonarqube_web_host: 127.0.0.1
+sonarqube_web_port: 9000
+
+# Persistent data, temp, and logs live outside /opt/sonarqube-<version> so upgrades
+# only swap the /opt/sonarqube symlink without touching indices or logs.
+sonarqube_data_dir: /var/lib/sonarqube/data
+sonarqube_temp_dir: /var/lib/sonarqube/temp
+sonarqube_log_dir: /var/log/sonarqube
+
+# JVM heap sizing for a 4 GB (4096 MB) VM that also runs PostgreSQL 16 and Caddy:
+# - Web Server:       512 MB max (-Xms128m -Xmx512m)
+# - Compute Engine:  1024 MB max (-Xms128m -Xmx1024m)
+# - Elasticsearch:   1024 MB fixed (-Xms1024m -Xmx1024m) + 512 MB MaxDirectMemorySize
+# Total JVM max heap = 2560 MB (2.5 GB), leaving ~1.5 GB for off-heap/direct memory,
+# PostgreSQL shared buffers, Caddy, and Linux page cache (used by ES mmap segments).
+sonarqube_web_java_opts: "-Xmx512m -Xms128m -XX:+HeapDumpOnOutOfMemoryError"
+sonarqube_ce_java_opts: "-Xmx1024m -Xms128m -XX:+HeapDumpOnOutOfMemoryError"
+sonarqube_search_java_opts: "-Xmx1024m -Xms1024m -XX:MaxDirectMemorySize=512m -XX:+HeapDumpOnOutOfMemoryError"
+
+# Kernel and systemd resource limits required by embedded Elasticsearch bootstrap checks.
+# ES refuses to start if vm.max_map_count < 262144, LimitNOFILE < 131072, or LimitNPROC < 4096.
+sonarqube_sysctl_vm_max_map_count: 524288
+sonarqube_sysctl_fs_file_max: 131072
+sonarqube_limit_nofile: 131072
+sonarqube_limit_nproc: 8192
+
+# Built-in factory password on a fresh SonarQube database; rotated on first boot and
+# saved to sonarqube_initial_admin_password_file (0600).
+sonarqube_default_admin_password: admin
+sonarqube_initial_admin_password_file: /root/sonarqube-initial-admin-password
+
+# Daily pg_dump directory and retention count for sonarqube-backup.timer.
+sonarqube_backup_dir: /var/backups/sonarqube
+sonarqube_backup_keep: 7

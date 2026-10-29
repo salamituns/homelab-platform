@@ -1,0 +1,80 @@
+- name: Install OpenJDK JRE and unzip required by SonarQube
+  ansible.builtin.apt:
+    name:
+      - "{{ sonarqube_java_package }}"
+      - unzip
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Ensure sonar system group exists
+  ansible.builtin.group:
+    name: sonar
+    system: true
+    state: present
+
+- name: Ensure sonar system user exists (no login shell)
+  ansible.builtin.user:
+    name: sonar
+    group: sonar
+    system: true
+    shell: /usr/sbin/nologin
+    home: /var/lib/sonarqube
+    create_home: false
+    state: present
+
+- name: Create SonarQube data, temp, and log directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: sonar
+    group: sonar
+    mode: "0750"
+  loop:
+    - /var/lib/sonarqube
+    - "{{ sonarqube_data_dir }}"
+    - "{{ sonarqube_temp_dir }}"
+    - "{{ sonarqube_log_dir }}"
+
+# /etc/sonarqube and /etc/sonarqube/secrets are root-owned and group-readable by sonar (0750)
+# so the service can read its configuration and secrets without being able to modify them.
+- name: Create SonarQube configuration and secrets directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: sonar
+    mode: "0750"
+  loop:
+    - /etc/sonarqube
+    - /etc/sonarqube/secrets
+
+- name: Download pinned SonarQube Community Build zip verified by SHA-256
+  ansible.builtin.get_url:
+    url: "{{ sonarqube_download_url }}"
+    dest: "/opt/sonarqube-{{ sonarqube_version }}.zip"
+    checksum: "sha256:{{ sonarqube_sha256 }}"
+    force: false
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Unpack SonarQube Community Build into /opt/sonarqube-{{ sonarqube_version }}
+  ansible.builtin.unarchive:
+    src: "/opt/sonarqube-{{ sonarqube_version }}.zip"
+    dest: /opt
+    remote_src: true
+    owner: root
+    group: sonar
+    creates: "/opt/sonarqube-{{ sonarqube_version }}/bin/linux-x86-64/sonar.sh"
+  notify: Restart sonarqube
+  when: not ansible_check_mode
+
+# Upgrade = new version directory + this symlink moves; old version directory stays for fast rollback.
+- name: Point /opt/sonarqube symlink at the pinned version
+  ansible.builtin.file:
+    src: "/opt/sonarqube-{{ sonarqube_version }}"
+    dest: /opt/sonarqube
+    state: link
+    force: true   # also lets --check pass before the archive is unpacked
+  notify: Restart sonarqube

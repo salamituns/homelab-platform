@@ -1,0 +1,21 @@
+# Managed by Ansible (homelab-platform, role: sonarqube). Local edits are overwritten.
+[Unit]
+Description=Dump SonarQube PostgreSQL database to {{ sonarqube_backup_dir }}
+After=postgresql.service
+Requires=postgresql.service
+
+[Service]
+Type=oneshot
+User=sonar
+Group=sonar
+WorkingDirectory={{ sonarqube_backup_dir }}
+ExecStart=/bin/bash -c 'set -euo pipefail; umask 0027; /usr/bin/pg_dump --format=custom --file={{ sonarqube_backup_dir }}/sonarqube-db-$(date -u +%%Y%%m%%dT%%H%%M%%SZ).dump {{ sonarqube_db_name }}'
+ExecStartPost=/bin/bash -c 'ls -1t {{ sonarqube_backup_dir }}/sonarqube-db-*.dump 2>/dev/null | tail -n +{{ (sonarqube_backup_keep | int) + 1 }} | xargs -r rm -f --'
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths={{ sonarqube_backup_dir }}
+ProtectHome=true
+PrivateDevices=true
+CapabilityBoundingSet=
