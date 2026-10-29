@@ -6,8 +6,9 @@ Week 3 scanners. Connects **out** to `https://jenkins.home.arpa/` over WebSocket
 so the controller never stores an SSH key for this host.
 
 Must run **after** the Jenkins controller play: this role downloads `agent.jar`
-from the controller and needs `ansible/files/ca/jenkins-caddy-root.crt` (fetched
-by `roles/caddy` on `jenkins`).
+from the controller. TLS trust for `*.home.arpa` is installed by the
+`lab_ca_trust` role (`host_vars/ci-agent.yml`: gitea, nexus, sonarqube, jenkins),
+which runs before this one in `playbooks/jenkins.yml`.
 
 ## What it does
 
@@ -19,11 +20,9 @@ by `roles/caddy` on `jenkins`).
      (not the group itself).
    - Docker listens on the unix socket only. No `-p` publishes, so nothing extra
      is on the LAN (UFW still only allows SSH).
-2. **Trust + Java (`tasks/trust.yml`)**
-   - `openjdk-21-jre-headless` and `ca-certificates-java`.
-   - Jenkins Caddy root → `/usr/local/share/ca-certificates/` +
-     `update-ca-certificates`. Ubuntu's OpenJDK uses that store, so `java -jar`
-     trusts `jenkins.home.arpa` too.
+2. **Java (`tasks/trust.yml`)**
+   - `openjdk-21-jre-headless` and `ca-certificates-java`, so the JVM truststore
+     follows the system store that `lab_ca_trust` updates.
 3. **Scanners (`tasks/scanners.yml`)**
    - Pinned trivy, syft, cosign, gitleaks under `/opt/ci-scanners/<ver>/`,
      linked from `/usr/local/bin`. SHA-256 from each vendor's checksums file.

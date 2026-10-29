@@ -1,3 +1,9 @@
 # No extra inbound ports. Docker does not publish ports; UFW only allows SSH
 # (firewall role default). The agent dials out to https://jenkins.home.arpa/.
 firewall_service_rules: []
+
+# Outbound TLS: git clones from gitea, cosign/trivy reach registry.home.arpa outside
+# Docker, the scanner uploads to sonarqube, the agent connects to jenkins.
+lab_ca_trust_cas: [gitea, nexus, sonarqube, jenkins]
+# JVM truststore is read at start; the agent JVM connects to jenkins.home.arpa.
+lab_ca_trust_java_service: jenkins-agent

@@ -1,7 +1,7 @@
 - name: Install Docker CE (pinned and held) and the jenkins-agent user
   ansible.builtin.import_tasks: docker.yml
 
-- name: Trust the Jenkins Caddy CA and install Java
+- name: Install Java for the agent (the lab CAs come from the lab_ca_trust role)
   ansible.builtin.import_tasks: trust.yml
 
 - name: Install pinned scanners into /usr/local/bin

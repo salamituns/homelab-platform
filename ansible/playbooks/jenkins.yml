@@ -8,6 +8,7 @@
   become: true
   roles:
     - baseline
+    - lab_ca_trust   # before jenkins: its JVM reads the truststore at start
     - internal_dns
     - firewall
     - jenkins
@@ -18,6 +19,7 @@
   become: true
   roles:
     - baseline
+    - lab_ca_trust   # before ci_agent: agent.jar is downloaded over HTTPS from jenkins
     - internal_dns
     - firewall
     - ci_agent

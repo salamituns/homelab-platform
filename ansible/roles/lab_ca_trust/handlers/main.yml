@@ -1,0 +1,21 @@
+# update-ca-certificates rebuilds the combined bundle /etc/ssl/certs/ca-certificates.crt.
+# ca-certificates-java's hook (/etc/ca-certificates/update.d/jks-keystore) then rebuilds
+# the JVM truststore /etc/ssl/certs/java/cacerts from it, so Java trusts the same CAs.
+- name: Update lab CA certificates
+  ansible.builtin.command:
+    argv:
+      - /usr/sbin/update-ca-certificates
+  changed_when: true
+
+# A JVM loads its truststore once, at start, so a running Java service must be restarted
+# to pick up a changed CA. Skipped on first run (the service is not installed yet; it
+# starts later in the play, already trusting the new CAs) and when no service is named.
+- name: Restart the Java service so it re-reads the truststore
+  ansible.builtin.systemd_service:
+    name: "{{ lab_ca_trust_java_service }}"
+    state: restarted
+  when:
+    - lab_ca_trust_java_service | length > 0
+    - (lab_ca_trust_java_service ~ '.service') in services or lab_ca_trust_java_service in services
+  ignore_errors: "{{ ansible_check_mode }}"
+  listen: Update lab CA certificates

@@ -57,7 +57,8 @@ Deploys and hardens SonarQube Community Build on `sonarqube` (`192.168.1.86`, VM
    cd ~/homelab-platform/ansible
    ansible-playbook playbooks/sonarqube.yml --limit sonarqube
    ```
-2. Trust the fetched Caddy root CA (`ansible/files/ca/sonarqube-caddy-root.crt`) on the Mac, `jenkins`, and `ci-agent`.
+2. Trust the fetched Caddy root CA (`ansible/files/ca/sonarqube-caddy-root.crt`) on the Mac.
+   (`jenkins` and `ci-agent` get it automatically from the `lab_ca_trust` role.)
 3. Read the initial `admin` password generated on the host:
    ```sh
    ssh sonarqube 'sudo cat /root/sonarqube-initial-admin-password'

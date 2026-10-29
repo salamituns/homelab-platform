@@ -13,3 +13,8 @@ firewall_service_rules:
 
 caddy_sites:
   - { names: [sonarqube.home.arpa, sonar.home.arpa], upstream: "127.0.0.1:9000" }
+
+# Outbound TLS: SonarQube POSTs the quality-gate webhook to https://jenkins.home.arpa/.
+lab_ca_trust_cas: [jenkins]
+# JVM truststore is read at start; restart SonarQube when a CA file changes.
+lab_ca_trust_java_service: sonarqube

@@ -1,0 +1,17 @@
+# Which lab CAs this host must trust: names matching ansible/files/ca/<name>-caddy-root.crt
+# (the Caddy `tls internal` root of each service host, fetched by that host's caddy role).
+# Set per host in host_vars; a host with no outbound lab TLS connections trusts nothing extra.
+lab_ca_trust_cas: []
+
+# Java services read the JVM truststore once, at start. Name the systemd unit to restart
+# when a CA file changes; empty means "no Java service on this host" (restart nothing).
+lab_ca_trust_java_service: ""
+
+# Where the CA files live on the controller (copy src, delegated to localhost).
+lab_ca_trust_ca_dir: "{{ playbook_dir }}/../files/ca"
+lab_ca_trust_ca_suffix: -caddy-root.crt
+
+# update-ca-certificates scans this directory recursively for *.crt (verified against the
+# Ubuntu 24.04 script); the lab/ subdirectory keeps the locally-added CAs visibly grouped
+# apart from anything a package drops directly into /usr/local/share/ca-certificates.
+lab_ca_trust_dest_dir: /usr/local/share/ca-certificates/lab

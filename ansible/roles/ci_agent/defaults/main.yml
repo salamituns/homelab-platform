@@ -29,9 +29,6 @@ ci_agent_docker_hold:
   - containerd.io
   - docker-buildx-plugin
 
-ci_agent_jenkins_ca_src: "{{ playbook_dir }}/../files/ca/jenkins-caddy-root.crt"
-ci_agent_jenkins_ca_dest: /usr/local/share/ca-certificates/jenkins-home-arpa.crt
-
 # Copied only when the Nexus play has already fetched it (Nexus may be built later).
 ci_agent_registry_hostname: registry.home.arpa
 ci_agent_nexus_ca_src: "{{ playbook_dir }}/../files/ca/nexus-caddy-root.crt"

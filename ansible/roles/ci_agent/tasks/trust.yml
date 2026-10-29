@@ -1,3 +1,6 @@
+# The lab CAs are installed by the lab_ca_trust role, which runs earlier in the play. This
+# file only installs Java and ca-certificates-java, which keeps the JVM truststore in sync
+# with the system store on every update-ca-certificates run.
 - name: Install Java JRE and the package that syncs CAs into the JVM truststore
   ansible.builtin.apt:
     name:
@@ -6,32 +9,3 @@
     state: present
     update_cache: true
     cache_valid_time: 3600
-
-- name: Check that the Jenkins Caddy root CA is on the controller
-  ansible.builtin.stat:
-    path: "{{ ci_agent_jenkins_ca_src }}"
-  delegate_to: localhost
-  become: false
-  register: ci_agent_jenkins_ca
-
-- name: Require the Jenkins Caddy root CA from play 1
-  ansible.builtin.assert:
-    that:
-      - ci_agent_jenkins_ca.stat.exists
-    fail_msg: >-
-      {{ ci_agent_jenkins_ca_src }} is missing. Run this playbook without --limit so
-      play 1 (hosts: jenkins, role: caddy) can fetch the CA first.
-  when: not ansible_check_mode
-
-- name: Install the Jenkins Caddy root CA into the system trust store
-  ansible.builtin.copy:
-    src: "{{ ci_agent_jenkins_ca_src }}"
-    dest: "{{ ci_agent_jenkins_ca_dest }}"
-    owner: root
-    group: root
-    mode: "0644"
-  notify: Update CA certificates
-  when: ci_agent_jenkins_ca.stat.exists
-
-- name: Flush handlers so Java and curl trust jenkins.home.arpa before agent.jar
-  ansible.builtin.meta: flush_handlers

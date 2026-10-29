@@ -8,6 +8,7 @@
   become: true
   roles:
     - baseline
+    - lab_ca_trust   # before sonarqube: its JVM reads the truststore at start
     - internal_dns
     - firewall
     - sonarqube
