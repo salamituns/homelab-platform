@@ -1,0 +1,53 @@
+# One place that makes every CI host trust the lab's internal CAs (ADR 0011). Each service
+# fronts TLS with its own Caddy `tls internal` root; that service's caddy role fetches the
+# root to ansible/files/ca/<host>-caddy-root.crt. Which host trusts which CAs lives in
+# host_vars (lab_ca_trust_cas), so this role stays generic and adds nothing unneeded.
+
+- name: Install ca-certificates-java so the JVM truststore follows the system store
+  ansible.builtin.apt:
+    name: ca-certificates-java
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Check that each listed CA file is on the controller
+  ansible.builtin.stat:
+    path: "{{ lab_ca_trust_ca_dir }}/{{ item }}{{ lab_ca_trust_ca_suffix }}"
+  loop: "{{ lab_ca_trust_cas }}"
+  delegate_to: localhost
+  become: false
+  register: lab_ca_trust_ca_files
+
+- name: Require each listed CA file on the controller
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+    fail_msg: >-
+      {{ lab_ca_trust_ca_dir }}/{{ item.item }}{{ lab_ca_trust_ca_suffix }} is missing. The service
+      host's playbook fetches it (caddy role); run that playbook first, without --limit.
+  loop: "{{ lab_ca_trust_ca_files.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: not ansible_check_mode
+
+- name: Install each lab CA into the system trust store directory
+  ansible.builtin.copy:
+    src: "{{ lab_ca_trust_ca_dir }}/{{ item }}{{ lab_ca_trust_ca_suffix }}"
+    dest: "{{ lab_ca_trust_dest_dir }}/{{ item }}{{ lab_ca_trust_ca_suffix }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ lab_ca_trust_cas }}"
+  notify: Update lab CA certificates
+
+# The restart handler below needs to know whether the Java service exists yet: on a first
+# run it does not (the jenkins/sonarqube/ci_agent roles install it later in the play) and
+# would fail, and a service that is not installed needs no restart anyway.
+- name: Collect service facts for the restart handler
+  ansible.builtin.service_facts:
+
+# Flush here instead of at end of play: later roles in this play talk to the lab services
+# right away - ci_agent downloads agent.jar from jenkins.home.arpa - and a Java service
+# started later reads the rebuilt truststore at its first start.
+- name: Flush handlers so the CAs are trusted from here on
+  ansible.builtin.meta: flush_handlers

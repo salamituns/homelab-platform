@@ -1,8 +1,21 @@
 # Caddy (443/tcp) fronts Jenkins on loopback. Admin clients use the UI; the agent
-# connects inbound over WebSocket; Gitea will POST webhooks later (jobs not in this role).
+# connects inbound over WebSocket; Gitea POSTs build webhooks; SonarQube POSTs the
+# quality-gate webhook to https://jenkins.home.arpa/sonarqube-webhook/ (ADR 0011).
 firewall_service_rules:
   - port: 443
-    clients: "{{ lab_admin_clients + [{'name': 'ci-agent', 'ip': '192.168.1.93'}, {'name': 'gitea', 'ip': '192.168.1.97'}] }}"
+    clients: >-
+      {{
+        lab_admin_clients + [
+          {'name': 'ci-agent', 'ip': '192.168.1.93'},
+          {'name': 'gitea', 'ip': '192.168.1.97'},
+          {'name': 'sonarqube', 'ip': '192.168.1.86'},
+        ]
+      }}
+
+# Outbound TLS: branch scanning against gitea, quality-gate API on sonarqube.
+lab_ca_trust_cas: [gitea, sonarqube]
+# JVM truststore is read at start; restart Jenkins when a CA file changes.
+lab_ca_trust_java_service: jenkins
 
 caddy_sites:
   - { names: [jenkins.home.arpa], upstream: "127.0.0.1:8080" }

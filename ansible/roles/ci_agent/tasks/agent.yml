@@ -15,7 +15,8 @@
     mode: "0750"
 
 # Downloaded from our controller (not the public internet), so there is no vendor
-# SHA-256 to pin. TLS + the Jenkins Caddy CA is the authenticity check.
+# SHA-256 to pin. TLS + the Jenkins Caddy CA (installed by lab_ca_trust) is the
+# authenticity check.
 - name: Download agent.jar from the Jenkins controller
   ansible.builtin.get_url:
     url: "{{ ci_agent_jenkins_url }}jnlpJars/agent.jar"
@@ -23,9 +24,7 @@
     owner: root
     group: root
     mode: "0644"
-  when:
-    - not ansible_check_mode
-    - ci_agent_jenkins_ca.stat.exists
+  when: not ansible_check_mode
   notify: Restart jenkins-agent
 
 - name: Read Jenkins admin password on the controller
