@@ -7,10 +7,22 @@
     mode: "0644"
 
 - name: Add Tailscale official apt repository
-  ansible.builtin.apt_repository:
-    repo: "deb [signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg] {{ tailscale_apt_base }} {{ ansible_facts['distribution_release'] }} main"
-    filename: tailscale
+  ansible.builtin.deb822_repository:
+    name: tailscale
+    types: deb
+    uris: "{{ tailscale_apt_base }}"
+    suites: "{{ ansible_facts['distribution_release'] }}"
+    components:
+      - main
+    signed_by: /usr/share/keyrings/tailscale-archive-keyring.gpg
     state: present
+
+# apt_repository wrote /etc/apt/sources.list.d/tailscale.list. Leaving it next to
+# the new .sources file makes apt see the same repo twice (warnings or a failed update).
+- name: Remove the legacy Tailscale apt .list after switching to deb822
+  ansible.builtin.file:
+    path: /etc/apt/sources.list.d/tailscale.list
+    state: absent
 
 - name: Install tailscale package
   ansible.builtin.apt:

@@ -5,7 +5,9 @@
 jenkins_version: "2.580.2"
 jenkins_apt_key_url: https://pkg.jenkins.io/debian-stable/jenkins.io-2026.key
 jenkins_apt_key_dest: /usr/share/keyrings/jenkins-keyring.asc
-jenkins_apt_repo: "deb [signed-by={{ jenkins_apt_key_dest }}] https://pkg.jenkins.io/debian-stable binary/"
+jenkins_apt_uris: https://pkg.jenkins.io/debian-stable
+# Trailing slash: this repo is a path-style suite, so it has no Components field.
+jenkins_apt_suites: binary/
 
 # OpenJDK 21 is the LTS Jenkins documents for this line (fontconfig for the bundled fonts).
 jenkins_java_packages:

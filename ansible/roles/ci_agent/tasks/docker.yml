@@ -7,13 +7,24 @@
     mode: "0644"
 
 - name: Add Docker official apt repository
-  ansible.builtin.apt_repository:
-    repo: >-
-      deb [arch=amd64 signed-by={{ ci_agent_docker_apt_key_dest }}]
-      https://download.docker.com/linux/ubuntu
-      {{ ansible_facts['distribution_release'] }} stable
-    filename: docker
+  ansible.builtin.deb822_repository:
+    name: docker
+    types: deb
+    uris: https://download.docker.com/linux/ubuntu
+    suites: "{{ ansible_facts['distribution_release'] }}"
+    components:
+      - stable
+    architectures:
+      - amd64
+    signed_by: "{{ ci_agent_docker_apt_key_dest }}"
     state: present
+
+# apt_repository wrote /etc/apt/sources.list.d/docker.list. Leaving it next to
+# the new .sources file makes apt see the same repo twice (warnings or a failed update).
+- name: Remove the legacy Docker apt .list after switching to deb822
+  ansible.builtin.file:
+    path: /etc/apt/sources.list.d/docker.list
+    state: absent
 
 - name: Install pinned Docker CE packages
   ansible.builtin.apt:
