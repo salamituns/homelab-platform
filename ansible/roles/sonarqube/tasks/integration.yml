@@ -1,0 +1,113 @@
+# The SonarQube side of the Jenkins integration (ADR 0011): the BelleShop project, a `jenkins` user that may only
+# browse and analyse that project, and its token for Jenkins (copied over by roles/jenkins).
+# No webhook: the scanner waits for the quality gate itself (sonar.qualitygate.wait=true), so nothing can POST a
+# fake "gate passed" to Jenkins, and SonarQube's SSRF guard on private webhook targets stays on.
+
+- name: Read the admin password
+  ansible.builtin.slurp:
+    src: "{{ sonarqube_initial_admin_password_file }}"
+  register: sonarqube_admin_pw_raw
+  no_log: true
+  when: not ansible_check_mode
+
+- name: Keep the admin password in a fact for the API calls
+  ansible.builtin.set_fact:
+    sonarqube_admin_pw: "{{ sonarqube_admin_pw_raw.content | b64decode | trim }}"
+  no_log: true
+  when: not ansible_check_mode
+
+- name: Integration with Jenkins
+  when: not ansible_check_mode
+  module_defaults:
+    ansible.builtin.uri:
+      user: admin
+      password: "{{ sonarqube_admin_pw }}"
+      force_basic_auth: true
+  block:
+    # --- project -------------------------------------------------------------------------------------------
+    - name: Look up the projects
+      ansible.builtin.uri:
+        url: "{{ sonarqube_api }}/projects/search?projects={{ item.key }}"
+      loop: "{{ sonarqube_projects }}"
+      loop_control:
+        label: "{{ item.key }}"
+      register: sonarqube_project_lookup
+
+    - name: Create missing projects
+      ansible.builtin.uri:
+        url: "{{ sonarqube_api }}/projects/create"
+        method: POST
+        body_format: form-urlencoded
+        body: { project: "{{ item.item.key }}", name: "{{ item.item.name }}" }
+      loop: "{{ sonarqube_project_lookup.results }}"
+      loop_control:
+        label: "{{ item.item.key }}"
+      when: item.json.components | length == 0
+      changed_when: true
+
+    # --- jenkins user: Browse + Execute Analysis on these projects only -------------------------------------
+    - name: Look up the jenkins user
+      ansible.builtin.uri:
+        url: "{{ sonarqube_api }}/users/search?q={{ sonarqube_ci_user }}"
+      register: sonarqube_ci_user_lookup
+
+    # A local password is required by the API but never used: Jenkins authenticates with the token.
+    - name: Create the jenkins user
+      ansible.builtin.uri:
+        url: "{{ sonarqube_api }}/users/create"
+        method: POST
+        body_format: form-urlencoded
+        body:
+          login: "{{ sonarqube_ci_user }}"
+          name: Jenkins CI
+          password: "Ci1!{{ lookup('ansible.builtin.password', '/dev/null', length=28, chars=['ascii_letters', 'digits']) }}"
+      no_log: true
+      when: sonarqube_ci_user_lookup.json.users | selectattr('login', 'equalto', sonarqube_ci_user) | list | length == 0
+      changed_when: true
+
+    - name: Grant browse and scan on each project
+      ansible.builtin.uri:
+        url: "{{ sonarqube_api }}/permissions/add_user"
+        method: POST
+        body_format: form-urlencoded
+        body: { login: "{{ sonarqube_ci_user }}", projectKey: "{{ item.0.key }}", permission: "{{ item.1 }}" }
+        status_code: 204
+      loop: "{{ sonarqube_projects | product(['user', 'scan']) | list }}"
+      loop_control:
+        label: "{{ item.0.key }} {{ item.1 }}"
+      changed_when: false   # idempotent on the server; it does not report whether anything changed
+
+    # --- token for Jenkins ----------------------------------------------------------------------------------
+    - name: Check for the saved Jenkins token
+      ansible.builtin.stat:
+        path: "{{ sonarqube_ci_token_file }}"
+      register: sonarqube_ci_token_stat
+
+    # Only when the file is missing: revoke a token of the same name (lost file), then generate a new one.
+    - name: Replace the Jenkins token
+      when: not sonarqube_ci_token_stat.stat.exists
+      no_log: true
+      block:
+        - name: Revoke an earlier token with the same name
+          ansible.builtin.uri:
+            url: "{{ sonarqube_api }}/user_tokens/revoke"
+            method: POST
+            body_format: form-urlencoded
+            body: { login: "{{ sonarqube_ci_user }}", name: "{{ sonarqube_ci_token_name }}" }
+            status_code: [204, 404]
+
+        - name: Generate the token
+          ansible.builtin.uri:
+            url: "{{ sonarqube_api }}/user_tokens/generate"
+            method: POST
+            body_format: form-urlencoded
+            body: { login: "{{ sonarqube_ci_user }}", name: "{{ sonarqube_ci_token_name }}", type: USER_TOKEN }
+          register: sonarqube_ci_token
+
+        - name: Save the token for the Jenkins role
+          ansible.builtin.copy:
+            content: "{{ sonarqube_ci_token.json.token }}"
+            dest: "{{ sonarqube_ci_token_file }}"
+            owner: root
+            group: root
+            mode: "0600"

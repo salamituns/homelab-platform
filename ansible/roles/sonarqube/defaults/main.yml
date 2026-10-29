@@ -50,3 +50,12 @@ sonarqube_initial_admin_password_file: /root/sonarqube-initial-admin-password
 # Daily pg_dump directory and retention count for sonarqube-backup.timer.
 sonarqube_backup_dir: /var/backups/sonarqube
 sonarqube_backup_keep: 7
+
+# Jenkins integration (tasks/integration.yml, ADR 0011). Projects are created here, not by the first scan,
+# so their permissions exist before any token can analyse them.
+sonarqube_api: "http://127.0.0.1:{{ sonarqube_web_port }}/api"
+sonarqube_projects:
+  - { key: belleshop, name: BelleShop }
+sonarqube_ci_user: jenkins
+sonarqube_ci_token_name: jenkins-ci
+sonarqube_ci_token_file: /etc/sonarqube/secrets/jenkins-token

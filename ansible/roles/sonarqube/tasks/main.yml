@@ -15,3 +15,6 @@
 
 - name: Configure daily SonarQube PostgreSQL dump systemd timer
   ansible.builtin.import_tasks: backup.yml
+
+- name: Create the BelleShop project, and the jenkins user and token
+  ansible.builtin.import_tasks: integration.yml
