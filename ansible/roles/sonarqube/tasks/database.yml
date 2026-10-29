@@ -14,7 +14,7 @@
     path: "/etc/postgresql/{{ sonarqube_postgresql_version }}/main/postgresql.conf"
     regexp: "^#?\\s*listen_addresses\\s*="
     line: "listen_addresses = '127.0.0.1'"
-  notify: Restart postgresql
+  register: sonarqube_pg_listen
   when: not ansible_check_mode
 
 - name: Enable and start postgresql service
@@ -24,8 +24,13 @@
     enabled: true
   ignore_errors: "{{ ansible_check_mode }}"
 
-- name: Flush handlers so PostgreSQL is listening on localhost before role/DB provisioning
-  ansible.builtin.meta: flush_handlers
+# Restarted here, not by a handler: flushing handlers at this point would also fire "Restart sonarqube",
+# queued by the unpack before sonarqube.service exists.
+- name: Restart PostgreSQL now if its listen address changed
+  ansible.builtin.systemd_service:
+    name: postgresql
+    state: restarted
+  when: sonarqube_pg_listen is changed   # noqa: no-handler (deliberate, see comment above)
 
 # Generate the database password directly on the host once into /etc/sonarqube/secrets/db_password
 # (root:sonar 0640) so it never lives in git or controller logs.

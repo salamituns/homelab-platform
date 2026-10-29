@@ -9,8 +9,7 @@ jenkins:
   markupFormatter:
     plainText: {}
   crumbIssuer:
-    standard:
-      excludeClientIPFromCrumb: false
+    standard: {}   # CSRF protection; excludeClientIPFromCrumb no longer exists in 2.580 (JCasC rejects unknown keys)
   securityRealm:
     local:
       allowsSignup: false
