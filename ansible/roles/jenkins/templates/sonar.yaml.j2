@@ -1,0 +1,8 @@
+# Managed by Ansible (homelab-platform, role: jenkins). Local edits are overwritten.
+unclassified:
+  sonarGlobalConfiguration:
+    buildWrapperEnabled: false
+    installations:
+      - name: sonarqube
+        serverUrl: "{{ jenkins_sonar_url }}"
+        credentialsId: sonarqube-token

@@ -1,0 +1,5 @@
+# Copy to ../../private/jenkins.yml (gitignored) and run:
+#   ansible-playbook playbooks/jenkins.yml -e @../private/jenkins.yml
+#
+# Gitea owner of the BelleShop repo. Keep this out of git (public mirror).
+jenkins_belleshop_owner: ""

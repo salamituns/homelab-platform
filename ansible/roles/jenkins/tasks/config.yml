@@ -26,6 +26,9 @@
     group: root
     mode: "0755"
 
+- name: Collect optional secrets and write them under /etc/jenkins/secrets
+  ansible.builtin.import_tasks: secrets.yml
+
 # Generated on the host once. umask 0077 then chmod 0640 so jenkins can read it for
 # JCasC ${readFile:...} without the value ever sitting in git or in Ansible logs.
 - name: Generate Jenkins admin password on first run
@@ -72,6 +75,9 @@
     mode: "0640"
   ignore_errors: "{{ ansible_check_mode }}"
   notify: Restart jenkins
+
+- name: Deploy optional JCasC fragments (credentials, Sonar, Gitea, jobs)
+  ansible.builtin.import_tasks: casc_extra.yml
 
 - name: Deploy Jenkins systemd drop-in (loopback + JCasC)
   ansible.builtin.template:
