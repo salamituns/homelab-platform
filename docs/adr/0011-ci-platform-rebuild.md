@@ -61,10 +61,18 @@ large companies. Gitea Actions runs GitHub Actions workflow syntax, so the lab c
 
 | Step | Status |
 |---|---|
-| Shut down 104-106, `onboot 0` | |
-| `nexus` + registry, nodes pull a test image | |
-| `sonarqube` | |
-| `jenkins` + `ci-agent` | |
-| `ci/` gates + BelleShop Jenkinsfile | |
-| Webhook, Gitleaks on PRs, Cosign | |
+| Shut down 104-106, `onboot 0` | Done 2026-10-29; delete after 2026-11-28 |
+| `nexus` + registry, nodes pull a test image | VM + role done; nodes trust the CA (`containerd_registry`). **Blocked**: CE serves no repository traffic until the owner accepts the Community EULA |
+| `sonarqube` | Done: project `belleshop`, user `jenkins` (browse + scan on that project only), token copied to Jenkins |
+| `jenkins` + `ci-agent` | Done: JCasC, 0 executors, agent online over WebSocket, gates in `/opt/ci-gates`, all lab CAs trusted (`lab_ca_trust`) |
+| `ci/` gates + BelleShop Jenkinsfile | Gates merged; Jenkinsfile on BelleShop branch `week3-pipeline`, merged after its first real run |
+| Webhook, Gitleaks on PRs, Cosign | Waiting for the owner: Gitea token for Jenkins, Cosign key pair |
 | Proof: PR with a CVE-laden base image blocked | |
+
+Changes to the decision made during rollout (2026-10-29):
+
+- **No SonarQube webhook.** SonarQube's SSRF guard rejects private webhook targets, and a webhook is a message a build
+  on the agent could forge. The scanner waits for the gate instead (`sonar.qualitygate.wait=true`).
+- Work split across agents (Antigravity, Cursor, Droid) in separate worktrees, each branch reviewed before merge;
+  every merge was then run against the real hosts, which caught one bug per role that `ansible-lint` passed.
+- All apt repositories moved to deb822 (`apt_repository` is removed in ansible-core 2.25).
