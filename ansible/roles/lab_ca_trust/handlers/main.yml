@@ -16,6 +16,6 @@
     state: restarted
   when:
     - lab_ca_trust_java_service | length > 0
-    - (lab_ca_trust_java_service ~ '.service') in services or lab_ca_trust_java_service in services
+    - (lab_ca_trust_java_service ~ '.service') in ansible_facts['services']
   ignore_errors: "{{ ansible_check_mode }}"
   listen: Update lab CA certificates
