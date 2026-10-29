@@ -78,7 +78,7 @@ the host itself or by the owner by hand; nothing secret is in git.
 | Nexus admin password | `nexus:/root/nexus-admin-password` (0600) | `nexus` role (first-start rotation) | Owner login; later playbook runs. If you change it in the UI, update the file too |
 | `ci-push` registry password | `nexus:/etc/nexus/secrets/ci-push` (0600) | `nexus` role (`openssl rand`, on the host) | Copied onto `jenkins:/etc/jenkins/secrets/nexus-ci-push` (0640) -> Jenkins credential `nexus-ci-push` |
 | `k8s-pull` registry password | `nexus:/etc/nexus/secrets/k8s-pull` (0600) | `nexus` role | The k8s `imagePullSecret`. Nothing in this repo creates it yet; do it by hand (unverified) |
-| SonarQube admin password | `sonarqube:/root/sonarqube-initial-admin-password` (0600) | `sonarqube` role (rotates built-in `admin/admin`) | Owner login. Still present on the host as of 2026-10-29 — shred after storing it |
+| SonarQube admin password | `sonarqube:/root/sonarqube-initial-admin-password` (0600) | `sonarqube` role (rotates built-in `admin/admin`) | Owner login, and `tasks/integration.yml` reads it on every run: keep it (change it in the UI = update the file) |
 | SonarQube DB password | `sonarqube:/etc/sonarqube/secrets/db_password` (0640 root:sonar) | `sonarqube` role, on the host | `sonar.properties`; handed to `psql` on stdin, never argv |
 | SonarQube token for Jenkins | `sonarqube:/etc/sonarqube/secrets/jenkins-token` (0600) | `sonarqube` role (integration) | Copied onto `jenkins:/etc/jenkins/secrets/sonarqube-token` -> JCasC credential |
 | SonarQube `jenkins` user's local password | Memory only, random | `sonarqube` role | Nobody — the API demands one, Jenkins uses the token |
@@ -99,8 +99,8 @@ curl -q --cacert ansible/files/ca/nexus-caddy-root.crt -sS -o /dev/null -w '%{ht
 # expected: 200
 
 curl -q --cacert ansible/files/ca/nexus-caddy-root.crt -sS -o /dev/null -w '%{http_code}\n' https://registry.home.arpa/v2/
-# expected: 403 — the registry answered (header docker-distribution-api-version: registry/2.0)
-# and refused anonymous access. A real pull needs ci-push / k8s-pull credentials.
+# expected after the EULA is accepted: 401 with a WWW-Authenticate challenge (anonymous refused).
+# 403 with no challenge = the EULA is not accepted yet (section 5).
 
 curl -q --cacert ansible/files/ca/sonarqube-caddy-root.crt -sS https://sonarqube.home.arpa/api/system/status
 # expected: {"id":"…","version":"26.10.0.133078","status":"UP"}
@@ -126,12 +126,12 @@ checked for this draft). A full pull test (`ctr images pull` on a node) is in th
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| First Nexus start: REST API answers `403`, the role's "Wait until Nexus accepts writes" loop runs out | Nexus Repository CE requires accepting the EULA before the API accepts writes (mechanism unverified; the 403 was observed) | Log into `https://nexus.home.arpa/` once as admin, accept the EULA, re-run the playbook |
+| The playbook succeeds, but every registry request (even as admin) gets `403`, with no `WWW-Authenticate` challenge, so `docker login` fails | Nexus Repository CE serves no repository traffic until its Community EULA is accepted (`GET /service/rest/v1/system/eula` shows `"accepted": false`) | The owner accepts the EULA (a legal decision, not automated without that decision): UI as admin, or the role's EULA variable once set |
 | SonarQube never comes up on first run; `web.log` shows a failure writing `extensions/downloads` | The systemd unit is `ProtectSystem=strict`; SonarQube refuses to start if it cannot create its marketplace download dir | Role now creates `/opt/sonarqube-<version>/extensions/downloads` (`sonar:sonar`) and lists it in `ReadWritePaths`. Nothing to do |
 | Jenkins does not apply JCasC / fails on boot with an unknown-config-key error | `crumbIssuer.standard.excludeClientFromCrumb` no longer exists in 2.580; JCasC rejects unknown keys instead of ignoring them | Template now uses `crumbIssuer: {standard: {}}`. When upgrading Jenkins, re-check every JCasC key against that release |
 | The agent fails to connect; its log shows an unrecognized `-secretFile` option | agent.jar has no `-secretFile`; the supported form reads the file: `-secret @<path>` — also keeps the secret out of `ps` | Template now uses `-secret @{{ ci_agent_secret_path }}` |
 | A new record in `dns.yml` (e.g. `registry.home.arpa`) does not resolve from clients, though it is in git | The record list is only data; the DNS server on `gateway` publishes it when its playbook runs | `ansible-playbook playbooks/dns.yml --limit gateway` (see runbooks/internal-dns.md) |
-| A SonarQube quality-gate webhook to Jenkins never arrives | SonarQube's SSRF guard blocks webhooks to private addresses, and we want it to stay on — anything that can POST could fake "gate passed" | No webhook: the scanner blocks on the gate (`sonar.qualitygate.wait=true`) and Jenkins uses `waitForQualityGate abortPipeline: true` |
+| Creating a SonarQube webhook to Jenkins fails: `Invalid URL: ... site-local ... addresses are not allowed` | SonarQube's SSRF guard rejects private targets, and it stays on. A webhook would also be something a build on the agent could fake ("gate passed") | No webhook at all: the scanner waits for the gate itself (`-Dsonar.qualitygate.wait=true`) and exits non-zero when it fails. The Jenkinsfile has no `waitForQualityGate` stage |
 | First run dies at "Restart sonarqube" before the unit exists | An early `flush_handlers` fired a restart queued by the unpack, before `sonarqube.service` was deployed | PostgreSQL is now restarted inline in `database.yml` (no early flush) |
 | PostgreSQL role/DB creation failed while the password was visible in `ps` | The password was passed as a `psql` argument (argv is world-readable) | The role pipes it on stdin; check `database.yml` when touching this |
 | Jenkins came up with the setup wizard despite JCasC | The packaged unit reads `JAVA_OPTS`; the old `JENKINS_JAVA_OPTIONS` name was silently ignored | The drop-in sets `JAVA_OPTS=... -Djenkins.install.runSetupWizard=false` |
