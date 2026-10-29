@@ -30,6 +30,14 @@
     label: "{{ item.item }}"
   when: not ansible_check_mode
 
+- name: Create the lab CA directory
+  ansible.builtin.file:
+    path: "{{ lab_ca_trust_dest_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
 - name: Install each lab CA into the system trust store directory
   ansible.builtin.copy:
     src: "{{ lab_ca_trust_ca_dir }}/{{ item }}{{ lab_ca_trust_ca_suffix }}"

@@ -11,7 +11,7 @@ ci_agent_jar_path: /usr/local/lib/jenkins-agent/agent.jar
 ci_agent_java_package: openjdk-21-jre-headless
 
 # Paved-road scripts from this repo (ci/gates/*.sh), not generated on the host.
-ci_agent_gates_src: "{{ playbook_dir }}/../ci/gates"
+ci_agent_gates_src: "{{ playbook_dir }}/../../ci/gates"   # playbooks/ -> ansible/ -> repo root
 ci_agent_gates_dest: /opt/ci-gates
 
 # Docker CE 29.9.2 + containerd 2.4.2-3 from download.docker.com noble/stable
