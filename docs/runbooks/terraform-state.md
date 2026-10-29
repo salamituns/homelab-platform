@@ -67,7 +67,9 @@ copies (`.backup` still holds the cloud-init passwords; the bucket is now the so
 rm -P terraform/proxmox/terraform.tfstate terraform/proxmox/terraform.tfstate.backup terraform/proxmox/tfplan
 ```
 
-Keep `private/terraform.tfstate.pre-s3` until the first PBS backup of sectools after the migration, then `rm -P` it.
+Keep `private/terraform.tfstate.pre-s3` until the first PBS backup of sectools after the migration, then `rm` it
+(deleted 2026-10-29). On macOS, `rm -P` and `shred` do not overwrite anything: APFS is copy-on-write and the
+SSD remaps blocks. FileVault (on) is what keeps the freed blocks unreadable.
 
 ## 5. Prove the lock works
 

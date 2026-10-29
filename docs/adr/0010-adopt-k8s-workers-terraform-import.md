@@ -46,7 +46,8 @@ but its replicas need free disk, which these workers do not have.
 | Guest | `grow-root-disk.yml`, one node at a time: WorkerNode1 79G, 35% used; WorkerNode2 79G, 41% used; no DiskPressure, all pods and Argo apps healthy |
 
 Left pending on both VMs until their next drained reboot (harmless): `boot: order=scsi0` and the
-rewritten `scsi0` option string (same values as the defaults).
+rewritten `scsi0` option string (same values as the defaults). Applied 2026-10-29 by drained `qm reboot`s
+of all three nodes (`docs/runbooks/drained-node-reboot.md`): `qm pending` empty, `terraform plan`: No changes.
 
 MasterNode (108) imported the same day: resource renamed `k8s_worker` -> `k8s_node` (`moved` blocks, workers
 unchanged), plan `1 to import, 1 to change` (ISO ejected, boot order pending), disk left at 40 GB.
