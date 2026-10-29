@@ -40,6 +40,43 @@ locals {
       data_disks   = [{ size_gb = 500, backup = false }]
       tags         = ["backup", "platform"]
     }
+    # CI platform (docs/adr/0011). Replace the hand-built SonarQuality/JenkinsCICD/Nexus (104-106) on their IPs.
+    # Nexus first: the registry for every image. Blobs go on the data disk, which PBS backs up.
+    nexus = {
+      vm_id        = 124
+      ipv4_address = "192.168.1.87"
+      cores        = 4
+      memory_mb    = 6144
+      disk_gb      = 40
+      data_disks   = [{ size_gb = 100 }]
+      tags         = ["ci", "registry"]
+    }
+    sonarqube = {
+      vm_id        = 125
+      ipv4_address = "192.168.1.86"
+      cores        = 2
+      memory_mb    = 4096
+      disk_gb      = 40
+      tags         = ["ci"]
+    }
+    # Controller only: 0 executors, holds the credentials, never runs build code.
+    jenkins = {
+      vm_id        = 126
+      ipv4_address = "192.168.1.88"
+      cores        = 2
+      memory_mb    = 2048
+      disk_gb      = 40
+      tags         = ["ci"]
+    }
+    # Runs the builds (untrusted code) and the scanners; connects inbound to the controller.
+    ci-agent = {
+      vm_id        = 127
+      ipv4_address = "192.168.1.93"
+      cores        = 2
+      memory_mb    = 4096
+      disk_gb      = 60
+      tags         = ["ci"]
+    }
   }
 }
 

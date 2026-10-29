@@ -1,8 +1,0 @@
-# Jenkins runs on the host (java, :8080), so plain ufw rules apply.
-firewall_service_rules:
-  - port: 8080
-    clients: "{{ lab_admin_clients + [{'name': 'gitea', 'ip': '192.168.1.97'}] }}"   # gitea: webhooks
-firewall_delete_rules:
-  - { src: 10.2.0.0/21 }               # retired subnet
-  - { port: "8080", proto: tcp }       # was open to the whole LAN
-  - { port: "8177", proto: tcp }       # nothing listens

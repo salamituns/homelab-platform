@@ -7,7 +7,7 @@
 # Recovery if a host loses the network: from tuns,
 #   qm guest exec <vmid> -- sh -c 'rm /etc/netplan/60-static.yaml && netplan apply'
 - name: Pin VMs to static addresses
-  hosts: k8s:cicd:Tomcat   # the legacy DHCP VMs; Terraform-built VMs are static from cloud-init
+  hosts: k8s:Tomcat   # the legacy DHCP VMs; Terraform-built VMs are static from cloud-init
   serial: 1   # a bad network change shows up on one host only
   vars:
     ansible_host: "{{ static_ip_via | default(inventory_hostname) }}"

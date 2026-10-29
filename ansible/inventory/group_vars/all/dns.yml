@@ -10,9 +10,10 @@ internal_dns_records:
   - { names: [ubuntunew], ip: 192.168.1.83 }           # retired Gitea VM, shut down 2026-10-26, delete after 2026-11-25
   - { names: [workernode2], ip: 192.168.1.84 }
   - { names: [tomcat], ip: 192.168.1.85 }
-  - { names: [sonar, sonarquality], ip: 192.168.1.86 }
-  - { names: [nexus], ip: 192.168.1.87 }
-  - { names: [jenkins, jenkinscicd], ip: 192.168.1.88 }
+  - { names: [sonarqube, sonar], ip: 192.168.1.86 }      # ADR 0011
+  - { names: [nexus, registry], ip: 192.168.1.87 }     # registry: Docker repos via Caddy (ADR 0011)
+  - { names: [jenkins], ip: 192.168.1.88 }
+  - { names: [ci-agent], ip: 192.168.1.93 }
   - { names: [workernode1], ip: 192.168.1.89 }
   - { names: [master, k8s-api], ip: 192.168.1.90 }
   - { names: [dockerapp], ip: 192.168.1.92 }

@@ -1,4 +1,4 @@
-# Applied to: gitea, cicd and DockerApp (playbooks/service-firewall.yml). Not on k8s nodes: they need 6443, 10250,
+# Applied to: gitea, the ci hosts and DockerApp (via their playbooks). Not on k8s nodes: they need 6443, 10250,
 # flannel 8472/udp and NodePorts first.
 firewall_default_incoming_policy: deny
 firewall_default_outgoing_policy: allow
