@@ -1,0 +1,8 @@
+# Managed by the containerd_registry role. Per-host registry config for containerd's CRI plugin
+# (docs/hosts.md in the containerd repo). Pulls from {{ item.host }} verify the server against the
+# CA below: Caddy's local root CA, fetched to this repo by the nexus role (ADR 0011).
+server = "https://{{ item.host }}"
+
+[host."https://{{ item.host }}"]
+  capabilities = ["pull", "resolve"]
+  ca = "{{ containerd_registry_certs_d }}/{{ item.host }}/ca.crt"

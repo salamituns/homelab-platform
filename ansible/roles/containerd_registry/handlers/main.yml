@@ -1,0 +1,18 @@
+# Restarting containerd does NOT stop running pods: the containerd-shim processes keep the
+# containers alive independently and the kubelet reconnects to the fresh socket. The worst case
+# is a short window in which new image pulls fail. The restart only fires when config_path had
+# to be set (see tasks/main.yml), and the playbook runs with serial: 1, so one node at a time.
+- name: Restart containerd
+  ansible.builtin.systemd_service:
+    name: containerd
+    state: restarted
+  ignore_errors: "{{ ansible_check_mode }}"
+
+# Do not move on until the runtime is back, so a failed restart shows up immediately.
+- name: Wait for the containerd socket
+  ansible.builtin.wait_for:
+    path: /run/containerd/containerd.sock
+    state: present
+    timeout: 60
+  listen: Restart containerd
+  when: not ansible_check_mode

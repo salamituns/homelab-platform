@@ -1,0 +1,14 @@
+# Trust the lab image registry's TLS CA on the k8s nodes (ADR 0011): nodes pull their images from
+# registry.home.arpa, which Caddy on the nexus host fronts with `tls internal`. Run AFTER the
+# nexus role has fetched the root CA to ansible/files/ca/nexus-caddy-root.crt.
+# serial: 1 so that, on the off chance the role has to restart containerd, it happens on one
+# node at a time (the restart does not stop running pods; see the role's README).
+# Usage:
+#   ansible-playbook playbooks/k8s-registry-trust.yml --check --diff
+#   ansible-playbook playbooks/k8s-registry-trust.yml
+- name: Trust the lab image registry on the k8s nodes
+  hosts: k8s
+  serial: 1   # a misbehaving node shows up one at a time, not all three at once
+  become: true
+  roles:
+    - containerd_registry
