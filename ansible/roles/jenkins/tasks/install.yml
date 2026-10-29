@@ -16,10 +16,20 @@
     mode: "0644"
 
 - name: Add Jenkins debian-stable apt repository
-  ansible.builtin.apt_repository:
-    repo: "{{ jenkins_apt_repo }}"
-    filename: jenkins
+  ansible.builtin.deb822_repository:
+    name: jenkins
+    types: deb
+    uris: "{{ jenkins_apt_uris }}"
+    suites: "{{ jenkins_apt_suites }}"
+    signed_by: "{{ jenkins_apt_key_dest }}"
     state: present
+
+# apt_repository wrote /etc/apt/sources.list.d/jenkins.list. Leaving it next to
+# the new .sources file makes apt see the same repo twice (warnings or a failed update).
+- name: Remove the legacy Jenkins apt .list after switching to deb822
+  ansible.builtin.file:
+    path: /etc/apt/sources.list.d/jenkins.list
+    state: absent
 
 - name: Install the pinned Jenkins LTS package
   ansible.builtin.apt:
