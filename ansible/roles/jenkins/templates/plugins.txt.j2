@@ -1,0 +1,5 @@
+# Managed by Ansible (homelab-platform, role: jenkins). Local edits are overwritten.
+# Exact versions for Jenkins {{ jenkins_version }} (LTS update center, 2026-10-29).
+{% for plugin in jenkins_plugins %}
+{{ plugin.id }}:{{ plugin.ver }}
+{% endfor %}

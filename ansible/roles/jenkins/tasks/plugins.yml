@@ -1,0 +1,65 @@
+- name: Create plugin-manager install directory
+  ansible.builtin.file:
+    path: /opt/jenkins-plugin-manager
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Download pinned jenkins-plugin-manager jar verified by SHA-256
+  ansible.builtin.get_url:
+    url: "{{ jenkins_plugin_manager_url }}"
+    dest: "{{ jenkins_plugin_manager_dest }}"
+    checksum: "sha256:{{ jenkins_plugin_manager_sha256 }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Create /etc/jenkins
+  ansible.builtin.file:
+    path: /etc/jenkins
+    state: directory
+    owner: root
+    group: jenkins
+    mode: "0750"
+  ignore_errors: "{{ ansible_check_mode }}"
+
+- name: Deploy plugins.txt with exact plugin versions
+  ansible.builtin.template:
+    src: plugins.txt.j2
+    dest: /etc/jenkins/plugins.txt
+    owner: root
+    group: jenkins
+    mode: "0644"
+  ignore_errors: "{{ ansible_check_mode }}"
+
+- name: Install pinned plugins into JENKINS_HOME
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/java
+      - -jar
+      - "{{ jenkins_plugin_manager_dest }}"
+      - --war
+      - "{{ jenkins_war_path }}"
+      - --plugin-file
+      - /etc/jenkins/plugins.txt
+      - --plugin-download-directory
+      - "{{ jenkins_home }}/plugins"
+      - --jenkins-version
+      - "{{ jenkins_version }}"
+      - --verbose
+  register: jenkins_plugin_install
+  changed_when: >-
+    'Downloading' in (jenkins_plugin_install.stdout | default(''))
+    or 'Downloaded' in (jenkins_plugin_install.stdout | default(''))
+  when: not ansible_check_mode
+  notify: Restart jenkins
+
+- name: Jenkins user owns the plugin directory
+  ansible.builtin.file:
+    path: "{{ jenkins_home }}/plugins"
+    state: directory
+    owner: jenkins
+    group: jenkins
+    recurse: true
+  when: not ansible_check_mode

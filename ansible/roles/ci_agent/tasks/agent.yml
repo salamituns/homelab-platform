@@ -1,0 +1,86 @@
+- name: Create agent.jar directory
+  ansible.builtin.file:
+    path: "{{ ci_agent_jar_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Create /etc/jenkins-agent
+  ansible.builtin.file:
+    path: /etc/jenkins-agent
+    state: directory
+    owner: root
+    group: "{{ ci_agent_group }}"
+    mode: "0750"
+
+# Downloaded from our controller (not the public internet), so there is no vendor
+# SHA-256 to pin. TLS + the Jenkins Caddy CA is the authenticity check.
+- name: Download agent.jar from the Jenkins controller
+  ansible.builtin.get_url:
+    url: "{{ ci_agent_jenkins_url }}jnlpJars/agent.jar"
+    dest: "{{ ci_agent_jar_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when:
+    - not ansible_check_mode
+    - ci_agent_jenkins_ca.stat.exists
+  notify: Restart jenkins-agent
+
+- name: Read Jenkins admin password on the controller
+  ansible.builtin.slurp:
+    src: /etc/jenkins/secrets/admin-password
+  delegate_to: "{{ ci_agent_controller_host }}"
+  register: ci_agent_admin_password
+  no_log: true
+  when: not ansible_check_mode
+
+# Loopback on the controller: no extra TLS, and the secret never crosses the LAN
+# as a Jenkins HTTP response to the agent. The agent play copies it onto disk.
+# Chosen over jenkins-cli Groovy because this is the documented jnlp endpoint
+# (brief) and needs no extra jar.
+- name: Fetch the inbound agent secret from the controller JNLP endpoint
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:8080/computer/{{ ci_agent_name }}/jenkins-agent.jnlp"
+    url_username: "{{ ci_agent_jenkins_admin_user }}"
+    url_password: "{{ ci_agent_admin_password.content | b64decode }}"
+    force_basic_auth: true
+    return_content: true
+    status_code: 200
+  delegate_to: "{{ ci_agent_controller_host }}"
+  register: ci_agent_jnlp
+  no_log: true
+  until: ci_agent_jnlp.status | default(0) == 200
+  retries: 30
+  delay: 5
+  when: not ansible_check_mode
+
+- name: Write the inbound agent secret
+  ansible.builtin.copy:
+    dest: "{{ ci_agent_secret_path }}"
+    content: "{{ ci_agent_jnlp.content | regex_findall('<argument>([^<]+)</argument>') | first }}"
+    owner: "{{ ci_agent_user }}"
+    group: "{{ ci_agent_group }}"
+    mode: "0600"
+  no_log: true
+  diff: false
+  when: not ansible_check_mode
+  notify: Restart jenkins-agent
+
+- name: Deploy jenkins-agent.service
+  ansible.builtin.template:
+    src: jenkins-agent.service.j2
+    dest: /etc/systemd/system/jenkins-agent.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart jenkins-agent
+
+- name: Enable and start jenkins-agent
+  ansible.builtin.systemd_service:
+    name: jenkins-agent
+    state: started
+    enabled: true
+    daemon_reload: true
+  ignore_errors: "{{ ansible_check_mode }}"

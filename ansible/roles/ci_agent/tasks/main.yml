@@ -1,0 +1,14 @@
+- name: Install Docker CE (pinned and held) and the jenkins-agent user
+  ansible.builtin.import_tasks: docker.yml
+
+- name: Trust the Jenkins Caddy CA and install Java
+  ansible.builtin.import_tasks: trust.yml
+
+- name: Install pinned scanners into /usr/local/bin
+  ansible.builtin.import_tasks: scanners.yml
+
+- name: Trust the Nexus registry CA when the controller already has it
+  ansible.builtin.import_tasks: registry.yml
+
+- name: Install agent.jar, fetch the inbound secret, and start jenkins-agent
+  ansible.builtin.import_tasks: agent.yml

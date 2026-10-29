@@ -1,0 +1,10 @@
+# Managed by Ansible (homelab-platform, role: jenkins). Local edits are overwritten.
+#
+# The package unit starts Jenkins on 0.0.0.0:8080. Bind loopback only; Caddy is the
+# LAN front door. Setup wizard off because JCasC defines the admin user.
+# CASC_JENKINS_CONFIG is a directory so later job/credential YAML can drop in beside jenkins.yaml.
+[Service]
+Environment="JENKINS_LISTEN_ADDRESS={{ jenkins_listen_address }}"
+Environment="JENKINS_PORT={{ jenkins_http_port }}"
+Environment="JENKINS_JAVA_OPTIONS=-Djava.awt.headless=true -Djenkins.install.runSetupWizard=false"
+Environment="CASC_JENKINS_CONFIG={{ jenkins_casc_dir }}"

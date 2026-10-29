@@ -1,0 +1,46 @@
+# Managed by Ansible (homelab-platform, role: jenkins). Local edits are overwritten.
+#
+# No credentials, jobs, or Gitea Branch Source yet. Those belong in extra YAML
+# under {{ jenkins_casc_dir }} in a later step (see the role README).
+jenkins:
+  numExecutors: 0
+  mode: EXCLUSIVE
+  slaveAgentPort: -1
+  markupFormatter:
+    plainText: {}
+  crumbIssuer:
+    standard:
+      excludeClientIPFromCrumb: false
+  securityRealm:
+    local:
+      allowsSignup: false
+      users:
+        - id: "{{ jenkins_admin_user }}"
+          password: "${readFile:{{ jenkins_admin_password_file }}}"
+  authorizationStrategy:
+    globalMatrix:
+      entries:
+        - user:
+            name: "{{ jenkins_admin_user }}"
+            permissions:
+              - Overall/Administer
+        - group:
+            name: authenticated
+            permissions:
+              - Overall/Read
+  nodes:
+    - permanent:
+        name: "{{ jenkins_agent_name }}"
+        labelString: "{{ jenkins_agent_label }}"
+        remoteFS: "{{ jenkins_agent_remote_fs }}"
+        numExecutors: {{ jenkins_agent_executors }}
+        mode: NORMAL
+        retentionStrategy: "always"
+        launcher:
+          inbound:
+            webSocket: true
+
+unclassified:
+  location:
+    url: "{{ jenkins_url }}"
+    adminAddress: admin@home.arpa

@@ -1,0 +1,55 @@
+ci_agent_jenkins_admin_user: admin
+ci_agent_user: jenkins-agent
+ci_agent_group: jenkins-agent
+ci_agent_home: /var/lib/jenkins-agent
+ci_agent_name: ci-agent
+ci_agent_jenkins_url: https://jenkins.home.arpa/
+ci_agent_controller_host: jenkins
+ci_agent_secret_path: /etc/jenkins-agent/secret
+ci_agent_jar_dir: /usr/local/lib/jenkins-agent
+ci_agent_jar_path: /usr/local/lib/jenkins-agent/agent.jar
+ci_agent_java_package: openjdk-21-jre-headless
+
+# Docker CE 29.9.2 + containerd 2.4.2-3 from download.docker.com noble/stable
+# (pool listing 2026-10-29). Held so unattended-upgrades cannot float the engine.
+ci_agent_docker_apt_key_url: https://download.docker.com/linux/ubuntu/gpg
+ci_agent_docker_apt_key_dest: /usr/share/keyrings/docker.asc
+ci_agent_docker_packages:
+  - "docker-ce=5:29.9.2-1~ubuntu.24.04~noble"
+  - "docker-ce-cli=5:29.9.2-1~ubuntu.24.04~noble"
+  - "containerd.io=2.4.2-3~ubuntu.24.04~noble"
+  - "docker-buildx-plugin=0.38.1-1~ubuntu.24.04~noble"
+ci_agent_docker_hold:
+  - docker-ce
+  - docker-ce-cli
+  - containerd.io
+  - docker-buildx-plugin
+
+ci_agent_jenkins_ca_src: "{{ playbook_dir }}/../files/ca/jenkins-caddy-root.crt"
+ci_agent_jenkins_ca_dest: /usr/local/share/ca-certificates/jenkins-home-arpa.crt
+
+# Copied only when the Nexus play has already fetched it (Nexus may be built later).
+ci_agent_registry_hostname: registry.home.arpa
+ci_agent_nexus_ca_src: "{{ playbook_dir }}/../files/ca/nexus-caddy-root.crt"
+ci_agent_registry_ca_dest: "/etc/docker/certs.d/{{ ci_agent_registry_hostname }}/ca.crt"
+
+# Scanner checksums from each vendor's release checksums.txt (checked 2026-10-29).
+ci_agent_trivy_version: "0.76.1"
+ci_agent_trivy_sha256: "c7cbe3137fb8a48a17574bede3dd6beb16742d1e9772929940fc90082c39d9c0"
+ci_agent_trivy_rel: https://github.com/aquasecurity/trivy/releases/download
+ci_agent_trivy_url: "{{ ci_agent_trivy_rel }}/v{{ ci_agent_trivy_version }}/trivy_{{ ci_agent_trivy_version }}_Linux-64bit.tar.gz"
+
+ci_agent_syft_version: "1.55.0"
+ci_agent_syft_sha256: "bb65249542db5fedeeb4d3f9b018b75e7264dbfbbb10486f044581a92f90490d"
+ci_agent_syft_rel: https://github.com/anchore/syft/releases/download
+ci_agent_syft_url: "{{ ci_agent_syft_rel }}/v{{ ci_agent_syft_version }}/syft_{{ ci_agent_syft_version }}_linux_amd64.tar.gz"
+
+ci_agent_cosign_version: "3.1.4"
+ci_agent_cosign_sha256: "424e2c97d0b45fd7a6b608a87f090f35633f4c23ece5f092d48bba11aaf4bbfa"
+ci_agent_cosign_rel: https://github.com/sigstore/cosign/releases/download
+ci_agent_cosign_url: "{{ ci_agent_cosign_rel }}/v{{ ci_agent_cosign_version }}/cosign-linux-amd64"
+
+ci_agent_gitleaks_version: "8.30.1"
+ci_agent_gitleaks_sha256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+ci_agent_gitleaks_rel: https://github.com/gitleaks/gitleaks/releases/download
+ci_agent_gitleaks_url: "{{ ci_agent_gitleaks_rel }}/v{{ ci_agent_gitleaks_version }}/gitleaks_{{ ci_agent_gitleaks_version }}_linux_x64.tar.gz"

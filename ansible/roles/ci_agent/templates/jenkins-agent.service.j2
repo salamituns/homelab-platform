@@ -1,0 +1,40 @@
+# Managed by Ansible (homelab-platform, role: ci_agent). Local edits are overwritten.
+#
+# Inbound WebSocket: this host dials https://jenkins.home.arpa/, so the controller
+# holds no SSH key. -secretFile keeps the secret off the process argument list.
+# Sandboxing is lighter than gitea: the agent must reach /run/docker.sock (docker
+# group) and write workspaces under {{ ci_agent_home }}.
+[Unit]
+Description=Jenkins inbound agent (ci-agent)
+After=network-online.target docker.service
+Wants=network-online.target docker.service
+
+[Service]
+Type=simple
+User={{ ci_agent_user }}
+Group={{ ci_agent_group }}
+WorkingDirectory={{ ci_agent_home }}
+Environment=HOME={{ ci_agent_home }} USER={{ ci_agent_user }}
+ExecStart=/usr/bin/java -jar {{ ci_agent_jar_path }} \
+  -url {{ ci_agent_jenkins_url }} \
+  -name {{ ci_agent_name }} \
+  -secretFile {{ ci_agent_secret_path }} \
+  -webSocket \
+  -workDir {{ ci_agent_home }}
+Restart=on-failure
+RestartSec=5s
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths={{ ci_agent_home }}
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,139 @@
+- name: Create versioned scanner directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - /opt/ci-scanners
+    - "/opt/ci-scanners/trivy-{{ ci_agent_trivy_version }}"
+    - "/opt/ci-scanners/syft-{{ ci_agent_syft_version }}"
+    - "/opt/ci-scanners/gitleaks-{{ ci_agent_gitleaks_version }}"
+
+- name: Download pinned Trivy archive verified by SHA-256
+  ansible.builtin.get_url:
+    url: "{{ ci_agent_trivy_url }}"
+    dest: "/opt/ci-scanners/trivy_{{ ci_agent_trivy_version }}_Linux-64bit.tar.gz"
+    checksum: "sha256:{{ ci_agent_trivy_sha256 }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Unpack Trivy
+  ansible.builtin.unarchive:
+    src: "/opt/ci-scanners/trivy_{{ ci_agent_trivy_version }}_Linux-64bit.tar.gz"
+    dest: "/opt/ci-scanners/trivy-{{ ci_agent_trivy_version }}"
+    remote_src: true
+    extra_opts:
+      - --no-same-owner
+    include:
+      - trivy
+    owner: root
+    group: root
+    creates: "/opt/ci-scanners/trivy-{{ ci_agent_trivy_version }}/trivy"
+
+- name: Make the Trivy binary executable
+  ansible.builtin.file:
+    path: "/opt/ci-scanners/trivy-{{ ci_agent_trivy_version }}/trivy"
+    owner: root
+    group: root
+    mode: "0755"
+  when: not ansible_check_mode
+
+- name: Point /usr/local/bin/trivy at the pinned version
+  ansible.builtin.file:
+    src: "/opt/ci-scanners/trivy-{{ ci_agent_trivy_version }}/trivy"
+    dest: /usr/local/bin/trivy
+    state: link
+    force: true
+
+- name: Download pinned Syft archive verified by SHA-256
+  ansible.builtin.get_url:
+    url: "{{ ci_agent_syft_url }}"
+    dest: "/opt/ci-scanners/syft_{{ ci_agent_syft_version }}_linux_amd64.tar.gz"
+    checksum: "sha256:{{ ci_agent_syft_sha256 }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Unpack Syft
+  ansible.builtin.unarchive:
+    src: "/opt/ci-scanners/syft_{{ ci_agent_syft_version }}_linux_amd64.tar.gz"
+    dest: "/opt/ci-scanners/syft-{{ ci_agent_syft_version }}"
+    remote_src: true
+    extra_opts:
+      - --no-same-owner
+    include:
+      - syft
+    owner: root
+    group: root
+    creates: "/opt/ci-scanners/syft-{{ ci_agent_syft_version }}/syft"
+
+- name: Make the Syft binary executable
+  ansible.builtin.file:
+    path: "/opt/ci-scanners/syft-{{ ci_agent_syft_version }}/syft"
+    owner: root
+    group: root
+    mode: "0755"
+  when: not ansible_check_mode
+
+- name: Point /usr/local/bin/syft at the pinned version
+  ansible.builtin.file:
+    src: "/opt/ci-scanners/syft-{{ ci_agent_syft_version }}/syft"
+    dest: /usr/local/bin/syft
+    state: link
+    force: true
+
+- name: Download pinned Cosign binary verified by SHA-256
+  ansible.builtin.get_url:
+    url: "{{ ci_agent_cosign_url }}"
+    dest: "/opt/ci-scanners/cosign-{{ ci_agent_cosign_version }}"
+    checksum: "sha256:{{ ci_agent_cosign_sha256 }}"
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Point /usr/local/bin/cosign at the pinned version
+  ansible.builtin.file:
+    src: "/opt/ci-scanners/cosign-{{ ci_agent_cosign_version }}"
+    dest: /usr/local/bin/cosign
+    state: link
+    force: true
+
+- name: Download pinned Gitleaks archive verified by SHA-256
+  ansible.builtin.get_url:
+    url: "{{ ci_agent_gitleaks_url }}"
+    dest: "/opt/ci-scanners/gitleaks_{{ ci_agent_gitleaks_version }}_linux_x64.tar.gz"
+    checksum: "sha256:{{ ci_agent_gitleaks_sha256 }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Unpack Gitleaks
+  ansible.builtin.unarchive:
+    src: "/opt/ci-scanners/gitleaks_{{ ci_agent_gitleaks_version }}_linux_x64.tar.gz"
+    dest: "/opt/ci-scanners/gitleaks-{{ ci_agent_gitleaks_version }}"
+    remote_src: true
+    extra_opts:
+      - --no-same-owner
+    include:
+      - gitleaks
+    owner: root
+    group: root
+    creates: "/opt/ci-scanners/gitleaks-{{ ci_agent_gitleaks_version }}/gitleaks"
+
+- name: Make the Gitleaks binary executable
+  ansible.builtin.file:
+    path: "/opt/ci-scanners/gitleaks-{{ ci_agent_gitleaks_version }}/gitleaks"
+    owner: root
+    group: root
+    mode: "0755"
+  when: not ansible_check_mode
+
+- name: Point /usr/local/bin/gitleaks at the pinned version
+  ansible.builtin.file:
+    src: "/opt/ci-scanners/gitleaks-{{ ci_agent_gitleaks_version }}/gitleaks"
+    dest: /usr/local/bin/gitleaks
+    state: link
+    force: true

@@ -1,0 +1,67 @@
+- name: Download Docker apt signing key
+  ansible.builtin.get_url:
+    url: "{{ ci_agent_docker_apt_key_url }}"
+    dest: "{{ ci_agent_docker_apt_key_dest }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Add Docker official apt repository
+  ansible.builtin.apt_repository:
+    repo: >-
+      deb [arch=amd64 signed-by={{ ci_agent_docker_apt_key_dest }}]
+      https://download.docker.com/linux/ubuntu
+      {{ ansible_facts['distribution_release'] }} stable
+    filename: docker
+    state: present
+
+- name: Install pinned Docker CE packages
+  ansible.builtin.apt:
+    name: "{{ ci_agent_docker_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Hold Docker CE packages at the pinned versions
+  ansible.builtin.dpkg_selections:
+    name: "{{ item }}"
+    selection: hold
+  loop: "{{ ci_agent_docker_hold }}"
+  ignore_errors: "{{ ansible_check_mode }}"
+
+- name: Ensure jenkins-agent system group exists
+  ansible.builtin.group:
+    name: "{{ ci_agent_group }}"
+    system: true
+    state: present
+
+# Members of `docker` can talk to the daemon socket, which is root on this VM.
+# That is exactly why the agent is its own machine (ADR 0011): a job that reaches
+# Docker cannot also reach the controller's credentials.
+- name: Ensure jenkins-agent system user exists and is in the docker group
+  ansible.builtin.user:
+    name: "{{ ci_agent_user }}"
+    group: "{{ ci_agent_group }}"
+    groups: docker
+    append: true
+    system: true
+    shell: /usr/sbin/nologin
+    home: "{{ ci_agent_home }}"
+    create_home: true
+    state: present
+  ignore_errors: "{{ ansible_check_mode }}"
+
+- name: Create Jenkins agent work directory
+  ansible.builtin.file:
+    path: "{{ ci_agent_home }}"
+    state: directory
+    owner: "{{ ci_agent_user }}"
+    group: "{{ ci_agent_group }}"
+    mode: "0750"
+
+- name: Enable and start docker (unix socket only; no published ports)
+  ansible.builtin.systemd_service:
+    name: docker
+    state: started
+    enabled: true
+  ignore_errors: "{{ ansible_check_mode }}"

@@ -1,0 +1,8 @@
+- name: Install Java, the Jenkins apt repo, and the pinned LTS package
+  ansible.builtin.import_tasks: install.yml
+
+- name: Install pinned plugins with jenkins-plugin-manager
+  ansible.builtin.import_tasks: plugins.yml
+
+- name: Configure JCasC, listen address, and start Jenkins
+  ansible.builtin.import_tasks: config.yml
