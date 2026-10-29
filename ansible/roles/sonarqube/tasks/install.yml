@@ -78,3 +78,15 @@
     state: link
     force: true   # also lets --check pass before the archive is unpacked
   notify: Restart sonarqube
+
+# SonarQube creates extensions/downloads at startup (marketplace staging) and stops if it cannot.
+# Only this directory is writable; extensions/plugins stays root-owned, so the sonar process cannot
+# install code: plugins change only through this role.
+- name: Create the writable plugin download directory
+  ansible.builtin.file:
+    path: "/opt/sonarqube-{{ sonarqube_version }}/extensions/downloads"
+    state: directory
+    owner: sonar
+    group: sonar
+    mode: "0750"
+  when: not ansible_check_mode
