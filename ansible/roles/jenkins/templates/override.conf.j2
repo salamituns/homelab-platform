@@ -6,5 +6,6 @@
 [Service]
 Environment="JENKINS_LISTEN_ADDRESS={{ jenkins_listen_address }}"
 Environment="JENKINS_PORT={{ jenkins_http_port }}"
-Environment="JENKINS_JAVA_OPTIONS=-Djava.awt.headless=true -Djenkins.install.runSetupWizard=false"
+# The packaged unit reads JAVA_OPTS (JENKINS_JAVA_OPTIONS was the old /etc/default name and is ignored).
+Environment="JAVA_OPTS=-Djava.awt.headless=true -Djenkins.install.runSetupWizard=false"
 Environment="CASC_JENKINS_CONFIG={{ jenkins_casc_dir }}"

@@ -69,11 +69,13 @@
   ansible.builtin.shell:
     cmd: |
       set -euo pipefail
+      # The password reaches psql on stdin (\set from the heredoc), never in argv where `ps` could show it.
       db_pass="$(cat {{ sonarqube_db_password_file | quote }})"
-      /usr/sbin/runuser -u postgres -- /usr/bin/psql -v ON_ERROR_STOP=1 \
-        -v db_user={{ sonarqube_db_user | quote }} \
-        -v db_pass="$db_pass" \
-        -c "CREATE ROLE :\"db_user\" WITH LOGIN PASSWORD :'db_pass';"
+      /usr/sbin/runuser -u postgres -- /usr/bin/psql -v ON_ERROR_STOP=1 <<SQL
+      \\set db_user {{ sonarqube_db_user }}
+      \\set db_pass '$db_pass'
+      CREATE ROLE :"db_user" WITH LOGIN PASSWORD :'db_pass';
+      SQL
     executable: /bin/bash
   no_log: true
   changed_when: true
