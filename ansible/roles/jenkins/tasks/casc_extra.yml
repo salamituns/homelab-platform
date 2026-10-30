@@ -15,6 +15,7 @@
       or jenkins_has_cosign_key | bool
       or jenkins_has_cosign_password | bool
       or jenkins_has_gitea_token | bool
+      or jenkins_has_gitea_promote_token | bool
 
 - name: Remove credentials.yaml when no secrets are present
   ansible.builtin.file:
@@ -28,6 +29,7 @@
       or jenkins_has_cosign_key | bool
       or jenkins_has_cosign_password | bool
       or jenkins_has_gitea_token | bool
+      or jenkins_has_gitea_promote_token | bool
     )
 
 - name: Deploy JCasC sonar.yaml
