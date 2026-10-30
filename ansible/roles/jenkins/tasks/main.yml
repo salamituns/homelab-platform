@@ -6,3 +6,6 @@
 
 - name: Configure JCasC, listen address, and start Jenkins
   ansible.builtin.import_tasks: config.yml
+
+- name: Create or update the BelleShop job through the REST API
+  ansible.builtin.import_tasks: job.yml

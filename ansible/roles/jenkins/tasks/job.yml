@@ -1,0 +1,52 @@
+# The BelleShop job, as config.xml through the REST API (not JCasC `jobs:`).
+# Why: a job-dsl script that JCasC cannot run stops Jenkins from booting at all (2026-10-29, twice). Through the API a
+# bad definition is a 400 for this task while the controller keeps running.
+- name: BelleShop job
+  when:
+    - not ansible_check_mode
+    - jenkins_has_gitea_token | bool
+    - jenkins_belleshop_owner | length > 0
+  block:
+    - name: Create the job definition directory
+      ansible.builtin.file:
+        path: "{{ jenkins_job_dir }}"
+        state: directory
+        owner: root
+        group: jenkins
+        mode: "0750"
+
+    - name: Render the job definition
+      ansible.builtin.template:
+        src: job-belleshop.xml.j2
+        dest: "{{ jenkins_job_dir }}/belleshop.xml"
+        owner: root
+        group: jenkins
+        mode: "0640"
+      register: jenkins_job_xml
+
+    # curl reads the admin login from stdin (-K -), so the password is never in a process list.
+    # Password logins need a CSRF crumb from the same session, hence the cookie jar.
+    - name: Create or update the job
+      ansible.builtin.shell: |
+        set -euo pipefail
+        jar="$(mktemp)"; trap 'rm -f "$jar"' EXIT
+        auth="user = \"{{ jenkins_admin_user }}:$(cat {{ jenkins_admin_password_file | quote }})\""
+        api() { printf '%s\n' "$auth" | curl -q -s -K - -b "$jar" -c "$jar" "$@"; }
+        crumb="$(api http://127.0.0.1:{{ jenkins_http_port }}/crumbIssuer/api/json \
+          | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d["crumbRequestField"]+":"+d["crumb"])')"
+        code="$(api -o /dev/null -w '%{http_code}' http://127.0.0.1:{{ jenkins_http_port }}/job/belleshop/config.xml)"
+        if [ "$code" = 404 ]; then
+          url="http://127.0.0.1:{{ jenkins_http_port }}/createItem?name=belleshop"; action=created
+        elif [ "{{ jenkins_job_xml is changed }}" = True ]; then
+          url="http://127.0.0.1:{{ jenkins_http_port }}/job/belleshop/config.xml"; action=updated
+        else
+          echo unchanged; exit 0
+        fi
+        out="$(api -w '\n%{http_code}' -X POST -H "$crumb" -H 'Content-Type: application/xml' \
+          --data-binary @{{ jenkins_job_dir }}/belleshop.xml "$url")"
+        [ "$(printf '%s' "$out" | tail -n1)" = 200 ] || { printf '%s\n' "$out" >&2; exit 1; }
+        echo "$action"
+      args:
+        executable: /bin/bash
+      register: jenkins_job_apply
+      changed_when: jenkins_job_apply.stdout != 'unchanged'

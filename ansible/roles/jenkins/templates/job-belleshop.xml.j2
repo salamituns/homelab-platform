@@ -1,0 +1,41 @@
+<?xml version='1.1' encoding='UTF-8'?>
+<!-- Managed by Ansible (homelab-platform, role: jenkins, tasks/job.yml). Edits in the UI are overwritten on the next run. -->
+<org.jenkinsci.plugins.workflow.multibranch.WorkflowMultiBranchProject plugin="workflow-multibranch">
+  <description>BelleShop: Gitea multibranch, Jenkinsfile at the repo root. Gates are /opt/ci-gates on the docker agent (ADR 0011).</description>
+  <orphanedItemStrategy class="com.cloudbees.hudson.plugins.folder.computed.DefaultOrphanedItemStrategy" plugin="cloudbees-folder">
+    <pruneDeadBranches>true</pruneDeadBranches>
+    <daysToKeep>-1</daysToKeep>
+    <numToKeep>20</numToKeep>
+    <abortBuilds>false</abortBuilds>
+  </orphanedItemStrategy>
+  <sources class="jenkins.branch.MultiBranchProject$BranchSourceList" plugin="branch-api">
+    <data>
+      <jenkins.branch.BranchSource>
+        <source class="org.jenkinsci.plugin.gitea.GiteaSCMSource" plugin="gitea">
+          <id>{{ jenkins_belleshop_repo | lower }}</id>
+          <serverUrl>{{ jenkins_gitea_url }}</serverUrl>
+          <repoOwner>{{ jenkins_belleshop_owner }}</repoOwner>
+          <repository>{{ jenkins_belleshop_repo }}</repository>
+          <credentialsId>gitea-jenkins</credentialsId>
+          <traits>
+            <!-- 3 = all branches; PRs from the same repo built as the PR head (2). Fork PRs are not discovered at all. -->
+            <org.jenkinsci.plugin.gitea.BranchDiscoveryTrait>
+              <strategyId>3</strategyId>
+            </org.jenkinsci.plugin.gitea.BranchDiscoveryTrait>
+            <org.jenkinsci.plugin.gitea.OriginPullRequestDiscoveryTrait>
+              <strategyId>2</strategyId>
+            </org.jenkinsci.plugin.gitea.OriginPullRequestDiscoveryTrait>
+          </traits>
+        </source>
+        <strategy class="jenkins.branch.DefaultBranchPropertyStrategy">
+          <properties class="empty-list"/>
+        </strategy>
+      </jenkins.branch.BranchSource>
+    </data>
+    <owner class="org.jenkinsci.plugins.workflow.multibranch.WorkflowMultiBranchProject" reference="../.."/>
+  </sources>
+  <factory class="org.jenkinsci.plugins.workflow.multibranch.WorkflowBranchProjectFactory">
+    <owner class="org.jenkinsci.plugins.workflow.multibranch.WorkflowMultiBranchProject" reference="../.."/>
+    <scriptPath>{{ jenkins_belleshop_script_path }}</scriptPath>
+  </factory>
+</org.jenkinsci.plugins.workflow.multibranch.WorkflowMultiBranchProject>

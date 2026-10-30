@@ -44,6 +44,8 @@ jenkins_plugin_manager_dest: "/opt/jenkins-plugin-manager/{{ jenkins_plugin_mana
 jenkins_belleshop_owner: ""
 jenkins_belleshop_repo: BelleShop
 jenkins_belleshop_script_path: Jenkinsfile
+# Rendered job definitions (config.xml), applied by tasks/job.yml.
+jenkins_job_dir: /etc/jenkins/jobs
 jenkins_gitea_url: https://gitea.home.arpa
 jenkins_sonar_url: https://sonarqube.home.arpa
 jenkins_nexus_ci_push_user: ci-push

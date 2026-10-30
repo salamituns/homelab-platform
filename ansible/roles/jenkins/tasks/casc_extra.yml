@@ -68,22 +68,9 @@
   notify: Restart jenkins
   when: not jenkins_has_gitea_token | bool
 
-- name: Deploy JCasC jobs.yaml
-  ansible.builtin.template:
-    src: jobs.yaml.j2
-    dest: "{{ jenkins_casc_dir }}/jobs.yaml"
-    owner: root
-    group: jenkins
-    mode: "0640"
-  notify: Restart jenkins
-  when:
-    - not ansible_check_mode
-    - jenkins_has_gitea_token | bool
-    - jenkins_belleshop_owner | length > 0
-
-- name: Remove jobs.yaml when the Gitea token or owner is absent
+# Jobs are no longer JCasC (`jobs:` via job-dsl): see tasks/job.yml. Remove a jobs.yaml left by older runs.
+- name: Remove the old JCasC jobs.yaml
   ansible.builtin.file:
     path: "{{ jenkins_casc_dir }}/jobs.yaml"
     state: absent
   notify: Restart jenkins
-  when: not jenkins_has_gitea_token | bool or jenkins_belleshop_owner | length == 0
