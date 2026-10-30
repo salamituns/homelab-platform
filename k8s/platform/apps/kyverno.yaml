@@ -5,6 +5,8 @@ metadata:
   namespace: argocd
   annotations:
     argocd.argoproj.io/sync-wave: "1"
+    # Compare the way it applies (ServerSideApply below). The client-side diff kept the CRDs OutOfSync.
+    argocd.argoproj.io/compare-options: ServerSideDiff=true
 spec:
   project: platform
   # Chart 3.9.2 ships Kyverno v1.19.2 (ADR 0012). Values live in this repo.
