@@ -120,6 +120,16 @@ flowchart LR
 
 Double-bordered stages are gates.
 
+### What the non-gate stages do
+
+| Stage | What happens | Why it is there |
+|---|---|---|
+| Checkout, tag = short SHA | `IMAGE_TAG` = `git rev-parse --short=12 HEAD`. Every image, SonarQube analysis and report for the build carries it. | One commit maps to one image name, so you can trace a running pod back to its source. Never `:latest`, which points at something different each time. Nexus is `allow_once`, so a tag can't be pushed twice or rewritten. The tag is still only a label: the image's real identity is its digest (see *Digest*). |
+| Build, bases by digest | `FROM python:3.12-slim@sha256:aa94…`. When a reference has both a tag and a digest, Docker uses the digest and the tag is only a comment for people. | A tag like `3.12-slim` is moved upstream every week. A digest is a hash of the exact bytes, so the build gets the same base until someone changes it in a reviewed PR. That also blocks a hijacked or re-pushed upstream tag. The cost is no free base-image updates; bumping is a deliberate PR. |
+| Image, Trivy image *(gate)* | Scans the built image: OS packages from the base (dpkg, apk) plus language packages inside it. It runs twice, first to write a full JSON report and then to enforce HIGH/CRITICAL that have a fix. | Trivy fs only sees what the repo declares. The image also holds everything the base image brought, which no repo file mentions: curl and brotli in nginx, CVEs vendored inside pip. It runs before the push, so a failing image never reaches Nexus. |
+| SBOM, Syft, SPDX | Syft lists every package in that same image (name, version, licence, purl) as SPDX JSON, the ISO/IEC 5962 standard format. | Not a gate; it's the evidence that goes with the image. On `main` it is signed and attached to the image digest (`cosign attest`). When a new CVE is announced, you can check which images contain the package by reading the SBOMs, without rebuilding anything. PRs generate it too, but only `main` publishes it. |
+| Digest | After the push, read the `sha256:` that Nexus stored for *our* repo. Docker's `RepoDigests[0]` can be another registry's digest. | Signatures, attestations and (Week 4) the `k8s/` pin all point at the digest, never at the tag. |
+
 | Gate | Tool (pinned) | Fails the build when | Caught for real |
 |---|---|---|---|
 | Secrets | Gitleaks 8.30.1 | Any finding in git history (allowlist only in a reviewed repo file) | — |
