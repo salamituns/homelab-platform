@@ -1,0 +1,25 @@
+# BelleShop runs what belleshop-deploy says, at the digests CI promoted by PR (ADR 0012).
+# Owned by platform-root since Week 4; before that the Application managed itself from BelleShop's k8s/.
+# The resources finalizer stays: deleting this Application deletes BelleShop from dev, on purpose only.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: belleshop
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://gitea.home.arpa/tunsgit/belleshop-deploy.git
+    targetRevision: main
+    path: overlays/dev
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: dev
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
