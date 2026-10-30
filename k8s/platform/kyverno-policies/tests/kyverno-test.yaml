@@ -1,0 +1,99 @@
+apiVersion: cli.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: kyverno-policies-test
+policies:
+  - ../restrict-registries.yaml
+  - ../require-digest.yaml
+  - ../disallow-latest.yaml
+  - ../require-requests-limits.yaml
+resources:
+  - resources.yaml
+variables: values.yaml
+results:
+  # --- b. restrict-registries ---
+  - policy: restrict-registries
+    isValidatingPolicy: true
+    kind: Pod
+    resources:
+      - dev/good-belleshop-pod
+    result: pass
+  - policy: restrict-registries
+    isValidatingPolicy: true
+    kind: Rollout
+    resources:
+      - dev/good-belleshop-rollout
+    result: pass
+  - policy: restrict-registries
+    isValidatingPolicy: true
+    kind: Pod
+    resources:
+      - dev/bad-registry-container
+      - dev/bad-registry-initcontainer
+      - dev/bad-registry-ephemeralcontainer
+    result: fail
+
+  # --- c. require-digest ---
+  - policy: require-digest
+    isValidatingPolicy: true
+    kind: Pod
+    resources:
+      - dev/good-belleshop-pod
+      - dev/bad-latest-with-digest
+    result: pass
+  - policy: require-digest
+    isValidatingPolicy: true
+    kind: Rollout
+    resources:
+      - dev/good-belleshop-rollout
+    result: pass
+  - policy: require-digest
+    isValidatingPolicy: true
+    kind: Pod
+    resources:
+      - dev/bad-tag-without-digest
+      - dev/bad-latest-tag
+    result: fail
+
+  # --- c. disallow-latest ---
+  - policy: disallow-latest
+    isValidatingPolicy: true
+    kind: Pod
+    resources:
+      - dev/good-belleshop-pod
+      - dev/bad-tag-without-digest
+    result: pass
+  - policy: disallow-latest
+    isValidatingPolicy: true
+    kind: Rollout
+    resources:
+      - dev/good-belleshop-rollout
+    result: pass
+  - policy: disallow-latest
+    isValidatingPolicy: true
+    kind: Pod
+    resources:
+      - dev/bad-latest-tag
+      - dev/bad-latest-with-digest
+    result: fail
+
+  # --- d. require-requests-limits ---
+  - policy: require-requests-limits
+    isValidatingPolicy: true
+    kind: Pod
+    resources:
+      - dev/good-belleshop-pod
+    result: pass
+  - policy: require-requests-limits
+    isValidatingPolicy: true
+    kind: Rollout
+    resources:
+      - dev/good-belleshop-rollout
+    result: pass
+  - policy: require-requests-limits
+    isValidatingPolicy: true
+    kind: Pod
+    resources:
+      - dev/bad-missing-cpu-request
+      - dev/bad-missing-memory-limit
+    result: fail

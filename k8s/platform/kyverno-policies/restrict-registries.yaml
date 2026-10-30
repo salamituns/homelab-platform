@@ -1,0 +1,47 @@
+# ADR 0012: In admission-enforced namespaces, every container, initContainer, and ephemeralContainer
+# image must come from registry.home.arpa/ (either our belleshop repo or a Nexus proxy repository).
+apiVersion: policies.kyverno.io/v1beta1
+kind: ValidatingPolicy
+metadata:
+  name: restrict-registries
+  annotations:
+    policies.kyverno.io/title: Restrict Image Registries to registry.home.arpa
+    policies.kyverno.io/category: Supply Chain Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/description: >-
+      Requires every container, initContainer, and ephemeralContainer image in enforced
+      namespaces to start with registry.home.arpa/.
+spec:
+  failurePolicy: Fail
+  validationActions:
+    - Audit
+  autogen:
+    podControllers:
+      controllers:
+        - daemonsets
+        - deployments
+        - jobs
+        - statefulsets
+        - replicasets
+        - cronjobs
+        - rollouts.v1alpha1.argoproj.io
+  matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        homelab.arpa/admission: enforced
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods"]
+  variables:
+    - name: allImages
+      expression: >-
+        (object.spec.containers +
+         object.spec.?initContainers.orValue([]) +
+         object.spec.?ephemeralContainers.orValue([])).map(c, c.image)
+  validations:
+    - expression: >-
+        variables.allImages.all(img, img.startsWith('registry.home.arpa/'))
+      message: >-
+        Every container, initContainer, and ephemeralContainer image must start with registry.home.arpa/.

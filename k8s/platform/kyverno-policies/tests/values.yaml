@@ -1,0 +1,11 @@
+apiVersion: cli.kyverno.io/v1alpha1
+kind: Value
+metadata:
+  name: values
+namespaceSelector:
+  - name: dev
+    labels:
+      homelab.arpa/admission: enforced
+  - name: kube-system
+    labels:
+      kubernetes.io/metadata.name: kube-system

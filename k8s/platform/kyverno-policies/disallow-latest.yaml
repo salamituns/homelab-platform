@@ -1,0 +1,51 @@
+# ADR 0012: Disallow the mutable :latest tag (explicit or implicit) on every container,
+# initContainer, and ephemeralContainer image in enforced namespaces.
+apiVersion: policies.kyverno.io/v1beta1
+kind: ValidatingPolicy
+metadata:
+  name: disallow-latest
+  annotations:
+    policies.kyverno.io/title: Disallow latest Image Tag
+    policies.kyverno.io/category: Supply Chain Security
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/description: >-
+      Disallows the :latest tag (or omitting both tag and digest) on every container,
+      initContainer, and ephemeralContainer image in enforced namespaces.
+spec:
+  failurePolicy: Fail
+  validationActions:
+    - Audit
+  autogen:
+    podControllers:
+      controllers:
+        - daemonsets
+        - deployments
+        - jobs
+        - statefulsets
+        - replicasets
+        - cronjobs
+        - rollouts.v1alpha1.argoproj.io
+  matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        homelab.arpa/admission: enforced
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods"]
+  variables:
+    - name: allImages
+      expression: >-
+        (object.spec.containers +
+         object.spec.?initContainers.orValue([]) +
+         object.spec.?ephemeralContainers.orValue([])).map(c, c.image)
+  validations:
+    - expression: >-
+        variables.allImages.all(img,
+          !img.endsWith(':latest') &&
+          !img.contains(':latest@') &&
+          (img.contains('@sha256:') || img.split('/')[size(img.split('/')) - 1].contains(':'))
+        )
+      message: >-
+        Using the mutable :latest image tag (explicit or implicit) is disallowed.

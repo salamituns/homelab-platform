@@ -1,0 +1,88 @@
+# Kyverno Helm chart 3.9.2 (appVersion v1.19.2) values for homelab-platform (ADR 0012).
+# Prerequisites created OUTSIDE git before syncing:
+#   1. Kubernetes upgraded to 1.33 (Kyverno 1.19 is tested on 1.33-1.35).
+#   2. Secret kyverno/nexus-pull (kubernetes.io/dockerconfigjson for k8s-pull on registry.home.arpa).
+
+# Trust the Caddy local root CA for registry.home.arpa (from ansible/files/ca/nexus-caddy-root.crt)
+# so Kyverno's admission, background, and reports controllers can verify TLS when resolving digests
+# and fetching Cosign v3 Sigstore bundles from Nexus.
+global:
+  caCertificates:
+    data: |
+      -----BEGIN CERTIFICATE-----
+      MIIBpDCCAUqgAwIBAgIRAJgfpzJhE/nWP/YQhuyb+8cwCgYIKoZIzj0EAwIwMDEu
+      MCwGA1UEAxMlQ2FkZHkgTG9jYWwgQXV0aG9yaXR5IC0gMjAyNiBFQ0MgUm9vdDAe
+      Fw0yNjEwMjkyMTMzNDlaFw0zNjA5MDYyMTMzNDlaMDAxLjAsBgNVBAMTJUNhZGR5
+      IExvY2FsIEF1dGhvcml0eSAtIDIwMjYgRUNDIFJvb3QwWTATBgcqhkjOPQIBBggq
+      hkjOPQMBBwNCAASskwDfJ72daAetd9Gf1faxsXp6SyaigWcQIJSJ192Xe7WRtvxS
+      yjirYRIOhSFluRe433svKm/wf3XkDHuIkWk9o0UwQzAOBgNVHQ8BAf8EBAMCAQYw
+      EgYDVR0TAQH/BAgwBgEB/wIBATAdBgNVHQ4EFgQU6yoyC21W1gg553xdLbWjV1uG
+      gDUwCgYIKoZIzj0EAwIDSAAwRQIhALK30BKa7KbEgH/e24y38HEokPzZhabwp3OH
+      NacjwVyZAiBH8N51C3miq8MI4xV6HMhTlpy6bEP1WhGpA3MRHvT5+A==
+      -----END CERTIFICATE-----
+
+# Pass --imagePullSecrets=nexus-pull to admissionController, backgroundController, and reportsController.
+# The Secret kyverno/nexus-pull is created out-of-band by the owner (never committed to git).
+existingImagePullSecrets:
+  - nexus-pull
+
+config:
+  # Scope Kyverno webhooks to namespaces explicitly opted in with `homelab.arpa/admission: enforced`.
+  # Combined with excludeKyvernoNamespace: true (chart default), kube-system, argocd, monitoring,
+  # ingress-nginx, metallb-system, argo-rollouts, local-path-storage, and kyverno are never sent
+  # to Kyverno webhooks.
+  excludeKyvernoNamespace: true
+  webhooks:
+    namespaceSelector:
+      matchLabels:
+        homelab.arpa/admission: enforced
+
+features:
+  # Fail closed (ADR 0012): do not force webhook failurePolicy to Ignore; policies set failurePolicy: Fail.
+  forceFailurePolicyIgnore:
+    enabled: false
+
+admissionController:
+  replicas: 1
+  container:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        memory: 512Mi
+
+backgroundController:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 192Mi
+
+reportsController:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+  rbac:
+    clusterRole:
+      # Allow reports-controller to scan Argo Rollouts (argoproj.io/v1alpha1) in enforced namespaces.
+      extraResources:
+        - apiGroups:
+            - argoproj.io
+          resources:
+            - rollouts
+
+cleanupController:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      memory: 128Mi

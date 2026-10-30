@@ -1,0 +1,47 @@
+# ADR 0012: Every container, initContainer, and ephemeralContainer image in enforced namespaces
+# must be pinned by a SHA-256 digest (@sha256:...).
+apiVersion: policies.kyverno.io/v1beta1
+kind: ValidatingPolicy
+metadata:
+  name: require-digest
+  annotations:
+    policies.kyverno.io/title: Require Image Digest Pin
+    policies.kyverno.io/category: Supply Chain Security
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/description: >-
+      Requires every container, initContainer, and ephemeralContainer image in enforced
+      namespaces to include an immutable @sha256: digest reference.
+spec:
+  failurePolicy: Fail
+  validationActions:
+    - Audit
+  autogen:
+    podControllers:
+      controllers:
+        - daemonsets
+        - deployments
+        - jobs
+        - statefulsets
+        - replicasets
+        - cronjobs
+        - rollouts.v1alpha1.argoproj.io
+  matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        homelab.arpa/admission: enforced
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods"]
+  variables:
+    - name: allImages
+      expression: >-
+        (object.spec.containers +
+         object.spec.?initContainers.orValue([]) +
+         object.spec.?ephemeralContainers.orValue([])).map(c, c.image)
+  validations:
+    - expression: >-
+        variables.allImages.all(img, img.matches('^.+@sha256:[0-9a-fA-F]{64}$'))
+      message: >-
+        Every container, initContainer, and ephemeralContainer image must be pinned by digest (@sha256:<64-hex>).
