@@ -5,7 +5,8 @@ metadata:
   namespace: argocd
   annotations:
     argocd.argoproj.io/sync-wave: "1"
-    # Compare the way it applies (ServerSideApply below). The client-side diff kept the CRDs OutOfSync.
+    # Compare the way it applies (ServerSideApply below). The client-side diff kept 11 CRDs OutOfSync
+    # forever: the chart renders `labels: {}`, which server-side apply does not store.
     argocd.argoproj.io/compare-options: ServerSideDiff=true
 spec:
   project: platform
@@ -25,13 +26,6 @@ spec:
     server: https://kubernetes.default.svc
     namespace: kyverno
   ignoreDifferences:
-    # Chart 3.9.2 renders `labels: {}` on the policies.kyverno.io CRDs; server-side apply stores no field,
-    # so the app showed OutOfSync forever. A jq select(. == {}) passed `argocd app diff` but not the
-    # controller's comparison, so labels are ignored on this app's CRDs (Kyverno's own) altogether.
-    - group: apiextensions.k8s.io
-      kind: CustomResourceDefinition
-      jsonPointers:
-        - /metadata/labels
     - group: admissionregistration.k8s.io
       kind: MutatingWebhookConfiguration
       jqPathExpressions:
