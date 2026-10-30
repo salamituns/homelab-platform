@@ -17,3 +17,6 @@ containerd_registry_certs_d: /etc/containerd/certs.d
 # findall checks and the replace edit share one spelling of the section name.
 containerd_registry_section_re: "\\[plugins\\.'io\\.containerd\\.cri\\.v1\\.images'\\.registry\\]"
 containerd_registry_config_path_re: "\\[plugins\\.'io\\.containerd\\.cri\\.v1\\.images'\\.registry\\][^\\[]*?config_path\\s*=\\s*'([^']*)'"
+
+# Section name of the transfer service, used only to undo a 2026-10-29 experiment (see tasks/main.yml).
+containerd_registry_transfer_section_re: "\\[plugins\\.'io\\.containerd\\.transfer\\.v1\\.local'\\]"

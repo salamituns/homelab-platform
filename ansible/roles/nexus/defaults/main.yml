@@ -30,3 +30,7 @@ nexus_docker_repos:
 nexus_service_users:
   - { name: ci-push, repo: belleshop, actions: [read, browse, add, edit] }
   - { name: k8s-pull, repo: belleshop, actions: [read, browse] }
+
+# Nexus Repository CE serves no repository traffic until its Community EULA is accepted. Accepting is a legal decision
+# by the owner, so it is off by default and switched on per host (host_vars) with the date of that decision.
+nexus_accept_ce_eula: false

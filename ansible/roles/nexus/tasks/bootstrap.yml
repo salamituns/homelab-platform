@@ -61,6 +61,41 @@
   no_log: true
   when: not ansible_check_mode
 
+# --- Community EULA ------------------------------------------------------------------------------------------
+- name: Read the Community EULA status
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ nexus_http_port }}/service/rest/v1/system/eula"
+    user: admin
+    password: "{{ nexus_admin_pw }}"
+    force_basic_auth: true
+  register: nexus_eula
+  when: not ansible_check_mode
+
+# The API takes back the disclaimer it returned, with accepted: true.
+- name: Accept the Community EULA (owner decision, see host_vars)
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ nexus_http_port }}/service/rest/v1/system/eula"
+    method: POST
+    user: admin
+    password: "{{ nexus_admin_pw }}"
+    force_basic_auth: true
+    body_format: json
+    body: { accepted: true, disclaimer: "{{ nexus_eula.json.disclaimer }}" }
+    status_code: [200, 204]
+  changed_when: true
+  when:
+    - not ansible_check_mode
+    - nexus_accept_ce_eula | bool
+    - not (nexus_eula.json.accepted | bool)
+
+- name: Warn that the registry stays closed without the EULA
+  ansible.builtin.debug:
+    msg: "Nexus CE EULA not accepted: every repository request gets 403. Set nexus_accept_ce_eula after the owner decides."
+  when:
+    - not ansible_check_mode
+    - not (nexus_accept_ce_eula | bool)
+    - not (nexus_eula.json.accepted | bool)
+
 # --- security settings ----------------------------------------------------------------------------------------
 - name: Turn anonymous access off and enable the Docker bearer-token realm
   ansible.builtin.uri:

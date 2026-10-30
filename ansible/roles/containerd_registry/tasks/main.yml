@@ -95,3 +95,23 @@
         config_path = '{{ containerd_registry_desired_config_path }}'
   when: containerd_registry_sections | length == 0
   notify: Restart containerd
+
+# --- CRI pull path ----------------------------------------------------------------------------------------
+# containerd 2.2 pulls CRI images through its transfer service by default (use_local_image_pull = false), and that
+# path did not use the `ca` from hosts.toml: every kubelet pull failed with "x509: certificate signed by unknown
+# authority" while `ctr --hosts-dir` with the same file worked (tested 2026-10-29, containerd 2.2.1). The CRI's own
+# pull path reads registry.config_path above, CA included.
+- name: Pull CRI images through the CRI resolver (reads certs.d)
+  ansible.builtin.replace:
+    path: /etc/containerd/config.toml
+    regexp: "use_local_image_pull = false"
+    replace: "use_local_image_pull = true"
+  notify: Restart containerd
+
+# Undo an experiment of 2026-10-29 (it did not help): the transfer service keeps its default.
+- name: Leave the transfer service's config_path at its default
+  ansible.builtin.replace:
+    path: /etc/containerd/config.toml
+    regexp: "({{ containerd_registry_transfer_section_re }}[^\\[]*?config_path\\s*=\\s*)'/etc/containerd/certs.d'"
+    replace: "\\g<1>''"
+  notify: Restart containerd

@@ -11,3 +11,7 @@ firewall_service_rules:
       {'name': 'master', 'ip': '192.168.1.90'},
       {'name': 'workernode1', 'ip': '192.168.1.89'},
       {'name': 'workernode2', 'ip': '192.168.1.84'}] }}"
+
+# The owner accepted the Nexus Repository Community Edition EULA on 2026-10-29
+# (https://links.sonatype.com/products/nxrm/ce-eula). The role applies it through the API.
+nexus_accept_ce_eula: true
