@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Cosign sign + SBOM attestation. Private lab: no public Rekor (--tlog-upload=false).
+# Cosign sign + SBOM attestation. Private lab: no public Rekor (a signing config with no services).
 # Pipeline must docker login first; cosign reuses ~/.docker/config.json.
 
 # shellcheck source=lib.sh disable=SC1091
@@ -32,10 +32,15 @@ ci_setup_reports
 ci_require_cmd cosign
 ci_log "sign: cosign sign+attest ${image_ref}"
 
+# Private lab: no public transparency log. cosign 3.x rejects --tlog-upload=false and wants a signing config instead;
+# `signing-config create` with no services gives one without Rekor/TSA (verified 2026-10-29: verify passes with our
+# public key and --insecure-ignore-tlog, and fails with any other key).
 # -y skips the "are you sure" prompt in CI. COSIGN_PASSWORD unlocks --key.
-# attest still accepts --tlog-upload=false in cosign 3.1.4 (deprecated warning).
-cosign sign --yes --key "${COSIGN_KEY}" --tlog-upload=false "${image_ref}"
-cosign attest --yes --key "${COSIGN_KEY}" --tlog-upload=false \
+signing_config="$(mktemp)"
+trap 'rm -f "${signing_config}"' EXIT
+cosign signing-config create --out "${signing_config}"
+cosign sign --yes --key "${COSIGN_KEY}" --signing-config "${signing_config}" "${image_ref}"
+cosign attest --yes --key "${COSIGN_KEY}" --signing-config "${signing_config}" \
 	--type spdxjson --predicate "${REPORT_DIR}/sbom.spdx.json" \
 	"${image_ref}"
 
