@@ -30,3 +30,8 @@ gitea_backup_keep: 7
 
 # Controller path where Caddy's local root CA certificate is fetched for client trust.
 gitea_ca_fetch_dest: "{{ playbook_dir }}/../files/ca/gitea-caddy-root.crt"
+
+# Webhook targets Gitea may call (app.ini [webhook] ALLOWED_HOST_LIST). Exact host names, no wildcards or CIDRs:
+# every other private address stays blocked by Gitea's SSRF guard.
+gitea_webhook_allowed_hosts:
+  - jenkins.home.arpa

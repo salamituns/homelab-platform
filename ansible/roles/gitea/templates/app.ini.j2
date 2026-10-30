@@ -43,6 +43,11 @@ ROOT = /var/lib/gitea/data/gitea-repositories
 [actions]
 ENABLED = false
 
+[webhook]
+; Gitea refuses webhooks to private addresses by default (SSRF guard). Allow exactly the hosts in
+; gitea_webhook_allowed_hosts and nothing else: today only Jenkins, for PR and push builds (ADR 0011).
+ALLOWED_HOST_LIST = {{ gitea_webhook_allowed_hosts | join(',') }}
+
 [mailer]
 ENABLED = false
 

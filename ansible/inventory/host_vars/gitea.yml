@@ -1,0 +1,4 @@
+# Outbound TLS: webhooks to https://jenkins.home.arpa/gitea-webhook/post (ADR 0011).
+lab_ca_trust_cas: [jenkins]
+# Go reads the system roots once per process: restart Gitea when a CA changes.
+lab_ca_trust_java_service: gitea
