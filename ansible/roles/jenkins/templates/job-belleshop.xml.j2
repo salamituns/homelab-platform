@@ -18,9 +18,11 @@
           <repository>{{ jenkins_belleshop_repo }}</repository>
           <credentialsId>gitea-jenkins</credentialsId>
           <traits>
-            <!-- 3 = all branches; PRs from the same repo built as the PR head (2). Fork PRs are not discovered at all. -->
+            <!-- Branches: 1 = only branches that are NOT also a PR, so a PR branch is built once (as PR-n), not twice.
+                 Two builds of one commit raced into the same SonarQube project and one was rejected (2026-10-29).
+                 PRs from the same repo are built as the PR head (2). Fork PRs are not discovered at all. -->
             <org.jenkinsci.plugin.gitea.BranchDiscoveryTrait>
-              <strategyId>3</strategyId>
+              <strategyId>1</strategyId>
             </org.jenkinsci.plugin.gitea.BranchDiscoveryTrait>
             <org.jenkinsci.plugin.gitea.OriginPullRequestDiscoveryTrait>
               <strategyId>2</strategyId>
