@@ -1,5 +1,5 @@
-# ingress-nginx controller v1.11.3, "cloud" static manifest (LoadBalancer Service, externalTrafficPolicy Local).
+# ingress-nginx controller v1.15.1, "cloud" static manifest (LoadBalancer Service, externalTrafficPolicy Local).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
-  - vendor/ingress-nginx-cloud-v1.11.3.yaml
+  - vendor/ingress-nginx-cloud-v1.15.1.yaml
