@@ -62,12 +62,12 @@ large companies. Gitea Actions runs GitHub Actions workflow syntax, so the lab c
 | Step | Status |
 |---|---|
 | Shut down 104-106, `onboot 0` | Done 2026-10-29; delete after 2026-11-28 |
-| `nexus` + registry, nodes pull a test image | VM + role done; nodes trust the CA (`containerd_registry`). **Blocked**: CE serves no repository traffic until the owner accepts the Community EULA |
+| `nexus` + registry, nodes pull a test image | Done: owner accepted the CE EULA (2026-10-29, `nexus_accept_ce_eula`); tags immutable; `k8s-pull` cannot push (403); nodes pull via the CRI resolver (`use_local_image_pull = true`) |
 | `sonarqube` | Done: project `belleshop`, user `jenkins` (browse + scan on that project only), token copied to Jenkins |
 | `jenkins` + `ci-agent` | Done: JCasC, 0 executors, agent online over WebSocket, gates in `/opt/ci-gates`, all lab CAs trusted (`lab_ca_trust`) |
-| `ci/` gates + BelleShop Jenkinsfile | Gates merged; Jenkinsfile on BelleShop branch `week3-pipeline`, merged after its first real run |
-| Webhook, Gitleaks on PRs, Cosign | Waiting for the owner: Gitea token for Jenkins, Cosign key pair |
-| Proof: PR with a CVE-laden base image blocked | |
+| `ci/` gates + BelleShop Jenkinsfile | Done. First full green `main` build #4 (2026-10-30). The gates found and blocked: k8s misconfigs (fixed in PR-1), CVEs vendored in pip and in curl/brotli (pip and curl removed from runtime images) |
+| Webhook, Gitleaks on PRs, Cosign | Done: Gitea webhook to Jenkins only (`ALLOWED_HOST_LIST`), job via REST API (not JCasC job-dsl: a bad script stopped Jenkins booting), cosign 3 signing config without tlog; signatures + SBOM attestations verified with the public key |
+| Proof: PR with a CVE-laden base image blocked | Done 2026-10-30: PR-3 blocked by the Image gate, 92 fixable HIGH/CRITICAL ([screenshot](../evidence/week-03-image-gate-blocked.png)); closed unmerged |
 
 Changes to the decision made during rollout (2026-10-29):
 
