@@ -32,7 +32,7 @@ See [ROADMAP.md](ROADMAP.md) for the 8-week plan.
 - [Runbook: Gitea](docs/runbooks/gitea.md): operate, upgrade, trust CA, rotate Argo CD token, restore dump
 - [Runbook: CI platform](docs/runbooks/ci-platform.md): Nexus, SonarQube, Jenkins, agent; build order, secrets, failures
 - [Runbook: drained node reboot](docs/runbooks/drained-node-reboot.md): one k8s node at a time
-- [Architecture](docs/architecture.md): topology, trust boundaries, CI/CD pipeline, supply chain, open gaps
+- [Architecture](docs/architecture.md) (written to [the docs standard](docs/standards/architecture-docs.md)): topology, trust boundaries, CI/CD pipeline, supply chain, open gaps
 - [Entry points](docs/entry-points.md): every way into the lab and how to close it
 - Postmortems: [2026-10-24 hypervisor key](docs/postmortems/2026-10-24-hypervisor-key-exposure.md), [2026-10-25 Gitea RCE](docs/postmortems/2026-10-25-gitea-rce-cve-2026-60004.md), [2026-10-26 DHCP drift](docs/postmortems/2026-10-26-dhcp-drift-k8s-outage.md)
 - [Credential inventory](docs/credentials.md)

@@ -1,0 +1,65 @@
+# Drain, swap kubelet + kubectl, restart, wait until the node reports the new version, uncordon, and wait until every
+# pod is back before the next node. Same drain flags as docs/runbooks/drained-node-reboot.md. Included by k8s-upgrade.yml.
+- name: Drain {{ k8s_node_name }}
+  ansible.builtin.command: >-
+    kubectl drain {{ k8s_node_name }} --ignore-daemonsets --delete-emptydir-data --timeout=180s
+  delegate_to: localhost
+  become: false
+  register: k8s_drain
+  # Right after `kubeadm upgrade apply` the API server restarts and refuses connections for a few seconds.
+  retries: 6
+  delay: 10
+  until: k8s_drain.rc == 0
+  changed_when: true
+
+- name: Install the held kubelet + kubectl packages {{ k8s_pkg_version }}
+  ansible.builtin.apt:
+    name:
+      - "kubelet={{ k8s_pkg_version }}"
+      - "kubectl={{ k8s_pkg_version }}"
+    allow_change_held_packages: true
+
+- name: Hold kubelet + kubectl again
+  ansible.builtin.dpkg_selections:
+    name: "{{ item }}"
+    selection: hold
+  loop: [kubelet, kubectl]
+
+- name: Restart kubelet on the new binary
+  ansible.builtin.systemd:
+    name: kubelet
+    state: restarted
+    daemon_reload: true
+
+- name: Wait until the node is Ready on the new version {{ k8s_node_name }}
+  ansible.builtin.command: >-
+    kubectl get node {{ k8s_node_name }}
+    -o jsonpath='{.status.nodeInfo.kubeletVersion} {.status.conditions[?(@.type=="Ready")].status}'
+  delegate_to: localhost
+  become: false
+  register: k8s_node_state
+  retries: 30
+  delay: 10
+  until: k8s_node_state.rc == 0 and k8s_node_state.stdout == 'v' ~ k8s_version ~ ' True'
+  changed_when: false
+
+- name: Uncordon {{ k8s_node_name }}
+  ansible.builtin.command: kubectl uncordon {{ k8s_node_name }}
+  delegate_to: localhost
+  become: false
+  changed_when: true
+
+# READY too, not only the phase: on 2026-10-30 Prometheus was Running 1/2 (WAL replay) and the next node was drained anyway.
+- name: Wait until every pod is Completed, or Running with all containers ready (local-path pods return with their node)
+  ansible.builtin.shell: |
+    set -o pipefail
+    kubectl get pods -A --no-headers | awk '$4 == "Completed" {next} {split($3, r, "/")} $4 != "Running" || r[1] != r[2] {print; bad=1} END {exit bad}'
+  args:
+    executable: /bin/bash
+  delegate_to: localhost
+  become: false
+  register: k8s_pods
+  retries: 36
+  delay: 10
+  until: k8s_pods.rc == 0
+  changed_when: false

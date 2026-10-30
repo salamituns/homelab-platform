@@ -58,3 +58,13 @@ Survey of the cluster on 2026-10-30, before choosing tools:
 - Argo CD's `belleshop` Application changes repo. BelleShop keeps `k8s/` until the switch is verified, then removes it.
 - `dev` starts pulling from Nexus: Nexus becomes a runtime dependency of the app namespace, not only of CI.
 - A Kyverno outage stops BelleShop deploys and pod restarts in `dev` until it is back.
+
+## Rollout
+
+| Step | Status |
+|---|---|
+| ingress-nginx v1.11.3 -> v1.15.1 | Done 2026-10-30. The admission Jobs needed `Force=true,Replace=true` (immutable pod template) and no TTL (self-heal recreate loop). All 15 ingress status codes identical before and after |
+| Kubernetes 1.31 -> 1.32 -> 1.33 | Done 2026-10-30 with `ansible/playbooks/k8s-upgrade.yml`; etcd snapshot before each run ([runbook](../runbooks/k8s-upgrade.md)) |
+| `belleshop-deploy` config repo + Jenkins Promote stage | Written, not yet on Gitea. Cutover must protect `belleshop-secrets` and the self-managed `belleshop` Application (its resources finalizer) with `Prune=false` before the source changes |
+| Kyverno 1.19 + policies in Audit | In progress |
+| Enforce, Pod Security restricted, proof | Not started |

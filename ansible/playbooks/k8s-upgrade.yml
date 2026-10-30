@@ -1,0 +1,128 @@
+# One kubeadm minor-version upgrade of the whole cluster: control plane first, then each worker, one node at a time.
+# kubeadm can only move one minor version per run, so 1.31 -> 1.33 is two runs. ADR 0012.
+# Usage (run from ansible/):
+#   ansible-playbook playbooks/k8s-upgrade.yml -e k8s_version=1.32.13              # plan only: backup, kubeadm upgrade plan, stop
+#   ansible-playbook playbooks/k8s-upgrade.yml -e k8s_version=1.32.13 -e k8s_upgrade_apply=true
+# Runbook: docs/runbooks/k8s-upgrade.md
+- name: Preflight from the Mac
+  hosts: localhost
+  connection: local
+  become: false
+  gather_facts: false
+  vars:
+    k8s_upgrade_apply: false
+  tasks:
+    - name: Require k8s_version as MAJOR.MINOR.PATCH
+      ansible.builtin.assert:
+        that: k8s_version is defined and k8s_version is match('^1\.[0-9]+\.[0-9]+$')
+        fail_msg: "pass -e k8s_version=1.32.13 (no leading v, no package revision)"
+
+    - name: Read node versions
+      ansible.builtin.command: kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}={.status.nodeInfo.kubeletVersion}{"\n"}{end}'
+      register: k8s_nodes
+      changed_when: false
+      check_mode: false   # read-only; must run in --check too
+
+    - name: Every node is on the target minor or the one before it (kubeadm skips no minor versions)
+      vars:
+        k8s_target_minor: "{{ k8s_version.split('.')[1] | int }}"
+      ansible.builtin.assert:
+        that: (item.split('=v')[1].split('.')[1] | int) in [k8s_target_minor | int, (k8s_target_minor | int) - 1]
+        fail_msg: "{{ item }} is too far from {{ k8s_version }}"
+        quiet: true
+      loop: "{{ k8s_nodes.stdout_lines }}"
+
+    - name: All nodes Ready and every pod Running or Completed before touching anything
+      ansible.builtin.shell: |
+        set -o pipefail
+        kubectl get nodes --no-headers | awk '$2 != "Ready" {print; bad=1} END {exit bad}'
+        kubectl get pods -A --no-headers | awk '$4 != "Running" && $4 != "Completed" {print; bad=1} END {exit bad}'
+      args:
+        executable: /bin/bash
+      changed_when: false
+      check_mode: false
+
+- name: Upgrade the control plane
+  hosts: k8s_control
+  serial: 1
+  become: true
+  vars: &k8s_upgrade_vars
+    k8s_upgrade_apply: false
+    k8s_minor: "{{ k8s_version.split('.')[0:2] | join('.') }}"
+    k8s_pkg_version: "{{ k8s_version }}-1.1"
+    k8s_node_name: "{{ inventory_hostname | lower }}"
+    k8s_backup_dir: "/root/k8s-upgrade-backups/{{ ansible_facts['date_time']['iso8601_basic_short'] }}-to-{{ k8s_version }}"
+  tasks:
+    - name: Backup directory, root only (it holds the cluster CA private keys)
+      ansible.builtin.file:
+        path: "{{ k8s_backup_dir }}"
+        state: directory
+        mode: "0700"
+
+    - name: Snapshot etcd with the etcdctl inside the etcd static pod
+      ansible.builtin.shell: |
+        set -euo pipefail
+        cid="$(crictl --runtime-endpoint unix:///run/containerd/containerd.sock ps --name '^etcd$' -q | head -1)"
+        crictl --runtime-endpoint unix:///run/containerd/containerd.sock exec "$cid" etcdctl \
+          --endpoints=https://127.0.0.1:2379 --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+          --cert=/etc/kubernetes/pki/etcd/server.crt --key=/etc/kubernetes/pki/etcd/server.key \
+          snapshot save /var/lib/etcd/pre-upgrade.db
+        mv /var/lib/etcd/pre-upgrade.db "{{ k8s_backup_dir }}/etcd.db"
+        tar -C /etc -czf "{{ k8s_backup_dir }}/etc-kubernetes.tgz" kubernetes
+        chmod 0600 "{{ k8s_backup_dir }}"/*
+      args:
+        executable: /bin/bash
+        creates: "{{ k8s_backup_dir }}/etcd.db"
+
+    - name: Kubernetes apt repo for the target minor
+      ansible.builtin.import_tasks: tasks/k8s-apt-repo.yml
+
+    - name: Install kubeadm {{ k8s_version }}
+      ansible.builtin.import_tasks: tasks/k8s-kubeadm.yml
+
+    - name: Kubeadm upgrade plan
+      ansible.builtin.command: kubeadm upgrade plan v{{ k8s_version }}
+      register: k8s_plan
+      changed_when: false
+      check_mode: false
+      # In --check the repo switch is only simulated, so kubeadm is still the old one and the plan cannot run.
+      when: not ansible_check_mode
+
+    - name: Show the plan
+      ansible.builtin.debug:
+        msg: "{{ k8s_plan.stdout_lines }}"
+      when: k8s_plan.stdout_lines is defined
+
+    - name: Stop here unless k8s_upgrade_apply=true
+      ansible.builtin.meta: end_play
+      when: not (k8s_upgrade_apply | bool)
+
+    - name: Kubeadm upgrade apply (static pods, kube-proxy, CoreDNS)
+      ansible.builtin.command: kubeadm upgrade apply v{{ k8s_version }} --yes
+      changed_when: true
+
+    - name: Drain, upgrade kubelet + kubectl, uncordon
+      ansible.builtin.import_tasks: tasks/k8s-kubelet.yml
+
+- name: Upgrade the workers
+  hosts: k8s_workers
+  serial: 1
+  become: true
+  vars: *k8s_upgrade_vars
+  tasks:
+    - name: Workers wait for the plan-only run to be confirmed
+      ansible.builtin.meta: end_play
+      when: not (k8s_upgrade_apply | bool)
+
+    - name: Kubernetes apt repo for the target minor
+      ansible.builtin.import_tasks: tasks/k8s-apt-repo.yml
+
+    - name: Install kubeadm {{ k8s_version }}
+      ansible.builtin.import_tasks: tasks/k8s-kubeadm.yml
+
+    - name: Kubeadm upgrade node (kubelet config)
+      ansible.builtin.command: kubeadm upgrade node
+      changed_when: true
+
+    - name: Drain, upgrade kubelet + kubectl, uncordon
+      ansible.builtin.import_tasks: tasks/k8s-kubelet.yml

@@ -1,0 +1,21 @@
+# pkgs.k8s.io has one repo per minor version, so each upgrade switches the repo. Included by k8s-upgrade.yml.
+- name: Kubernetes apt repo (deb822) for v{{ k8s_minor }}
+  ansible.builtin.deb822_repository:
+    name: kubernetes
+    types: deb
+    uris: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_minor }}/deb/"
+    suites: /
+    signed_by: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_minor }}/deb/Release.key"
+
+- name: Remove the hand-made one-line repo file and its keyring (replaced by the deb822 source above)
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/apt/sources.list.d/kubernetes.list
+    - /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+
+- name: Refresh the package index
+  ansible.builtin.apt:
+    update_cache: true
+  changed_when: false
