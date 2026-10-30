@@ -1,0 +1,54 @@
+# ADR 0012: Every container in enforced namespaces must declare non-zero CPU and memory requests
+# and a non-zero memory limit.
+apiVersion: policies.kyverno.io/v1beta1
+kind: ValidatingPolicy
+metadata:
+  name: require-requests-limits
+  annotations:
+    policies.kyverno.io/title: Require CPU/Memory Requests and Memory Limits
+    policies.kyverno.io/category: Best Practices
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/description: >-
+      Requires every container in enforced namespaces to specify CPU and memory requests
+      and a memory limit.
+spec:
+  failurePolicy: Fail
+  validationActions:
+    - Audit
+  autogen:
+    podControllers:
+      controllers:
+        - daemonsets
+        - deployments
+        - jobs
+        - statefulsets
+        - replicasets
+        - cronjobs
+        - rollouts.v1alpha1.argoproj.io
+  matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        homelab.arpa/admission: enforced
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods"]
+  validations:
+    - expression: >-
+        object.spec.containers.all(c,
+          has(c.resources) &&
+          has(c.resources.requests) &&
+          has(c.resources.requests.cpu) &&
+          isQuantity(string(c.resources.requests.cpu)) &&
+          quantity(string(c.resources.requests.cpu)).isGreaterThan(quantity('0')) &&
+          has(c.resources.requests.memory) &&
+          isQuantity(string(c.resources.requests.memory)) &&
+          quantity(string(c.resources.requests.memory)).isGreaterThan(quantity('0')) &&
+          has(c.resources.limits) &&
+          has(c.resources.limits.memory) &&
+          isQuantity(string(c.resources.limits.memory)) &&
+          quantity(string(c.resources.limits.memory)).isGreaterThan(quantity('0'))
+        )
+      message: >-
+        Every container must define non-zero resources.requests.cpu, resources.requests.memory, and resources.limits.memory.
