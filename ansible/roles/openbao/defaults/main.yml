@@ -5,9 +5,10 @@ openbao_sha256: "582b1f3c2fdc5afd443b2d57a225ef654de75adea609fdb66731fd582a9cbc9
 openbao_download_url: "https://github.com/openbao/openbao/releases/download/v{{ openbao_version }}/openbao_{{ openbao_version }}_linux_amd64.tar.gz"
 
 openbao_config_dir: /etc/openbao
-# Raft storage (the sealed store) and the audit log (enabled after init, runbook).
+# Raft storage (the sealed store) and the audit log (declared in the config file, rotated weekly).
 openbao_data_dir: /var/lib/openbao
 openbao_log_dir: /var/log/openbao
+openbao_audit_log: "{{ openbao_log_dir }}/audit.log"
 # Both ports bind 127.0.0.1. The only way in from the LAN is Caddy on 443 (role: caddy),
 # which terminates TLS for bao.home.arpa.
 openbao_api_port: 8200

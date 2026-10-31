@@ -17,6 +17,18 @@ storage "raft" {
   node_id = "{{ openbao_node_id }}"
 }
 
-# mlock stays on: OpenBao pins its memory (unseal keys, sealed store) so nothing reaches swap.
-# The service unit grants LimitMEMLOCK instead of CAP_IPC_LOCK, so no capability is needed.
-disable_mlock = false
+# Audit is declarative: OpenBao 2.7.2 refuses `bao audit enable` over the API (tested 2026-10-31)
+# and loads audit devices only from the config file, at startup and on SIGHUP (which is also what
+# logrotate uses to reopen the file). Values in the log are HMAC-hashed, never clear.
+audit "file" "file" {
+  description = "Requests and responses, HMAC-hashed values"
+  options {
+    file_path = "{{ openbao_audit_log }}"
+  }
+}
+
+# mlock is off on purpose: with Raft, bbolt memory-maps the whole database and mlockall would pin
+# it all in physical memory (OpenBao's mlock-removal RFC), risking the OOM killer on this 4 GB VM.
+# The trade-off: sectools has swap on (/swap.img, 3.8 GB, checked 2026-10-31), so a swapped-out
+# page could land secrets on disk; the fix for that is swap policy (off or encrypted), not mlock.
+disable_mlock = true

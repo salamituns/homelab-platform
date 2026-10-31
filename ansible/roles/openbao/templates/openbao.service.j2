@@ -15,10 +15,11 @@ Type=notify
 User=openbao
 Group=openbao
 ExecStart=/usr/local/bin/bao server -config={{ openbao_config_dir }}/openbao.hcl
+# SIGHUP reloads the config and reopens the audit log after logrotate (verified on 2.7.2:
+# "audit: reloading file audit backend"; the server stays unsealed, so rotation is no outage).
+ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
 RestartSec=5s
-# mlock without CAP_IPC_LOCK: RLIMIT_MEMLOCK lets the openbao user pin its own memory.
-LimitMEMLOCK=infinity
 
 NoNewPrivileges=true
 PrivateTmp=true

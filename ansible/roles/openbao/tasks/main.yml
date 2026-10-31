@@ -101,6 +101,14 @@
     mode: "0644"
   notify: Restart openbao
 
+- name: Deploy logrotate config for the audit log
+  ansible.builtin.template:
+    src: logrotate.j2
+    dest: /etc/logrotate.d/openbao
+    owner: root
+    group: root
+    mode: "0644"
+
 - name: Enable and start openbao service
   ansible.builtin.systemd_service:
     name: openbao

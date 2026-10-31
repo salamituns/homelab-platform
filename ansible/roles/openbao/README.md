@@ -6,10 +6,14 @@ OpenBao v2.7.2 on `sectools` as the lab secrets store. ADR 0014, runbook `docs/r
   checked 2026-10-31), unpacked to `/opt/openbao/<version>/bao`, linked from `/usr/local/bin/bao`.
 - Listens on `127.0.0.1:8200` with TLS off. `https://bao.home.arpa` is Caddy on 443 (role: caddy);
   clients trust `ansible/files/ca/sectools-caddy-root.crt`.
-- Raft storage in `/var/lib/openbao` (0700, single node). The audit device writes to
-  `/var/log/openbao` and is enabled by the owner after init (runbook step 5).
-- mlock stays on: OpenBao pins its memory so the sealed store never swaps to disk. The service
-  unit grants `LimitMEMLOCK=infinity` instead of `CAP_IPC_LOCK`, so the capability set stays empty.
+- Raft storage in `/var/lib/openbao` (0700, single node). The audit device is declared in the
+  config file (OpenBao 2.7.2 refuses `bao audit enable` over the API, tested 2026-10-31), writes
+  `/var/log/openbao/audit.log`, and is rotated weekly by `/etc/logrotate.d/openbao` (move + SIGHUP,
+  which reopens the file without sealing the store).
+- mlock is off on purpose: with Raft, bbolt memory-maps the whole database and mlock would pin it
+  all in physical memory, risking the OOM killer on this 4 GB VM (OpenBao's mlock-removal RFC).
+  sectools has swap on, so the swap exposure is a swap-policy question (off or encrypted), not
+  an mlock one.
 - The role installs and configures, nothing more. It never inits, unseals, or sees any key or
   token; the owner does all of that in their own terminal (runbook). Init and unseal output never
   belongs in this repo, in a variable or in a log.

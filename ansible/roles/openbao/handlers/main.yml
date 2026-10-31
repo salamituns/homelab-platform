@@ -1,3 +1,6 @@
+# A restart seals the store: until someone unseals it (runbook step 3) OpenBao serves nothing.
+# So a playbook run that changes the config, unit or version is never a no-op outage-wise;
+# the runbook's deploy section says the same.
 - name: Restart openbao
   ansible.builtin.systemd_service:
     name: openbao
