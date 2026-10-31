@@ -16,6 +16,7 @@ Exit 0 = pass. Non-zero = fail the build. Reports go to `$REPORT_DIR`
 | `image.sh` | image ref | HIGH/CRITICAL vuln **with a fix** | `image.json` (all severities) |
 | `sbom.sh` | image ref | syft error | `sbom.spdx.json` |
 | `sign.sh` | `registry/repo@sha256:…` | missing digest; missing `COSIGN_*`; missing SBOM; cosign error | none (signature is on the registry) |
+| `promote.sh` | `digests.txt` | Gitea API error; missing token/tag; cannot parse owner from `GIT_URL` | none (the PR is on Gitea) |
 
 `deps.sh` / `image.sh` run Trivy **twice**: JSON with `--exit-code 0` (the
 archive) then `--severity HIGH,CRITICAL --ignore-unfixed --exit-code 1` (the
@@ -67,6 +68,7 @@ gitleaks allowlists live in the app repo (`.gitleaks.toml` / `.gitleaksignore`).
 ## Tests
 
 `ci/gates/tests/run-tests.sh` — dirty fixture must fail `secrets.sh` and
-`deps.sh`; clean fixture must pass. Intentional leak files are under
-`ci/gates/tests/fixtures/` and are allowlisted in the **platform** repo
+`deps.sh`; clean fixture must pass; `promote_test.sh` covers the Gitea PR
+cases (create, skip, existing PR, unrelated 422). Intentional leak files are
+under `ci/gates/tests/fixtures/` and are allowlisted in the **platform** repo
 `.gitleaks.toml` so pre-commit does not treat them as real credentials.

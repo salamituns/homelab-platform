@@ -60,4 +60,7 @@ COSIGN_KEY="${WORKDIR}/missing.key" COSIGN_PASSWORD="x" REPORT_DIR="${WORKDIR}/r
 	expect_fail sign-missing-key "${ROOT}/sign.sh" \
 	"registry.home.arpa/belleshop/backend@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
+# Promote talks to a fake Gitea + a local bare remote (no Docker, no cluster).
+"${ROOT}/tests/promote_test.sh"
+
 printf 'all gate tests passed\n'
