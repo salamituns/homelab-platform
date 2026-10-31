@@ -198,3 +198,12 @@ supports this through the official traffic-router plugin
 - Both NGF images are pinned by digest: the control plane through kustomize `images`, the data plane through the
   `NginxProxy` `tag` field (`2.8.0@sha256:…`).
 - The cert-generator `Job` gets the ingress-nginx treatment (no TTL, `Force=true,Replace=true`) to avoid the self-heal loop.
+
+## Rollout status
+
+| Step | Status |
+|---|---|
+| 1-2. NGF v2.8.0 + `homelab-gateway` on `.244` | Done 2026-10-31 (1484a3a): GatewayClass Accepted, Gateway Programmed on `192.168.1.244`, app Healthy |
+| 3. HTTPRoutes | Platform routes done (b144699): argocd/grafana/rollouts give 9/9 identical status codes on `.240` and `.244`. Namespace labels live in the no-prune `cluster-config` app. BelleShop routes: belleshop-deploy PR #8. Known difference: ingress-nginx matched `/api` case-insensitively; HTTPRoute does not (`/API/...` goes to the frontend) |
+| 4. Canary on the Gateway API plugin | Plugin v0.17.0 loaded, checksum-pinned (a92bba2); Argo CD ignores the route's weights (1a6f530). Rollout switch + Role in `dev`: branch `gw-canary`, PR after #8 |
+| 5. Cutover to `.240`, remove ingress-nginx | Not started |
