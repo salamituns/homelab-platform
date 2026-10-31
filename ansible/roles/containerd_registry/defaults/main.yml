@@ -11,6 +11,14 @@ containerd_registries:  # noqa: var-naming[no-role-prefix]
 # config_path that the role checks (and sets if missing) in /etc/containerd/config.toml.
 containerd_registry_certs_d: /etc/containerd/certs.d
 
+# Stale per-registry dirs to delete from certs.d: leftovers from the old registry setup
+# (10.2.0.11:8085 on two nodes, the port-less 10.2.0.11 variant on workernode2, checked
+# 2026-10-31). No handler needed: containerd rereads certs.d on every pull ("Updates under
+# this directory do not require restarting the containerd daemon", containerd docs/hosts.md).
+containerd_registry_stale_dirs:
+  - "10.2.0.11:8085"
+  - "10.2.0.11"
+
 # Regexes against /etc/containerd/config.toml (containerd 2.x, config version 3). The CRI v1
 # images plugin's registry section is where config_path lives; its value may be a colon-separated
 # list (these nodes ship '/etc/containerd/certs.d:/etc/docker/certs.d'). Kept as variables so the

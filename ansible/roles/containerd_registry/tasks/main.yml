@@ -3,6 +3,15 @@
 # authentication is the k8s-pull imagePullSecret, created out-of-band, not this role.
 # Nothing is installed or downloaded here, so there is no version pin or checksum.
 
+# Stale dirs from the old registry are removed first: they make containerd try a dead endpoint
+# before falling through to _default. No notify/handler: removal under certs.d takes effect on
+# the next pull without restarting containerd (containerd docs/hosts.md, checked 2026-10-31).
+- name: Remove stale registry directories from certs.d
+  ansible.builtin.file:
+    path: "{{ containerd_registry_certs_d }}/{{ item }}"
+    state: absent
+  loop: "{{ containerd_registry_stale_dirs }}"
+
 - name: Create the per-registry directory under certs.d
   ansible.builtin.file:
     path: "{{ containerd_registry_certs_d }}/{{ item.host }}"
