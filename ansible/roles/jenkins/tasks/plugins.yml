@@ -32,6 +32,9 @@
     group: jenkins
     mode: "0644"
   ignore_errors: "{{ ansible_check_mode }}"
+  # The install task below detects downloads from the plugin manager's stdout, which missed a new plugin
+  # on 2026-10-31 (it stayed unloaded). A changed plugin list is the reliable signal to restart.
+  notify: Restart jenkins
 
 - name: Install pinned plugins into JENKINS_HOME
   ansible.builtin.command:
