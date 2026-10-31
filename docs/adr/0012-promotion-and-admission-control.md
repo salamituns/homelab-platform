@@ -67,7 +67,7 @@ Survey of the cluster on 2026-10-30, before choosing tools:
 | Kubernetes 1.31 -> 1.32 -> 1.33 | Done 2026-10-30 with `ansible/playbooks/k8s-upgrade.yml`; etcd snapshot before each run ([runbook](../runbooks/k8s-upgrade.md)) |
 | `belleshop-deploy` config repo | Done 2026-10-30: private, `main` protected (no direct or force push; only the owner merges); `ci-promote` has write on this repo only |
 | Cutover | Done 2026-10-30. BelleShop PR #4 put `Prune=false` on `belleshop-secrets` and the self-managed Application first; then platform-root adopted the Application with the new source. `dev` runs the signed Nexus digests; canary analysis Successful; mysql not restarted; smoke identical |
-| Jenkins Promote stage | Credential `gitea-ci-promote` in Jenkins; BelleShop PR #5 open |
+| Jenkins Promote stage | Done 2026-10-31: `main` #8 opened belleshop-deploy PR #3 as `ci-promote`, both digests signed with SBOM attestations. Took three fixes, none visible before `main`: Groovy turned `\n` in `sh '''` into real newlines (PR #6); the credential file's trailing newline broke the auth header, and the stage read Gitea's HTTP 422 as "PR exists" and passed (PR #7). Lesson: move the stage into a tested script like the gates |
 | Kyverno 1.19.2 + policies in Audit | Done 2026-10-30. Needed `ServerSideDiff=true` to match `ServerSideApply` (11 CRDs were OutOfSync forever) |
-| `dev` opt-in + Pod Security warn/audit | belleshop-deploy PR #1 open; PSA dry run found the backend missing seccomp, allowPrivilegeEscalation and drop ALL |
+| `dev` opt-in + Pod Security warn/audit | Done 2026-10-31 (belleshop-deploy PR #1): backend hardened after a PSA dry run; Kyverno Audit: verify-belleshop-images 4/4 pass, only `mysql:8.0` fails restrict-registries and require-digest; a `restricted` enforce dry run is clean |
 | Enforce, PSA enforce, proof | Not started |
