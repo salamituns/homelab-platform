@@ -2,6 +2,12 @@
 {% for site in caddy_sites %}
 {{ site.names | join(', ') }} {
 	tls internal
+{% if site.allowed_clients is defined %}
+	# Only listed IPs may use this site (remote_ip matches packet source, so SNATed
+	# clients appear as their gateway); everything else gets 403 at the TLS door.
+	@blocked not remote_ip {{ site.allowed_clients | map(attribute='ip') | join(' ') }}
+	respond @blocked 403
+{% endif %}
 {% if site.routes is defined %}
 {% for route in site.routes %}
 	handle {{ route.path }} {

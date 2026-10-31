@@ -1,10 +1,20 @@
 # Caddy (443/tcp) fronts the SeaweedFS S3 gateway: https://s3.home.arpa (ADR 0007)
 # and OpenBao: https://bao.home.arpa (ADR 0014).
-# Only admin clients may reach them: Terraform state and the secrets store.
+# 443 reaches: admins (Terraform, the bao CLI) and the three k8s nodes. ESO pods appear
+# as node IPs after SNAT, so the nodes, not a pod range, are named (ADR 0014 step 3).
+# Caddy still keeps s3.home.arpa admin-only (allowed_clients below): the Terraform state
+# must stay unreachable from the cluster even though the nodes may reach the port.
 firewall_service_rules:
   - port: 443
-    clients: "{{ lab_admin_clients }}"
+    clients: >-
+      {{
+        lab_admin_clients + [
+          {'name': 'master', 'ip': '192.168.1.90'},
+          {'name': 'workernode1', 'ip': '192.168.1.89'},
+          {'name': 'workernode2', 'ip': '192.168.1.84'},
+        ]
+      }}
 
 caddy_sites:
-  - { names: [s3.home.arpa], upstream: "127.0.0.1:8333" }
+  - { names: [s3.home.arpa], upstream: "127.0.0.1:8333", allowed_clients: "{{ lab_admin_clients }}" }
   - { names: [bao.home.arpa], upstream: "127.0.0.1:8200" }
