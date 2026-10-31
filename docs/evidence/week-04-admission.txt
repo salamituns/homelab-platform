@@ -19,3 +19,7 @@ $ kubectl apply --dry-run=server  # image: registry.home.arpa/belleshop/bellesho
 ### 5. Scope: same nginx:latest in namespace default (not opted in): Kyverno must not be consulted
 $ kubectl -n default run scope-check --image=nginx:latest --dry-run=server
   pod/scope-check created (server dry run)
+
+### 6. Pod Security restricted (enforced): a privileged pod is refused before Kyverno is even asked
+$ kubectl -n dev run psa-check --image=<signed digest> --privileged --dry-run=server
+  Error from server (Forbidden): pods "psa-check" is forbidden: violates PodSecurity "restricted:latest": privileged (container "psa-check" must not set securityContext.privileged=true), allowPrivilegeEscalation != false (container "psa-check" must set securityContext.allowPrivilegeEscalation=false), unrestricted capabilities (container "psa-check" must set securityContext.capabilities.drop=["ALL"]), runAsNonRoot != true (pod or container "psa-check" must set securityContext.runAsNonRoot=true), seccompProfile (pod or container "psa-check" must set securityContext.seccompProfile.type to "RuntimeDefault" or "Localhost")
