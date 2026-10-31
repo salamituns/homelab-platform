@@ -158,6 +158,8 @@ jenkins_plugins:
     ver: "5.5.0-242.v1482d48d3ea_3"  # gitleaks:allow
   - id: pipeline-build-step
     ver: "601.v6d4c6d1a_9dc7"  # gitleaks:allow
+  - id: pipeline-graph-view   # stage graph + per-stage logs on each run; replaces Blue Ocean (2026-10-31)
+    ver: "1053.v9df19e6ceed2"  # gitleaks:allow
   - id: pipeline-groovy-lib
     ver: "822.vc95f70dea_db_7"  # gitleaks:allow
   - id: pipeline-input-step
