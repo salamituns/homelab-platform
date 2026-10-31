@@ -7,9 +7,12 @@ metadata:
   namespace: nginx-gateway
 spec:
   gatewayClassName: nginx
-  addresses:
-    - type: IPAddress
-      value: 192.168.1.244
+  # The address is requested from MetalLB, not set with spec.addresses: NGF turns spec.addresses into Service
+  # externalIPs, which kube-proxy accepts but MetalLB never announces on the LAN. NGF copies these annotations onto
+  # the Service it generates (homelab-gateway-nginx). MetalLB v0.14 reads the metallb.universe.tf key, not metallb.io.
+  infrastructure:
+    annotations:
+      metallb.universe.tf/loadBalancerIPs: 192.168.1.244
   listeners:
     - name: http
       protocol: HTTP
