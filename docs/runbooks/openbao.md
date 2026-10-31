@@ -26,6 +26,9 @@ A restart seals the store (no auto-unseal, ADR 0014), so any later playbook run 
 config, unit or version leaves OpenBao sealed until you run step 3 again. Expect that; it is not
 an outage the playbook caused silently.
 
+The role also turns swap off on sectools: mlock is off, so a swapped-out page could otherwise
+carry secrets to the disk PBS copies nightly. `swapon --show` should print nothing afterwards.
+
 ## 2. Initialise (your terminal, once)
 
 ```sh

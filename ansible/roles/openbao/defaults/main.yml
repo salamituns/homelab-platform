@@ -17,3 +17,8 @@ openbao_cluster_port: 8201
 openbao_api_addr: "https://bao.home.arpa"
 # Raft node name; a single node today, the name only matters for snapshots and future peers.
 openbao_node_id: "{{ inventory_hostname }}"
+
+# Swap is turned off on sectools: mlock is off (see the config template), so a swapped-out page
+# could write secrets to the swap file, and PBS copies that disk nightly. Safe here: 3.9 GB RAM,
+# ~0.6 GB used, 524 K of swap ever touched (checked 2026-10-31). Set false to keep swap.
+openbao_disable_swap: true

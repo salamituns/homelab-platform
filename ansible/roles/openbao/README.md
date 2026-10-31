@@ -12,8 +12,8 @@ OpenBao v2.7.2 on `sectools` as the lab secrets store. ADR 0014, runbook `docs/r
   which reopens the file without sealing the store).
 - mlock is off on purpose: with Raft, bbolt memory-maps the whole database and mlock would pin it
   all in physical memory, risking the OOM killer on this 4 GB VM (OpenBao's mlock-removal RFC).
-  sectools has swap on, so the swap exposure is a swap-policy question (off or encrypted), not
-  an mlock one.
+  A swapped-out page could otherwise carry secrets to the disk PBS copies nightly, so the role
+  also turns swap off on sectools (`openbao_disable_swap`; safe: 524 K of swap ever touched).
 - The role installs and configures, nothing more. It never inits, unseals, or sees any key or
   token; the owner does all of that in their own terminal (runbook). Init and unseal output never
   belongs in this repo, in a variable or in a log.

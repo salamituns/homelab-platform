@@ -1,3 +1,45 @@
+# --- Swap off (ADR 0014) ---------------------------------------------------------------------------
+# mlock is off (openbao.hcl), so a swapped-out page could write secrets to the swap file, and PBS
+# copies that disk nightly. The role turns swap off instead; the VM has the headroom for it.
+
+# Read-only, so it runs even in --check (command tasks skip check mode unless told not to):
+# the dry run then reports what a real run would disable. Lines look like
+# "/swap.img partition 4095960K 524K -2"; only the first field is a device name.
+- name: List active swap devices
+  ansible.builtin.command:
+    cmd: swapon --show --noheadings
+  register: openbao_swap_devices
+  changed_when: false
+  check_mode: false
+  when: openbao_disable_swap
+
+# command ignores --check (it would really disable swap), so a dry run never touches the system.
+# Idempotent by the loop: a later run lists no swap devices and executes nothing.
+- name: Turn off swap
+  ansible.builtin.command:
+    cmd: "swapoff {{ item.split()[0] }}"
+  changed_when: true
+  loop: "{{ openbao_swap_devices.stdout_lines | reject('equalto', '') | list }}"
+  loop_control:
+    label: "{{ item.split()[0] }}"
+  when:
+    - openbao_disable_swap
+    - not ansible_check_mode
+
+- name: Remove the swap entry from fstab
+  ansible.builtin.lineinfile:
+    path: /etc/fstab
+    regexp: '^\s*/swap\.img\s+none\s+swap\s'
+    state: absent
+  when: openbao_disable_swap
+
+# Only reached after swapoff: deleting the image while it is in use would fail.
+- name: Delete the swap image
+  ansible.builtin.file:
+    path: /swap.img
+    state: absent
+  when: openbao_disable_swap
+
 - name: Ensure openbao system group exists
   ansible.builtin.group:
     name: openbao
