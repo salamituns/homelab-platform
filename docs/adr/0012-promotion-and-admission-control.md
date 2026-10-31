@@ -65,6 +65,9 @@ Survey of the cluster on 2026-10-30, before choosing tools:
 |---|---|
 | ingress-nginx v1.11.3 -> v1.15.1 | Done 2026-10-30. The admission Jobs needed `Force=true,Replace=true` (immutable pod template) and no TTL (self-heal recreate loop). All 15 ingress status codes identical before and after |
 | Kubernetes 1.31 -> 1.32 -> 1.33 | Done 2026-10-30 with `ansible/playbooks/k8s-upgrade.yml`; etcd snapshot before each run ([runbook](../runbooks/k8s-upgrade.md)) |
-| `belleshop-deploy` config repo + Jenkins Promote stage | Written, not yet on Gitea. Cutover must protect `belleshop-secrets` and the self-managed `belleshop` Application (its resources finalizer) with `Prune=false` before the source changes |
-| Kyverno 1.19 + policies in Audit | In progress |
-| Enforce, Pod Security restricted, proof | Not started |
+| `belleshop-deploy` config repo | Done 2026-10-30: private, `main` protected (no direct or force push; only the owner merges); `ci-promote` has write on this repo only |
+| Cutover | Done 2026-10-30. BelleShop PR #4 put `Prune=false` on `belleshop-secrets` and the self-managed Application first; then platform-root adopted the Application with the new source. `dev` runs the signed Nexus digests; canary analysis Successful; mysql not restarted; smoke identical |
+| Jenkins Promote stage | Credential `gitea-ci-promote` in Jenkins; BelleShop PR #5 open |
+| Kyverno 1.19.2 + policies in Audit | Done 2026-10-30. Needed `ServerSideDiff=true` to match `ServerSideApply` (11 CRDs were OutOfSync forever) |
+| `dev` opt-in + Pod Security warn/audit | belleshop-deploy PR #1 open; PSA dry run found the backend missing seccomp, allowPrivilegeEscalation and drop ALL |
+| Enforce, PSA enforce, proof | Not started |
