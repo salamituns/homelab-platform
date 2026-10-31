@@ -28,7 +28,9 @@ jenkins_initial_admin_password_dest: /root/jenkins-initial-admin-password
 jenkins_agent_name: ci-agent
 jenkins_agent_label: docker
 jenkins_agent_remote_fs: /var/lib/jenkins-agent
-jenkins_agent_executors: 2
+# One build at a time: ci-agent has 2 vCPUs, and two concurrent SonarScanner runs starved the JS analysis bridge
+# ("Failed to start the bridge server (300s timeout)", BelleShop PR-9, 2026-10-31). Builds queue instead.
+jenkins_agent_executors: 1
 
 # plugin-installation-manager-tool 2.15.0 (GitHub release 2026-05-08).
 # SHA-256 from jenkins-plugin-manager-2.15.0.jar.sha256 on that release (checked 2026-10-29).
