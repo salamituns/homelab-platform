@@ -68,6 +68,10 @@ jenkins_gitea_promote_token_src: "{{ jenkins_private_dir }}/gitea-ci-promote.tok
 # not JCasC `jobs:`, and no pinned plugin needs job-dsl (checked update-center.actual.json
 # for 2.580.2; only optional chains reach it, e.g. git -> promoted-builds -> job-dsl).
 
+# Plugins taken out of jenkins_plugins stay installed unless listed here: the plugin manager only adds.
+jenkins_plugins_removed:
+  - job-dsl
+
 # id/ver maps (not name:ver) so gitleaks does not treat incrementals as API keys.
 jenkins_plugins:
   - id: antisamy-markup-formatter

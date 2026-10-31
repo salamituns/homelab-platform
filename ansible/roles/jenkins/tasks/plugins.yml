@@ -66,3 +66,12 @@
     group: jenkins
     recurse: true
   when: not ansible_check_mode
+
+- name: Remove plugins that are no longer pinned
+  ansible.builtin.file:
+    path: "{{ jenkins_home }}/plugins/{{ item.0 }}{{ item.1 }}"
+    state: absent
+  loop: "{{ jenkins_plugins_removed | product(['.jpi', '.jpi.disabled', '.jpi.pinned', '']) | list }}"
+  loop_control:
+    label: "{{ item.0 }}{{ item.1 }}"
+  notify: Restart jenkins
