@@ -3,6 +3,10 @@ kind: Application
 metadata:
   name: monitoring
   namespace: argocd
+  annotations:
+    # Server-side diff to match ServerSideApply: the legacy diff counts every API-server default (HTTPRoute
+    # backendRef group/kind/weight, parentRef group/kind) as drift (ADR 0013 step 5; same lesson as Kyverno, ADR 0012).
+    argocd.argoproj.io/compare-options: ServerSideDiff=true
 spec:
   project: platform
   # Chart from the Helm repo, values from this git repo. releaseName keeps every object name the same

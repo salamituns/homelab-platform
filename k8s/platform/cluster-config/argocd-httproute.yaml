@@ -19,8 +19,5 @@ spec:
             type: PathPrefix
             value: /
       backendRefs:
-        - group: ""   # the API server's defaults, spelled out so a server-side apply shows no drift
-          kind: Service
-          name: argocd-server
+        - name: argocd-server
           port: 80
-          weight: 1

@@ -1,6 +1,6 @@
 # ADR 0013: Replace `ingress-nginx` with a Kubernetes Gateway API controller
 
-- Status: Accepted (owner, 2026-10-31)
+- Status: Accepted (owner, 2026-10-31); implemented 2026-10-31
 - Date: 2026-10-31
 
 ## Context
@@ -165,7 +165,7 @@ supports this through the official traffic-router plugin
 
 - `ingress-nginx` and its two admission webhook `Job` workarounds (`Force=true,Replace=true`, removed `ttlSecondsAfterFinished`) are deleted from `homelab-platform` once cutover completes.
 - `argo-rollouts` gains an initContainer and RBAC for `gateway.networking.k8s.io/httproutes`.
-- NGINX Gateway Fabric `2.x` dynamically creates the data-plane `Deployment` and `LoadBalancer` `Service` (`homelab-gateway-nginx`) owned by the `Gateway` resource; MetalLB assigns the VIP configured via `Gateway.spec.addresses` (`192.168.1.240`).
+- NGINX Gateway Fabric `2.x` dynamically creates the data-plane `Deployment` and `LoadBalancer` `Service` (`homelab-gateway-nginx`) owned by the `Gateway` resource; MetalLB assigns `192.168.1.240` from the `metallb.universe.tf/loadBalancerIPs` annotation, set through `Gateway.spec.infrastructure.annotations` (not `spec.addresses`; see Changes made during rollout).
 - Every route uses portable `gateway.networking.k8s.io/v1` `HTTPRoute` specs with no controller-specific annotations; switching to Envoy Gateway in the future would only require changing `gatewayClassName` and the controller Application.
 
 ## Rollout plan
@@ -198,12 +198,24 @@ supports this through the official traffic-router plugin
 - Both NGF images are pinned by digest: the control plane through kustomize `images`, the data plane through the
   `NginxProxy` `tag` field (`2.8.0@sha256:…`).
 - The cert-generator `Job` gets the ingress-nginx treatment (no TTL, `Force=true,Replace=true`) to avoid the self-heal loop.
+- **The address is requested from MetalLB, not set with `spec.addresses`.** NGF writes `spec.addresses` into the Service's
+  `externalIPs`. kube-proxy accepts traffic for those, but MetalLB never announces them, so a plain edit from `.244` to `.240`
+  would have left `.240` unanswered. Staging got `.244` only because it was the next free address. The Gateway now sets
+  `metallb.universe.tf/loadBalancerIPs` through `spec.infrastructure.annotations`. MetalLB v0.14.8 ignores the newer
+  `metallb.io/loadBalancerIPs` key; both were tested with throwaway Services.
+- The `ingress-nginx` Application had no resources finalizer; one was added before the cutover so deleting the Application
+  deletes the controller.
+- `platform-root` runs with `prune: false`, so removing `apps/ingress-nginx.yaml` only marked the Application for pruning.
+  It was deleted by hand (`kubectl -n argocd delete app ingress-nginx`). `argocd-server-ingress` (no-prune `cluster-config`
+  app) and the Rollouts-created `backend-belleshop-api-ingress-canary` were deleted by hand as well.
+- `argo-rollouts` and `monitoring` showed their HTTPRoutes as permanently OutOfSync: server-side apply with the legacy diff
+  counts every API-server default as drift. Both apps now use `ServerSideDiff=true`, as `kyverno` and `nginx-gateway` do.
 
 ## Rollout status
 
 | Step | Status |
 |---|---|
 | 1-2. NGF v2.8.0 + `homelab-gateway` on `.244` | Done 2026-10-31 (1484a3a): GatewayClass Accepted, Gateway Programmed on `192.168.1.244`, app Healthy |
-| 3. HTTPRoutes | Platform routes done (b144699): argocd/grafana/rollouts give 9/9 identical status codes on `.240` and `.244`. Namespace labels live in the no-prune `cluster-config` app. BelleShop routes: belleshop-deploy PR #8. Known difference: ingress-nginx matched `/api` case-insensitively; HTTPRoute does not (`/API/...` goes to the frontend) |
-| 4. Canary on the Gateway API plugin | Plugin v0.17.0 loaded, checksum-pinned (a92bba2); Argo CD ignores the route's weights (1a6f530). Rollout switch + Role in `dev`: branch `gw-canary`, PR after #8 |
-| 5. Cutover to `.240`, remove ingress-nginx | Not started |
+| 3. HTTPRoutes | Platform routes done (b144699): argocd/grafana/rollouts give 9/9 identical status codes on `.240` and `.244`. Namespace labels live in the no-prune `cluster-config` app. BelleShop routes: belleshop-deploy #8, all 15 checks identical. Known difference: ingress-nginx matched `/api` case-insensitively; HTTPRoute does not (`/API/...` goes to the frontend) |
+| 4. Canary on the Gateway API plugin | Done 2026-10-31 (belleshop-deploy #9, #11): first canary stepped `belleshop-api` 90/10 → 50/50 → 100/0, AnalysisRun Successful |
+| 5. Cutover to `.240`, remove ingress-nginx | Done 2026-10-31 09:05 (homelab-platform #1, #2; belleshop-deploy #12): `.240` moved to `homelab-gateway-nginx` 1 s after the ingress-nginx Service was deleted; a probe at 2/s saw 1 failed request in 600. `scripts/route-smoke.sh 192.168.1.240` matches the pre-cutover baseline 15/15. No ingress-nginx objects remain |
