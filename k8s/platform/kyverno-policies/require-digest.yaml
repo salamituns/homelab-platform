@@ -13,8 +13,9 @@ metadata:
       namespaces to include an immutable @sha256: digest reference.
 spec:
   failurePolicy: Fail
+  # Deny since 2026-10-31 (ADR 0012). Rollback: back to Audit; background reports keep running either way.
   validationActions:
-    - Audit
+    - Deny
   autogen:
     podControllers:
       controllers:

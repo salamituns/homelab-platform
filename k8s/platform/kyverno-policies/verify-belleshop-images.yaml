@@ -15,8 +15,9 @@ metadata:
       signed by the homelab Cosign key (without transparency log), mutating tags to digests.
 spec:
   failurePolicy: Fail
+  # Deny since 2026-10-31 (ADR 0012). Rollback: back to Audit; background reports keep running either way.
   validationActions:
-    - Audit
+    - Deny
   validationConfigurations:
     mutateDigest: true
     verifyDigest: true
