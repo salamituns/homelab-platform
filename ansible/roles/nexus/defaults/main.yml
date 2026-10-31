@@ -25,15 +25,18 @@ nexus_secrets_dir: /etc/nexus/secrets
 nexus_docker_repos:
   - { name: belleshop, http_port: 8082, write_policy: allow_once }
 
-# Pull-through cache of Docker Hub. Caddy sends registry.home.arpa/v2/library/* here (host_vars/nexus.yml),
-# so third-party official images are pulled through Nexus and pinned by digest (ADR 0012).
+# Pull-through caches. Caddy routes registry.home.arpa paths to each connector (host_vars/nexus.yml):
+# - /v2/library/*      -> dockerhub (8083): third-party official images, pinned by digest (ADR 0012)
+# - /v2/aquasecurity/* -> ghcr (8084):      Trivy vulnerability DBs and checks bundle
 nexus_docker_proxies:
-  - { name: dockerhub, http_port: 8083, remote_url: "https://registry-1.docker.io" }
+  - { name: dockerhub, http_port: 8083, remote_url: "https://registry-1.docker.io", index_type: HUB }
+  - { name: ghcr, http_port: 8084, remote_url: "https://ghcr.io", index_type: REGISTRY }
 
-# Least privilege: CI may push to its repo only; the cluster may only pull. Passwords are generated on the host
-# into {{ nexus_secrets_dir }}/<user> and handed to Jenkins / Kubernetes by the owner.
+# Least privilege: CI may push to its repo only; ci-pull reads cached scanner DBs on every build (including PRs);
+# the cluster may only pull runtime images. Passwords are generated on the host into {{ nexus_secrets_dir }}/<user>.
 nexus_service_users:
   - { name: ci-push, repos: [belleshop], actions: [read, browse, add, edit] }
+  - { name: ci-pull, repos: [ghcr], actions: [read, browse] }
   - { name: k8s-pull, repos: [belleshop, dockerhub], actions: [read, browse] }
 
 # Nexus Repository CE serves no repository traffic until its Community EULA is accepted. Accepting is a legal decision

@@ -23,7 +23,11 @@ archive) then `--severity HIGH,CRITICAL --ignore-unfixed --exit-code 1` (the
 gate). Two runs so the fail rule stays in Trivy instead of a jq rewrite of
 `FixedVersion`.
 
-Cache: `$TRIVY_CACHE_DIR` or `$HOME/.cache/trivy`. DB download is allowed.
+Cache: `$TRIVY_CACHE_DIR` or `$HOME/.cache/trivy`. DB and checks-bundle
+downloads go through the Nexus `ghcr` proxy (`registry.home.arpa/aquasecurity/trivy-db:2`,
+`registry.home.arpa/aquasecurity/trivy-java-db:1`,
+`registry.home.arpa/aquasecurity/trivy-checks:2`); Trivy reads `TRIVY_USERNAME`
+and `TRIVY_PASSWORD` (or `DOCKER_CONFIG`) from the environment, never argv.
 Trivy is invoked with `--config /dev/null` and an explicit `--ignorefile` so a
 `trivy.yaml` / `.trivyignore` in the caller's cwd cannot weaken the gate (or
 fail the agent user with permission errors).
@@ -32,12 +36,13 @@ fail the agent user with permission errors).
 
 ```sh
 export REPORT_DIR="${WORKSPACE}/reports"
+# Bind nexus-ci-pull (read-only on ghcr proxy) to TRIVY_USERNAME / TRIVY_PASSWORD on every build (PRs + main):
 /opt/ci-gates/secrets.sh "${WORKSPACE}"
 /opt/ci-gates/deps.sh "${WORKSPACE}"
 # build image, tag as registry.home.arpa/belleshop/<name>:<gitsha>
 /opt/ci-gates/image.sh "${IMAGE_REF}"
 /opt/ci-gates/sbom.sh "${IMAGE_REF}"
-# docker login, then:
+# On main only: docker login with nexus-ci-push, then:
 export COSIGN_KEY=... COSIGN_PASSWORD=...
 /opt/ci-gates/sign.sh "${IMAGE_REF}@sha256:${DIGEST}"
 ```

@@ -51,10 +51,12 @@ jenkins_job_dir: /etc/jenkins/jobs
 jenkins_gitea_url: https://gitea.home.arpa
 jenkins_sonar_url: https://sonarqube.home.arpa
 jenkins_nexus_ci_push_user: ci-push
+jenkins_nexus_ci_pull_user: ci-pull
 jenkins_private_dir: "{{ playbook_dir }}/../../private"
 
 # Host paths we copy into /etc/jenkins/secrets/ (0640 root:jenkins). Missing sources are skipped.
 jenkins_nexus_ci_push_src: /etc/nexus/secrets/ci-push
+jenkins_nexus_ci_pull_src: /etc/nexus/secrets/ci-pull
 jenkins_sonarqube_token_src: /etc/sonarqube/secrets/jenkins-token
 jenkins_cosign_key_src: "{{ jenkins_private_dir }}/cosign.key"
 jenkins_cosign_password_src: "{{ jenkins_private_dir }}/cosign.password"

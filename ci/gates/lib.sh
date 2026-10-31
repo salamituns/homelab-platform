@@ -127,9 +127,30 @@ ci_trivy() {
 	# Pin config and ignore files. Trivy otherwise reads trivy.yaml /
 	# .trivyignore from cwd, which on the agent is often an admin home the
 	# jenkins-agent user cannot open.
+	# Vulnerability DBs and the misconfig checks bundle come from the Nexus
+	# ghcr.io proxy (registry.home.arpa/aquasecurity/*). Auth is read by Trivy
+	# from TRIVY_USERNAME / TRIVY_PASSWORD (or DOCKER_CONFIG) in the environment,
+	# never argv.
 	local ignore="/dev/null"
 	if [[ -n "${CI_TRIVY_IGNOREFILE:-}" ]]; then
 		ignore="${CI_TRIVY_IGNOREFILE}"
 	fi
-	trivy --config /dev/null --ignorefile "${ignore}" "$@"
+	local db_repo="${TRIVY_DB_REPOSITORY:-registry.home.arpa/aquasecurity/trivy-db:2}"
+	local java_db_repo="${TRIVY_JAVA_DB_REPOSITORY:-registry.home.arpa/aquasecurity/trivy-java-db:1}"
+	local checks_repo="${TRIVY_CHECKS_BUNDLE_REPOSITORY:-registry.home.arpa/aquasecurity/trivy-checks:2}"
+	if [[ -n "${TRIVY_USERNAME:-}" ]]; then
+		TRIVY_USERNAME="${TRIVY_USERNAME//$'\r'/}"
+		TRIVY_USERNAME="${TRIVY_USERNAME//$'\n'/}"
+		export TRIVY_USERNAME
+	fi
+	if [[ -n "${TRIVY_PASSWORD:-}" ]]; then
+		TRIVY_PASSWORD="${TRIVY_PASSWORD//$'\r'/}"
+		TRIVY_PASSWORD="${TRIVY_PASSWORD//$'\n'/}"
+		export TRIVY_PASSWORD
+	fi
+	trivy --config /dev/null --ignorefile "${ignore}" \
+		--db-repository "${db_repo}" \
+		--java-db-repository "${java_db_repo}" \
+		--checks-bundle-repository "${checks_repo}" \
+		"$@"
 }

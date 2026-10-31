@@ -57,6 +57,7 @@ Jenkins credential / job. The playbook still succeeds if they are missing.
 | Credential id | Type | Create |
 |---|---|---|
 | `nexus-ci-push` | username/password (`ci-push`) | Run the Nexus playbook. Password is `/etc/nexus/secrets/ci-push` on `nexus`. |
+| `nexus-ci-pull` | username/password (`ci-pull`) | Run the Nexus playbook. Password is `/etc/nexus/secrets/ci-pull` on `nexus` (read-only on `ghcr` proxy for Trivy DBs). |
 | `sonarqube-token` | secret text | On SonarQube, create a token for Jenkins and write it to `/etc/sonarqube/secrets/jenkins-token` on `sonarqube` (`0640`). |
 | `cosign-key` | secret file `cosign.key` | On the Mac: `cosign generate-key-pair` (passphrase prompted). Move `cosign.key` to `private/cosign.key`. Keep `cosign.pub` for Week 4. |
 | `cosign-password` | secret text | Same passphrase, one line, `private/cosign.password`. |

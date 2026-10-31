@@ -11,6 +11,7 @@
   when:
     - not ansible_check_mode
     - jenkins_has_nexus_ci_push | bool
+      or jenkins_has_nexus_ci_pull | bool
       or jenkins_has_sonarqube_token | bool
       or jenkins_has_cosign_key | bool
       or jenkins_has_cosign_password | bool
@@ -25,6 +26,7 @@
   when: >-
     not (
       jenkins_has_nexus_ci_push | bool
+      or jenkins_has_nexus_ci_pull | bool
       or jenkins_has_sonarqube_token | bool
       or jenkins_has_cosign_key | bool
       or jenkins_has_cosign_password | bool

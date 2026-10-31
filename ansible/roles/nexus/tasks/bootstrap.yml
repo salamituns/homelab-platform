@@ -200,7 +200,7 @@
         forceBasicAuth: true    # no anonymous pulls through the cache either
         httpPort: "{{ item.item.http_port }}"
       dockerProxy:
-        indexType: HUB
+        indexType: "{{ item.item.index_type | default('REGISTRY') }}"
     status_code: [201, 204]
   loop: "{{ nexus_proxy_lookup.results | default([]) }}"
   loop_control:
