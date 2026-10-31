@@ -44,7 +44,7 @@ Why: [ADR 0008](../adr/0008-argocd-app-of-apps-platform.md). Layout: `k8s/platfo
 
 ## Proof drill: delete `monitoring`, watch it come back
 
-What comes back: every object in git (chart, values, Grafana ingress, BelleShop's ServiceMonitor and dashboard).
+What comes back: every object in git (chart, values, Grafana HTTPRoute, BelleShop's ServiceMonitor and dashboard).
 What does NOT: `grafana-admin` (not in git) and the Prometheus/Alertmanager PVC data (7 days of metrics).
 
 ```bash
