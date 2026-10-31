@@ -12,4 +12,8 @@ shows up as a reviewable diff. Upgrade: download the new file, check it, update 
 | `local-path/vendor/local-path-storage-v0.0.28.yaml` | `https://raw.githubusercontent.com/rancher/local-path-provisioner/v0.0.28/deploy/local-path-storage.yaml` | `569fe4c806d8a967b3be1c97ead3dec5fa6931fc983c731a755c0e8ad82ea336` |
 | `metrics-server/vendor/metrics-server-components-v0.8.1.yaml` | `https://github.com/kubernetes-sigs/metrics-server/releases/download/v0.8.1/components.yaml` | `4a672c4891902573a3ff753cece5de1bf1f55dd053403dfec39df9d1636b7ff1` |
 
+| `nginx-gateway/vendor/gateway-api-standard-v1.6.3.yaml` | `https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.6.3/standard-install.yaml` | `356c2b8e286a964dc20995435659ad1095386329974793af10bbfe3eff977fe5` |
+| `nginx-gateway/vendor/ngf-crds-v2.8.0.yaml` | `https://raw.githubusercontent.com/nginx/nginx-gateway-fabric/v2.8.0/deploy/crds.yaml` | `a652a8cdbade3a7663de77c4b293844f2126ac0a18421310129adac61bf926af` |
+| `nginx-gateway/vendor/ngf-deploy-v2.8.0.yaml` | `https://raw.githubusercontent.com/nginx/nginx-gateway-fabric/v2.8.0/deploy/default/deploy.yaml` | `6f01716982e32be93d09917abf8ea17a06d0983855e67f37fb4f60de1d0f41f2` |
+
 Check: `cd k8s/platform && shasum -a 256 */vendor/*.yaml`

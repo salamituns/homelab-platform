@@ -1,0 +1,38 @@
+# NGINX Gateway Fabric v2.8.0 + Gateway API v1.6.3 standard CRDs (the version NGF v2.8.0's own kustomization pins). ADR 0013.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - vendor/gateway-api-standard-v1.6.3.yaml
+  - vendor/ngf-crds-v2.8.0.yaml
+  - vendor/ngf-deploy-v2.8.0.yaml
+  - gateway.yaml
+# Control plane and cert-generator Job by digest (ghcr.io, checked 2026-10-31).
+images:
+  - name: ghcr.io/nginx/nginx-gateway-fabric
+    newTag: 2.8.0@sha256:cd0a787ecdaaa140f66a64b071f9553c7d69606b22c7b786ca65ad414a25b0fe
+patches:
+  # Same two traps as ingress-nginx's admission Jobs (ADR 0012): a Job's pod template is immutable, so an image change
+  # fails a normal apply (Force+Replace recreates it), and ttlSecondsAfterFinished deletes it, which self-heal sees as drift.
+  - target:
+      kind: Job
+      name: nginx-gateway-cert-generator
+    patch: |-
+      - op: remove
+        path: /spec/ttlSecondsAfterFinished
+      - op: add
+        path: /metadata/annotations
+        value:
+          argocd.argoproj.io/sync-options: Force=true,Replace=true
+  # Data plane: one replica, sized for the 4 GB workers, image by digest (NginxProxy builds repository:tag).
+  - target:
+      kind: NginxProxy
+      name: nginx-gateway-proxy-config
+    patch: |-
+      - op: replace
+        path: /spec/kubernetes/deployment/container/image/tag
+        value: "2.8.0@sha256:ed85a822d773a1a780c8897054f27fc881e378f586e6f39582dc2e04a152128d"
+      - op: add
+        path: /spec/kubernetes/deployment/container/resources
+        value:
+          requests: { cpu: 50m, memory: 64Mi }
+          limits: { memory: 256Mi }

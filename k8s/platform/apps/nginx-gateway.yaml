@@ -1,0 +1,25 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: nginx-gateway
+  namespace: argocd
+  annotations:
+    # Server-side apply (the CRDs are ~2 MB, past the client-side annotation limit) and server-side diff to match it,
+    # the lesson from Kyverno's permanent OutOfSync (ADR 0012).
+    argocd.argoproj.io/compare-options: ServerSideDiff=true
+spec:
+  project: platform
+  source:
+    repoURL: https://gitea.home.arpa/tunsgit/homelab-platform.git
+    targetRevision: main
+    path: k8s/platform/nginx-gateway
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: nginx-gateway
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
+      - SkipDryRunOnMissingResource=true   # GatewayClass/Gateway/NginxProxy before their CRDs exist on the first sync

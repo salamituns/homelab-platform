@@ -1,0 +1,22 @@
+# The one shared Gateway (ADR 0013). Staging address .244 while ingress-nginx keeps .240; the cutover moves this to .240.
+# Routes attach only from namespaces that opt in with the label below, the same opt-in style as Kyverno's.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: homelab-gateway
+  namespace: nginx-gateway
+spec:
+  gatewayClassName: nginx
+  addresses:
+    - type: IPAddress
+      value: 192.168.1.244
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              homelab.arpa/gateway-routes: "true"

@@ -1,6 +1,6 @@
 # ADR 0013: Replace `ingress-nginx` with a Kubernetes Gateway API controller
 
-- Status: Proposed
+- Status: Accepted (owner, 2026-10-31)
 - Date: 2026-10-31
 
 ## Context
@@ -20,7 +20,7 @@ Before selecting a replacement, we surveyed the cluster and everything that depe
 | Kubernetes | `v1.33.x` on kubeadm (1 control plane, 2 workers) | Must support Kubernetes 1.33 and Gateway API `v1` (`gateway.networking.k8s.io/v1`) |
 | Node memory | 2 workers × 4 GB RAM, currently at 50–57% used | Heavy service-mesh control planes or high-memory proxies risk pushing workers over 75% during rollouts |
 | CNI | Flannel (`kube-flannel-ds`, VXLAN) | Rules out CNI-integrated gateways unless we also replace the CNI |
-| LoadBalancer | MetalLB L2 (`192.168.1.240–192.168.1.243`); `.240` is bound to `ingress-nginx-controller` | A spare VIP (`.241`) is available for parallel bring-up before moving `.240` |
+| LoadBalancer | MetalLB L2 (`192.168.1.240–192.168.1.243`); `.240` is bound to `ingress-nginx-controller` | A spare VIP (`.244`) is available for parallel bring-up before moving `.240` |
 | GitOps | Argo CD app-of-apps (`homelab-platform` and `belleshop-deploy`), `ServerSideApply=true`, `ServerSideDiff=true` | CRDs and controller manifests must vendor cleanly from a pinned Helm chart or release manifest without OutOfSync drift |
 | Progressive delivery | Argo Rollouts `belleshop-backend` uses `trafficRouting.nginx` (`stableIngress: belleshop-api-ingress`) | Must migrate to `HTTPRoute` weight splitting via [`argoproj-labs/rollouts-plugin-trafficrouter-gatewayapi`](https://github.com/argoproj-labs/rollouts-plugin-trafficrouter-gatewayapi) | Kyverno admission | Enforces `restricted` PSA and signed/digest-pinned images in `dev` (`homelab-platform` namespaces are excluded) | Gateway control/data-plane pods live in their own platform namespace |
 
@@ -152,7 +152,7 @@ supports this through the official traffic-router plugin
 | Route ownership | Platform `HTTPRoute` objects (`argocd`, `grafana`, `rollouts`) live in `homelab-platform` inside each service's namespace; BelleShop `HTTPRoute` objects (`belleshop-frontend`, `belleshop-api`) live in `belleshop-deploy` (`namespace: dev`) | App routes stay in the app config repo alongside the `Rollout` and `Service` they target; no cross-namespace `ReferenceGrant` needed because each `HTTPRoute` lives in the same namespace as its `Service` |
 | Data-plane sizing | `NginxProxy` resource pinned to `1` replica with explicit CPU/memory requests and limits | Prevents unexpected scaling on a 2-worker homelab cluster |
 | Canary traffic router | `argoproj-labs/rollouts-plugin-trafficrouter-gatewayapi` `v0.17.0`, loaded via initContainer (no runtime internet download) | Official Argo Rollouts Gateway API integration; keeps air-gapped/pinned runtime posture |
-| Cutover method | Parallel bring-up on MetalLB `.241`, smoke-test all 5 routes + a canary rollout via `--resolve` / `/etc/hosts`, then move `.240` to `homelab-gateway` and remove `ingress-nginx` | Instant rollback before `.240` moves; zero-guesswork verification of every route and canary step |
+| Cutover method | Parallel bring-up on MetalLB `.244`, smoke-test all 5 routes + a canary rollout via `--resolve` / `/etc/hosts`, then move `.240` to `homelab-gateway` and remove `ingress-nginx` | Instant rollback before `.240` moves; zero-guesswork verification of every route and canary step |
 
 ## Not now
 
@@ -173,10 +173,10 @@ supports this through the official traffic-router plugin
 | Step | Action | Verification / Rollback |
 |---|---|---|
 | 1. Vendor Gateway API CRDs + NGINX Gateway Fabric `v2.8.0` | Add Gateway API `v1.6.3` standard CRDs and NGF `v2.8.0` under `k8s/platform/nginx-gateway/` in `homelab-platform` (`ServerSideApply=true`, `ServerSideDiff=true`). Pin images through Nexus or upstream digest | `kubectl get gatewayclass nginx` reports `Accepted=True`; `ingress-nginx` on `.240` is untouched |
-| 2. Provision `homelab-gateway` on staging VIP `192.168.1.241` | Create `NginxProxy` (1 replica, resource requests/limits) and `Gateway/homelab-gateway` requesting address `192.168.1.241` from MetalLB | `kubectl -n nginx-gateway get gateway homelab-gateway` shows `Programmed=True`, `ADDRESS=192.168.1.241` |
-| 3. Add `HTTPRoute` resources alongside existing `Ingress` objects | Add `HTTPRoute` manifests for `argocd.local`, `grafana.local`, `rollouts.local` in `homelab-platform`, and `belleshop.local` (frontend + `/api` with `ReplacePrefixMatch: /`) and `api.belleshop.local` in `belleshop-deploy` | Existing `Ingress` objects on `.240` keep serving traffic; test all 15 HTTP checks from `INGRESS-UPGRADE-NOTES.md` against `192.168.1.241` (`curl --resolve <host>:80:192.168.1.241`) and verify identical status codes |
+| 2. Provision `homelab-gateway` on staging VIP `192.168.1.244` | Create `NginxProxy` (1 replica, resource requests/limits) and `Gateway/homelab-gateway` requesting address `192.168.1.244` from MetalLB | `kubectl -n nginx-gateway get gateway homelab-gateway` shows `Programmed=True`, `ADDRESS=192.168.1.244` |
+| 3. Add `HTTPRoute` resources alongside existing `Ingress` objects | Add `HTTPRoute` manifests for `argocd.local`, `grafana.local`, `rollouts.local` in `homelab-platform`, and `belleshop.local` (frontend + `/api` with `ReplacePrefixMatch: /`) and `api.belleshop.local` in `belleshop-deploy` | Existing `Ingress` objects on `.240` keep serving traffic; test all 15 HTTP checks from `INGRESS-UPGRADE-NOTES.md` against `192.168.1.244` (`curl --resolve <host>:80:192.168.1.244`) and verify identical status codes |
 | 4. Enable Argo Rollouts Gateway API plugin and switch `belleshop-backend` | Add `rollouts-plugin-trafficrouter-gatewayapi` `v0.17.0` + `httproutes` RBAC to `argo-rollouts` in `homelab-platform`; update `belleshop-deploy` `base/backend-rollout.yaml` from `trafficRouting.nginx` to `trafficRouting.plugins["argoproj-labs/gatewayAPI"]` | Trigger a rollout in `dev`; verify `HTTPRoute/belleshop-api` `backendRefs` weights step `20 -> 50 -> 100` and `AnalysisRun` succeeds |
-| 5. Cut over VIP `192.168.1.240` and remove `ingress-nginx` | Remove the five `Ingress` resources, remove the `ingress-nginx` Application (releasing `.240`), and update `Gateway/homelab-gateway` `spec.addresses` from `192.168.1.241` to `192.168.1.240` | Re-run all 15 HTTP checks against `.240` (`argocd.local`, `grafana.local`, `rollouts.local`, `belleshop.local`, `api.belleshop.local`). Rollback: revert the Git commit in `homelab-platform` |
+| 5. Cut over VIP `192.168.1.240` and remove `ingress-nginx` | Remove the five `Ingress` resources, remove the `ingress-nginx` Application (releasing `.240`), and update `Gateway/homelab-gateway` `spec.addresses` from `192.168.1.244` to `192.168.1.240` | Re-run all 15 HTTP checks against `.240` (`argocd.local`, `grafana.local`, `rollouts.local`, `belleshop.local`, `api.belleshop.local`). Rollback: revert the Git commit in `homelab-platform` |
 
 ## References
 
@@ -188,3 +188,13 @@ supports this through the official traffic-router plugin
 - Istio — [Kubernetes Gateway API task guide](https://istio.io/latest/docs/tasks/traffic-management/ingress/gateway-api/)
 - Cilium — [Gateway API prerequisites (`kubeProxyReplacement` + Cilium CNI)](https://docs.cilium.io/en/stable/network/servicemesh/gateway-api/gateway-api/)
 - Argo Rollouts — [`rollouts-plugin-trafficrouter-gatewayapi` (`v0.17.0`)](https://github.com/argoproj-labs/rollouts-plugin-trafficrouter-gatewayapi)
+
+## Changes made during rollout (2026-10-31)
+
+- Staging address is `192.168.1.244`, not `.241`: `.240`–`.243` are taken by ingress-nginx, Argo CD, Grafana and the
+  Rollouts dashboard LoadBalancers.
+- Gateway API CRDs: the standard `v1.6.3` bundle, exactly what NGF v2.8.0's `config/crd/gateway-api/standard` pins
+  (its release notes mention an earlier bump to 1.6.2).
+- Both NGF images are pinned by digest: the control plane through kustomize `images`, the data plane through the
+  `NginxProxy` `tag` field (`2.8.0@sha256:…`).
+- The cert-generator `Job` gets the ingress-nginx treatment (no TTL, `Force=true,Replace=true`) to avoid the self-heal loop.
