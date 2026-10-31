@@ -1,0 +1,37 @@
+# Managed by Ansible (homelab-platform, role: openbao). Local edits are overwritten.
+#
+# The listener is 127.0.0.1: Caddy on 443 is the front door (bao.home.arpa).
+# ProtectSystem=strict + ReadWritePaths: the process can write only its data and log
+# directories, so a compromised OpenBao cannot rewrite its config or its own binary.
+# After a reboot it starts sealed and waits for two unseal keys (ADR 0014: no auto-unseal);
+# the unit itself succeeds, sealed is the normal state, not a failure.
+[Unit]
+Description=OpenBao (secrets store, ADR 0014)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+User=openbao
+Group=openbao
+ExecStart=/usr/local/bin/bao server -config={{ openbao_config_dir }}/openbao.hcl
+Restart=on-failure
+RestartSec=5s
+# mlock without CAP_IPC_LOCK: RLIMIT_MEMLOCK lets the openbao user pin its own memory.
+LimitMEMLOCK=infinity
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths={{ openbao_data_dir }} {{ openbao_log_dir }}
+ProtectHome=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

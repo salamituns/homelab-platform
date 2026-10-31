@@ -1,0 +1,18 @@
+# Pinned OpenBao release (ADR 0014). Bump both together; the checksum comes from checksums.txt
+# on the GitHub release page (checked 2026-10-31).
+openbao_version: "2.7.2"
+openbao_sha256: "582b1f3c2fdc5afd443b2d57a225ef654de75adea609fdb66731fd582a9cbc96"
+openbao_download_url: "https://github.com/openbao/openbao/releases/download/v{{ openbao_version }}/openbao_{{ openbao_version }}_linux_amd64.tar.gz"
+
+openbao_config_dir: /etc/openbao
+# Raft storage (the sealed store) and the audit log (enabled after init, runbook).
+openbao_data_dir: /var/lib/openbao
+openbao_log_dir: /var/log/openbao
+# Both ports bind 127.0.0.1. The only way in from the LAN is Caddy on 443 (role: caddy),
+# which terminates TLS for bao.home.arpa.
+openbao_api_port: 8200
+openbao_cluster_port: 8201
+# What OpenBao advertises to clients (through Caddy), not what it listens on.
+openbao_api_addr: "https://bao.home.arpa"
+# Raft node name; a single node today, the name only matters for snapshots and future peers.
+openbao_node_id: "{{ inventory_hostname }}"

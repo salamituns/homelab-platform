@@ -1,0 +1,22 @@
+# Managed by Ansible (homelab-platform, role: openbao). Local edits are overwritten.
+# TLS is off: the listener binds 127.0.0.1 only, and Caddy terminates TLS for bao.home.arpa.
+
+listener "tcp" {
+  address         = "127.0.0.1:{{ openbao_api_port }}"
+  cluster_address = "127.0.0.1:{{ openbao_cluster_port }}"
+  tls_disable     = true
+}
+
+# api_addr is what OpenBao tells clients to use (Caddy on 443). cluster_addr stays on loopback:
+# one node, so Raft has no peers to talk to (ADR 0014: no HA yet).
+api_addr     = "{{ openbao_api_addr }}"
+cluster_addr = "https://127.0.0.1:{{ openbao_cluster_port }}"
+
+storage "raft" {
+  path    = "{{ openbao_data_dir }}"
+  node_id = "{{ openbao_node_id }}"
+}
+
+# mlock stays on: OpenBao pins its memory (unseal keys, sealed store) so nothing reaches swap.
+# The service unit grants LimitMEMLOCK instead of CAP_IPC_LOCK, so no capability is needed.
+disable_mlock = false

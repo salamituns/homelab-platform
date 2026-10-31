@@ -1,0 +1,121 @@
+- name: Ensure openbao system group exists
+  ansible.builtin.group:
+    name: openbao
+    system: true
+    state: present
+
+- name: Ensure openbao system user exists (no login shell)
+  ansible.builtin.user:
+    name: openbao
+    group: openbao
+    system: true
+    shell: /usr/sbin/nologin
+    home: "{{ openbao_data_dir }}"
+    create_home: false
+    state: present
+
+# Raft storage: holds the sealed store. 0700, owned by openbao, nobody else reads it.
+- name: Create OpenBao data directory
+  ansible.builtin.file:
+    path: "{{ openbao_data_dir }}"
+    state: directory
+    owner: openbao
+    group: openbao
+    mode: "0700"
+
+# The audit device (enabled after init, see the runbook) writes here. The unit allows writes
+# only here and in the data directory.
+- name: Create OpenBao log directory
+  ansible.builtin.file:
+    path: "{{ openbao_log_dir }}"
+    state: directory
+    owner: openbao
+    group: openbao
+    mode: "0750"
+
+# Root-owned and only group-readable: the service reads its config but cannot change it.
+- name: Create OpenBao configuration directory
+  ansible.builtin.file:
+    path: "{{ openbao_config_dir }}"
+    state: directory
+    owner: root
+    group: openbao
+    mode: "0750"
+
+- name: Create versioned install directory
+  ansible.builtin.file:
+    path: "/opt/openbao/{{ openbao_version }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# --check cannot create /opt/openbao, so the download has no destination to verify against;
+# on a fresh host it would fail. Everything else checks cleanly, so the download and unpack
+# run for real only (a real second run is a no-op anyway: same checksum, `creates:` guard).
+- name: Download pinned OpenBao release verified by SHA-256
+  ansible.builtin.get_url:
+    url: "{{ openbao_download_url }}"
+    dest: "/opt/openbao/openbao-{{ openbao_version }}-linux_amd64.tar.gz"
+    checksum: "sha256:{{ openbao_sha256 }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when: not ansible_check_mode
+
+- name: Unpack the bao binary
+  ansible.builtin.unarchive:
+    src: "/opt/openbao/openbao-{{ openbao_version }}-linux_amd64.tar.gz"
+    dest: "/opt/openbao/{{ openbao_version }}"
+    remote_src: true
+    include: [bao]
+    owner: root
+    group: root
+    creates: "/opt/openbao/{{ openbao_version }}/bao"
+  when: not ansible_check_mode
+
+# Upgrade = new version dir + this link moves; the old dir stays for a quick rollback.
+- name: Point /usr/local/bin/bao at the pinned version
+  ansible.builtin.file:
+    src: "/opt/openbao/{{ openbao_version }}/bao"
+    dest: /usr/local/bin/bao
+    state: link
+    force: true   # also lets --check pass before the binary exists
+  notify: Restart openbao
+
+- name: Deploy OpenBao configuration
+  ansible.builtin.template:
+    src: openbao.hcl.j2
+    dest: "{{ openbao_config_dir }}/openbao.hcl"
+    owner: root
+    group: openbao
+    mode: "0640"
+  notify: Restart openbao
+
+- name: Deploy hardened openbao.service systemd unit
+  ansible.builtin.template:
+    src: openbao.service.j2
+    dest: /etc/systemd/system/openbao.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart openbao
+
+- name: Enable and start openbao service
+  ansible.builtin.systemd_service:
+    name: openbao
+    state: started
+    enabled: true
+    daemon_reload: true
+  ignore_errors: "{{ ansible_check_mode }}"
+
+- name: Flush handlers before the readiness wait
+  ansible.builtin.meta: flush_handlers
+
+# A sealed OpenBao still listens; this checks the service is up, not that it is unsealed.
+- name: Wait for the API listener on localhost
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ openbao_api_port }}"
+    timeout: 60
+  when: not ansible_check_mode
