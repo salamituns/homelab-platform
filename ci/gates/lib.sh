@@ -135,9 +135,17 @@ ci_trivy() {
 	if [[ -n "${CI_TRIVY_IGNOREFILE:-}" ]]; then
 		ignore="${CI_TRIVY_IGNOREFILE}"
 	fi
-	local db_repo="${TRIVY_DB_REPOSITORY:-registry.home.arpa/aquasecurity/trivy-db:2}"
-	local java_db_repo="${TRIVY_JAVA_DB_REPOSITORY:-registry.home.arpa/aquasecurity/trivy-java-db:1}"
-	local checks_repo="${TRIVY_CHECKS_BUNDLE_REPOSITORY:-registry.home.arpa/aquasecurity/trivy-checks:2}"
+	# Nexus first only when the pipeline passed the ci-pull credential; the public mirrors stay as a fallback
+	# (Trivy tries the list in order), so neither ghcr.io nor Nexus alone can fail a build. Without the
+	# credential this is Trivy's own default list, which keeps builds working while the Jenkinsfile catches up.
+	local mirrors=()
+	if [[ -n "${TRIVY_USERNAME:-}" && -n "${TRIVY_PASSWORD:-}" ]]; then
+		mirrors=(
+			--db-repository "${TRIVY_DB_REPOSITORY:-registry.home.arpa/aquasecurity/trivy-db:2,mirror.gcr.io/aquasec/trivy-db:2,ghcr.io/aquasecurity/trivy-db:2}"
+			--java-db-repository "${TRIVY_JAVA_DB_REPOSITORY:-registry.home.arpa/aquasecurity/trivy-java-db:1,mirror.gcr.io/aquasec/trivy-java-db:1,ghcr.io/aquasecurity/trivy-java-db:1}"
+			--checks-bundle-repository "${TRIVY_CHECKS_BUNDLE_REPOSITORY:-registry.home.arpa/aquasecurity/trivy-checks:2}"
+		)
+	fi
 	if [[ -n "${TRIVY_USERNAME:-}" ]]; then
 		TRIVY_USERNAME="${TRIVY_USERNAME//$'\r'/}"
 		TRIVY_USERNAME="${TRIVY_USERNAME//$'\n'/}"
@@ -148,9 +156,5 @@ ci_trivy() {
 		TRIVY_PASSWORD="${TRIVY_PASSWORD//$'\n'/}"
 		export TRIVY_PASSWORD
 	fi
-	trivy --config /dev/null --ignorefile "${ignore}" \
-		--db-repository "${db_repo}" \
-		--java-db-repository "${java_db_repo}" \
-		--checks-bundle-repository "${checks_repo}" \
-		"$@"
+	trivy --config /dev/null --ignorefile "${ignore}" ${mirrors[@]+"${mirrors[@]}"} "$@"
 }
