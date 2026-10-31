@@ -1,0 +1,21 @@
+Week 4 proof: Kyverno admission in namespace dev (policies: Deny). 2026-10-31T07:25Z
+
+### 1. Our registry, our repo, NOT signed (tag 4b882614e710, signature removed in Week 3)
+$ kubectl apply --dry-run=server  # image: registry.home.arpa/belleshop/belleshop-backend:4b882614e710
+  Error from server: error when creating "STDIN": admission webhook "ivpol.validate.kyverno.svc-fail" denied the request: Policy verify-belleshop-images failed: BelleShop image signature verification failed: image must be signed by the homelab Cosign key.
+
+### 2. Docker Hub, :latest
+$ kubectl apply --dry-run=server  # image: nginx:latest
+  Error from server: error when creating "STDIN": admission webhook "vpol.validate.kyverno.svc-fail" denied the request: Policy restrict-registries failed: Every container, initContainer, and ephemeralContainer image must start with registry.home.arpa/.; Policy disallow-latest failed: Using the mutable :latest image tag (explicit or implicit) is disallowed.; Policy require-digest failed: Every container, initContainer, and ephemeralContainer image must be pinned by digest (@sha256:<64-hex>).
+
+### 3. Signed image, but no resource requests/limits
+$ kubectl apply --dry-run=server  # image: registry.home.arpa/belleshop/belleshop-backend@sha256:cd9beb969532c1a41695f4d1224d2e47ef404e67a86494cad03e89903339e141
+  Error from server: error when creating "STDIN": admission webhook "vpol.validate.kyverno.svc-fail" denied the request: Policy require-requests-limits failed: Every container must define non-zero resources.requests.cpu, resources.requests.memory, and resources.limits.memory.
+
+### 4. Signed image, pinned by digest, limits set: must be admitted
+$ kubectl apply --dry-run=server  # image: registry.home.arpa/belleshop/belleshop-backend@sha256:cd9beb969532c1a41695f4d1224d2e47ef404e67a86494cad03e89903339e141
+  pod/good created (server dry run)
+
+### 5. Scope: same nginx:latest in namespace default (not opted in): Kyverno must not be consulted
+$ kubectl -n default run scope-check --image=nginx:latest --dry-run=server
+  pod/scope-check created (server dry run)

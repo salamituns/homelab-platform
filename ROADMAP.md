@@ -67,9 +67,9 @@ See [postmortem](docs/postmortems/2026-10-25-gitea-rce-cve-2026-60004.md).
   ([screenshot](docs/evidence/week-03-image-gate-blocked.png))
 
 ## Week 4: Supply chain + admission control
-- [ ] Kyverno: require signed images from Nexus, disallow `:latest`, require resource limits
+- [x] Kyverno: require signed images from Nexus, disallow `:latest`, require resource limits (enforcing 2026-10-31)
 - [ ] Pod Security Admission `restricted` on app namespaces
-- **Proof:** `kubectl run` with an unsigned image is rejected
+- **Proof:** `kubectl run` with an unsigned image is rejected ([evidence](docs/evidence/week-04-admission.txt))
 
 ## Week 5: Secrets + identity
 - [ ] Vault (or OpenBao) on the cluster; External Secrets Operator
