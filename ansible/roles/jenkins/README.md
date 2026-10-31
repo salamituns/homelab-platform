@@ -46,7 +46,7 @@ to `ansible/files/ca/jenkins-caddy-root.crt` by `roles/caddy`.
 |---|---|---|
 | Jenkins LTS | 2.580.2 | `debian-stable` (`get.jenkins.io/debian-stable/`, 2026-10-27) |
 | plugin-manager jar | 2.15.0 | GitHub `jenkins-plugin-manager-2.15.0.jar.sha256` |
-| Plugins | see `defaults/main.yml` | LTS update-center; **job-dsl 3732.v9a_c49a_61a_313** added 2026-10-29 (deps already pinned) |
+| Plugins | see `defaults/main.yml` | LTS update-center; job-dsl removed 2026-10-31 (job comes from REST config.xml) |
 | Java | OpenJDK 21 | Ubuntu 24.04 apt (not held; security updates stay on) |
 
 ## Secrets the owner must create by hand

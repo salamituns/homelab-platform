@@ -64,7 +64,9 @@ jenkins_gitea_promote_user: ci-promote
 jenkins_gitea_promote_token_src: "{{ jenkins_private_dir }}/gitea-ci-promote.token"
 
 # Top-level plugins plus required deps from the LTS update center (core 2.580.2).
-# job-dsl added 2026-10-29 for JCasC `jobs:` (same update-center.actual.json).
+# job-dsl removed 2026-10-31: the BelleShop job is created through the REST API (tasks/job.yml),
+# not JCasC `jobs:`, and no pinned plugin needs job-dsl (checked update-center.actual.json
+# for 2.580.2; only optional chains reach it, e.g. git -> promoted-builds -> job-dsl).
 
 # id/ver maps (not name:ver) so gitleaks does not treat incrementals as API keys.
 jenkins_plugins:
@@ -136,8 +138,6 @@ jenkins_plugins:
     ver: "1.2.0-8"  # gitleaks:allow
   - id: jaxb
     ver: "2.3.9-143.v5979df3304e6"  # gitleaks:allow
-  - id: job-dsl
-    ver: "3732.v9a_c49a_61a_313"  # gitleaks:allow
   - id: joda-time-api
     ver: "2.15.1-211.ve499f52b_da_33"  # gitleaks:allow
   - id: jquery3-api
