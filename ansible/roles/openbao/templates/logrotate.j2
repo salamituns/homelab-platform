@@ -1,0 +1,16 @@
+# Managed by Ansible (homelab-platform, role: openbao). Local edits are overwritten.
+#
+# OpenBao fails closed: when no audit device can write, it denies requests. So the rotation
+# moves the file (no copytruncate, which could lose lines) and HUPs the service, which
+# reopens the file handle without restarting or sealing anything (verified on 2.7.2).
+{{ openbao_audit_log }} {
+  weekly
+  rotate 8
+  missingok
+  notifempty
+  compress
+  delaycompress
+  postrotate
+    systemctl kill -s HUP openbao.service 2>/dev/null || true
+  endscript
+}

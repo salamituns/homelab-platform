@@ -1,8 +1,10 @@
-# Caddy (443/tcp) fronts the SeaweedFS S3 gateway: https://s3.home.arpa (ADR 0007).
-# Only admin clients run Terraform; nothing else may reach the state store.
+# Caddy (443/tcp) fronts the SeaweedFS S3 gateway: https://s3.home.arpa (ADR 0007)
+# and OpenBao: https://bao.home.arpa (ADR 0014).
+# Only admin clients may reach them: Terraform state and the secrets store.
 firewall_service_rules:
   - port: 443
     clients: "{{ lab_admin_clients }}"
 
 caddy_sites:
   - { names: [s3.home.arpa], upstream: "127.0.0.1:8333" }
+  - { names: [bao.home.arpa], upstream: "127.0.0.1:8200" }

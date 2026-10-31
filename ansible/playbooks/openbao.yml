@@ -1,0 +1,15 @@
+# Secrets store on sectools (ADR 0014): OpenBao on localhost, Caddy TLS on 443 (bao.home.arpa).
+# The role installs and configures only; init and unseal run in the owner's terminal
+# (docs/runbooks/openbao.md) and their output never goes in the repo.
+# Usage:
+#   ansible-playbook playbooks/openbao.yml --limit sectools --check --diff
+#   ansible-playbook playbooks/openbao.yml --limit sectools
+- name: Configure the secrets store
+  hosts: devsecops
+  become: true
+  roles:
+    - baseline
+    - internal_dns
+    - firewall
+    - openbao
+    - caddy

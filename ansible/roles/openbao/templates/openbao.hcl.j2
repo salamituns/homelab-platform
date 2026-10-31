@@ -1,0 +1,34 @@
+# Managed by Ansible (homelab-platform, role: openbao). Local edits are overwritten.
+# TLS is off: the listener binds 127.0.0.1 only, and Caddy terminates TLS for bao.home.arpa.
+
+listener "tcp" {
+  address         = "127.0.0.1:{{ openbao_api_port }}"
+  cluster_address = "127.0.0.1:{{ openbao_cluster_port }}"
+  tls_disable     = true
+}
+
+# api_addr is what OpenBao tells clients to use (Caddy on 443). cluster_addr stays on loopback:
+# one node, so Raft has no peers to talk to (ADR 0014: no HA yet).
+api_addr     = "{{ openbao_api_addr }}"
+cluster_addr = "https://127.0.0.1:{{ openbao_cluster_port }}"
+
+storage "raft" {
+  path    = "{{ openbao_data_dir }}"
+  node_id = "{{ openbao_node_id }}"
+}
+
+# Audit is declarative: OpenBao 2.7.2 refuses `bao audit enable` over the API (tested 2026-10-31)
+# and loads audit devices only from the config file, at startup and on SIGHUP (which is also what
+# logrotate uses to reopen the file). Values in the log are HMAC-hashed, never clear.
+audit "file" "file" {
+  description = "Requests and responses, HMAC-hashed values"
+  options {
+    file_path = "{{ openbao_audit_log }}"
+  }
+}
+
+# mlock is off on purpose: with Raft, bbolt memory-maps the whole database and mlockall would pin
+# it all in physical memory (OpenBao's mlock-removal RFC), risking the OOM killer on this 4 GB VM.
+# The trade-off: a swapped-out page could carry secrets to disk, so the role turns swap off on
+# sectools (openbao_disable_swap, tasks/main.yml), which closes that path.
+disable_mlock = true

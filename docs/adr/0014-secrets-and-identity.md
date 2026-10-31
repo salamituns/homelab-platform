@@ -1,6 +1,6 @@
 # ADR 0014: Secrets and identity with OpenBao, External Secrets Operator and scoped cluster access
 
-- Status: Proposed. Owner accepted the main choices on 2026-10-31; the MySQL network path below is new and still needs review.
+- Status: Accepted (owner, 2026-10-31); in progress.
 - Date: 2026-10-31
 
 ## Context
@@ -51,11 +51,18 @@ Changing a value in a secret store does not change a password in MySQL, so the p
 3. **Install External Secrets Operator (ESO) on the cluster** through Argo CD, using its Vault provider with
    Kubernetes auth. Each namespace gets its own `SecretStore` and an OpenBao role limited to its own path.
 4. **Use a static database role** for the app user. Dynamic per-pod users can come later.
-5. **Give OpenBao a dedicated MySQL admin account** that can only change the app user's password, and then remove
-   `root@'%'`.
+5. **Give OpenBao a dedicated MySQL account with global `CREATE USER`** (tested on 8.0.46, 2026-10-31): MySQL cannot scope
+   an account to changing only the app user, so it can create users and change any ordinary user's password, but not
+   `root`, which holds `SYSTEM_USER`. `APPLICATION_PASSWORD_ADMIN` is not needed. Accepted because OpenBao already holds
+   the app's password, so the account adds little data access, though it could disrupt ordinary users. `root@'%'` is
+   still removed.
 6. **Reach MySQL through a dedicated MetalLB address** (`.244`) with `loadBalancerSourceRanges` limited to `sectools`.
+   The account uses `REQUIRE SSL` and OpenBao connects with `tls=skip-verify`: the link is encrypted, but the server is
+   not authenticated, because MySQL's auto-generated certificate has no usable SAN. Week 6's cert-manager replaces it
+   with a verified certificate.
 7. **Have the app read the password from a mounted file** on each new connection, so it needs no restart. Use MySQL's
-   `RETAIN CURRENT PASSWORD` so the old and new passwords both work during the switch.
+   `RETAIN CURRENT PASSWORD` so the old and new passwords both work during the switch (confirmed on 8.0.46, 2026-10-31:
+   after a rotation both log in, and the older one stops working at the next rotation).
 8. **Enable etcd encryption at rest** with an `EncryptionConfiguration`, then rewrite existing Secrets. ESO copies
    secrets into etcd, so this belongs in the same week.
 9. **Scope cluster access.** Create per-namespace Roles, issue short-lived client certificates through the
@@ -93,6 +100,11 @@ only until the next rotation, so a pod that has missed one full period starts to
   ([ADR 0006](0006-backups-proxmox-backup-server.md)) more valuable.
 - ESO pods reach `sectools` from node IPs after SNAT, so the firewall rule names the nodes rather than a pod range.
 - The `SecretStore` must carry the `sectools` Caddy root CA, because the lab CA is not public.
+- `sectools` runs without swap: mlock is off with Raft, and a swapped-out page could otherwise carry secrets to the disk
+  PBS copies nightly.
+- Audit devices are declared in OpenBao's config file; 2.7.2 refuses to create them through the API.
+- While MySQL is unreachable, OpenBao keeps serving the current password and retries in the background; in the test it
+  rotated about 8 seconds after MySQL came back.
 - The app gains a dependency on a mounted file. Local `docker compose` keeps using environment variables, so the code has
   to support both.
 
@@ -100,8 +112,10 @@ only until the next rotation, so a pod that has missed one full period starts to
 
 Each step is separately reversible.
 
-1. **Test the unverified parts on a throwaway database:** the static role's `rotation_statements` with `RETAIN CURRENT
-   PASSWORD`, and ESO's Vault provider against OpenBao. If `RETAIN` doesn't work, fall back to a short retry in the app.
+1. **Done 2026-10-31 (throwaway database: OpenBao 2.7.2 against MySQL 8.0.46):** `RETAIN CURRENT PASSWORD` works, the
+   dual-password window is one rotation, and no app fallback is needed. The least privilege the rotation needs is global
+   `CREATE USER` (decision 5). ESO's Vault provider is checked in step 3 instead: a local dev server is not reachable
+   from the cluster.
 2. **OpenBao on `sectools`:** Ansible role, dry run first. The owner initialises it and stores the shares.
 3. **ESO on the cluster,** then sync `belleshop-secrets` from OpenBao with the current values. Nothing should change for
    the app at this point.
