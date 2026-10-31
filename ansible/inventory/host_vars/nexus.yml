@@ -1,7 +1,12 @@
 # Nexus Repository + Docker registry (ADR 0011). Caddy (443) is the only LAN entry point.
 caddy_sites:
   - { names: [nexus.home.arpa], upstream: "127.0.0.1:8081" }       # web UI and REST API
-  - { names: [registry.home.arpa], upstream: "127.0.0.1:8082" }    # Docker repo `belleshop` (its connector port)
+  # Docker repo `belleshop` (its connector port). Docker Hub official images (library/*) come from the
+  # `dockerhub` proxy on the same name, so the cluster pulls everything from registry.home.arpa (ADR 0012).
+  - names: [registry.home.arpa]
+    upstream: "127.0.0.1:8082"
+    routes:
+      - { path: "/v2/library/*", upstream: "127.0.0.1:8083" }
 
 # Who may reach 443: admins, the CI agent (pushes images), the k8s nodes (pull images).
 firewall_service_rules:

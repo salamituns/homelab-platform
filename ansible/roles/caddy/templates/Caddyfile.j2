@@ -2,6 +2,17 @@
 {% for site in caddy_sites %}
 {{ site.names | join(', ') }} {
 	tls internal
+{% if site.routes is defined %}
+{% for route in site.routes %}
+	handle {{ route.path }} {
+		reverse_proxy {{ route.upstream }}
+	}
+{% endfor %}
+	handle {
+		reverse_proxy {{ site.upstream }}
+	}
+{% else %}
 	reverse_proxy {{ site.upstream }}
+{% endif %}
 }
 {% endfor %}

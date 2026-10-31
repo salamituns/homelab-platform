@@ -25,11 +25,16 @@ nexus_secrets_dir: /etc/nexus/secrets
 nexus_docker_repos:
   - { name: belleshop, http_port: 8082, write_policy: allow_once }
 
+# Pull-through cache of Docker Hub. Caddy sends registry.home.arpa/v2/library/* here (host_vars/nexus.yml),
+# so third-party official images are pulled through Nexus and pinned by digest (ADR 0012).
+nexus_docker_proxies:
+  - { name: dockerhub, http_port: 8083, remote_url: "https://registry-1.docker.io" }
+
 # Least privilege: CI may push to its repo only; the cluster may only pull. Passwords are generated on the host
 # into {{ nexus_secrets_dir }}/<user> and handed to Jenkins / Kubernetes by the owner.
 nexus_service_users:
-  - { name: ci-push, repo: belleshop, actions: [read, browse, add, edit] }
-  - { name: k8s-pull, repo: belleshop, actions: [read, browse] }
+  - { name: ci-push, repos: [belleshop], actions: [read, browse, add, edit] }
+  - { name: k8s-pull, repos: [belleshop, dockerhub], actions: [read, browse] }
 
 # Nexus Repository CE serves no repository traffic until its Community EULA is accepted. Accepting is a legal decision
 # by the owner, so it is off by default and switched on per host (host_vars) with the date of that decision.

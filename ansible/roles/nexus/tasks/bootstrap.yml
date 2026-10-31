@@ -158,6 +158,56 @@
   changed_when: item.status == 404
   when: not ansible_check_mode
 
+- name: Look up the Docker proxy repositories
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ nexus_http_port }}/service/rest/v1/repositories/docker/proxy/{{ item.name }}"
+    user: admin
+    password: "{{ nexus_admin_pw }}"
+    force_basic_auth: true
+    status_code: [200, 404]
+  loop: "{{ nexus_docker_proxies }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: nexus_proxy_lookup
+  when: not ansible_check_mode
+
+- name: Create or update the Docker proxy repositories
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ nexus_http_port }}/service/rest/v1/repositories/docker/proxy{{ '' if item.status == 404 else '/' ~ item.item.name }}"
+    method: "{{ 'POST' if item.status == 404 else 'PUT' }}"
+    user: admin
+    password: "{{ nexus_admin_pw }}"
+    force_basic_auth: true
+    body_format: json
+    body:
+      name: "{{ item.item.name }}"
+      online: true
+      storage:
+        blobStoreName: default
+        strictContentTypeValidation: true
+      proxy:
+        remoteUrl: "{{ item.item.remote_url }}"
+        contentMaxAge: 1440     # minutes; a digest never changes, so only tags are re-checked
+        metadataMaxAge: 1440
+      negativeCache:
+        enabled: true
+        timeToLive: 10
+      httpClient:
+        blocked: false
+        autoBlock: true
+      docker:
+        v1Enabled: false
+        forceBasicAuth: true    # no anonymous pulls through the cache either
+        httpPort: "{{ item.item.http_port }}"
+      dockerProxy:
+        indexType: HUB
+    status_code: [201, 204]
+  loop: "{{ nexus_proxy_lookup.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  changed_when: item.status == 404
+  when: not ansible_check_mode
+
 # --- service users --------------------------------------------------------------------------------------------
 - name: Create one role per service user
   ansible.builtin.uri:
@@ -170,8 +220,8 @@
     body:
       id: "{{ item.1.name }}"
       name: "{{ item.1.name }}"
-      description: "{{ item.1.actions | join(', ') }} on docker repo {{ item.1.repo }} (ADR 0011)"
-      privileges: "{{ item.1.actions | map('regex_replace', '^', 'nx-repository-view-docker-' ~ item.1.repo ~ '-') | list }}"
+      description: "{{ item.1.actions | join(', ') }} on docker repos {{ item.1.repos | join(', ') }} (ADR 0011, 0012)"
+      privileges: "{{ item.1.repos | product(item.1.actions) | map('join', '-') | map('regex_replace', '^', 'nx-repository-view-docker-') | list }}"
     status_code: [200, 204, 400]
   # POST creates; when it already exists (400) the PUT that follows sets the privileges to exactly this list.
   loop: "{{ ['POST', 'PUT'] | product(nexus_service_users) | list }}"
