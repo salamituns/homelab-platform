@@ -72,9 +72,10 @@ See [postmortem](docs/postmortems/2026-10-25-gitea-rce-cve-2026-60004.md).
 - **Proof:** `kubectl run` with an unsigned image is rejected ([evidence](docs/evidence/week-04-admission.txt))
 
 ## Week 5: Secrets + identity
-- [ ] Vault (or OpenBao) on the cluster; External Secrets Operator
+- [ ] OpenBao on `sectools` ([ADR 0014](docs/adr/0014-secrets-and-identity.md)); External Secrets Operator
 - [ ] Move BelleShop MySQL creds out of manifests
 - [ ] k8s RBAC: per-namespace dev roles, no cluster-admin kubeconfigs on laptops
+- [ ] etcd encryption at rest
 - **Proof:** rotate the DB password in Vault and the app picks it up with no git change
 
 ## Week 6: TLS, network and runtime security
