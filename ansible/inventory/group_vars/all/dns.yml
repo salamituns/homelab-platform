@@ -21,6 +21,6 @@ internal_dns_records:
   - { names: [gateway], ip: 192.168.1.96 }
   - { names: [pbs], ip: 192.168.1.98 }                 # Proxmox Backup Server
 
-# Wildcard: anything under apps.home.arpa goes to the ingress-nginx LoadBalancer (MetalLB).
+# Wildcard: anything under apps.home.arpa goes to the Gateway homelab-gateway (MetalLB .240, ADR 0013).
 internal_dns_wildcards:
   - { name: apps, ip: 192.168.1.240 }

@@ -1,6 +1,4 @@
-# http://grafana.local through the shared Gateway (ADR 0013 step 3). Same host and backend as
-# grafana-ingress.yaml next to it; both stay live until the cutover (ingress-nginx on .240,
-# Gateway on .244).
+# http://grafana.local through the shared Gateway (ADR 0013). Replaced grafana-ingress.yaml at the cutover.
 # Managed by Argo CD (app monitoring, k8s/platform/apps/monitoring.yaml): change it in git.
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -24,3 +22,4 @@ spec:
           kind: Service
           name: prometheus-stack-grafana
           port: 80
+          weight: 1

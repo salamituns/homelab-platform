@@ -1,6 +1,5 @@
-# http://argocd.local through the shared Gateway (ADR 0013 step 3). Same host and backend as
-# argocd-ingress.yaml next to it; both stay live until the cutover (ingress-nginx on .240, Gateway
-# on .244). The Ingress's backend-protocol: "HTTP" is simply the default on the http listener.
+# http://argocd.local through the shared Gateway (ADR 0013). Replaced argocd-ingress.yaml at the cutover; that
+# Ingress's backend-protocol: "HTTP" is simply the default on the http listener.
 # Managed by Argo CD (app cluster-config, k8s/platform/apps/cluster-config.yaml): change it in git.
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -24,3 +23,4 @@ spec:
           kind: Service
           name: argocd-server
           port: 80
+          weight: 1

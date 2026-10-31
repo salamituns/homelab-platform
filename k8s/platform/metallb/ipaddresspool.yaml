@@ -1,4 +1,4 @@
-# LoadBalancer IPs handed out by MetalLB. .240 = ingress-nginx (apps.home.arpa wildcard, ADR 0004).
+# LoadBalancer IPs handed out by MetalLB. .240 = Gateway homelab-gateway (apps.home.arpa wildcard, ADR 0004, ADR 0013).
 # Outside the router's DHCP pool (.100-.180).
 apiVersion: metallb.io/v1beta1
 kind: IPAddressPool

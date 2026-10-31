@@ -29,7 +29,7 @@ existingImagePullSecrets:
 config:
   # Scope Kyverno webhooks to namespaces explicitly opted in with `homelab.arpa/admission: enforced`.
   # Combined with excludeKyvernoNamespace: true (chart default), kube-system, argocd, monitoring,
-  # ingress-nginx, metallb-system, argo-rollouts, local-path-storage, and kyverno are never sent
+  # nginx-gateway, metallb-system, argo-rollouts, local-path-storage, and kyverno are never sent
   # to Kyverno webhooks.
   excludeKyvernoNamespace: true
   webhooks:
