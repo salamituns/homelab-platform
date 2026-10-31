@@ -1,0 +1,27 @@
+# The Gateway accepts routes only from namespaces labelled homelab.arpa/gateway-routes: "true"
+# (gateway.yaml allowedRoutes), so argocd, monitoring and argo-rollouts need the label to attach
+# their HTTPRoutes (ADR 0013 step 3). None of the three namespaces is git-managed today (argocd
+# and argo-rollouts were created by hand at bootstrap, monitoring by Argo CreateNamespace), and
+# this is the no-prune app (apps/cluster-config.yaml): a Namespace manifest must never sit in a
+# pruning app, where deleting the file would delete the whole namespace.
+# Managed by Argo CD (app cluster-config, k8s/platform/apps/cluster-config.yaml): change it in git.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: argocd
+  labels:
+    homelab.arpa/gateway-routes: "true"
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    homelab.arpa/gateway-routes: "true"
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: argo-rollouts
+  labels:
+    homelab.arpa/gateway-routes: "true"

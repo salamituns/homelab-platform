@@ -6,6 +6,7 @@ resources:
   - vendor/argo-rollouts-install-v1.9.1.yaml
   - vendor/argo-rollouts-dashboard-install-v1.9.1.yaml
   - rollouts-ingress.yaml   # http://rollouts.local (moved from BelleShop 2026-10-27)
+  - rollouts-httproute.yaml   # same host via the Gateway on .244 (ADR 0013 step 3)
 patches:
   # Gateway API traffic router for canaries (ADR 0013). The controller downloads the binary at start and refuses it
   # unless the SHA-256 matches (verified 2026-10-31 against our own download and the GitHub release digest).
