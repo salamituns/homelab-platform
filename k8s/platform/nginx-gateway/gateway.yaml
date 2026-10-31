@@ -1,4 +1,5 @@
-# The one shared Gateway (ADR 0013). Staging address .244 while ingress-nginx keeps .240; the cutover moves this to .240.
+# The one shared Gateway (ADR 0013), on 192.168.1.240: the address ingress-nginx had until the cutover, so DNS and
+# every client stayed the same.
 # Routes attach only from namespaces that opt in with the label below, the same opt-in style as Kyverno's.
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
@@ -12,7 +13,7 @@ spec:
   # the Service it generates (homelab-gateway-nginx). MetalLB v0.14 reads the metallb.universe.tf key, not metallb.io.
   infrastructure:
     annotations:
-      metallb.universe.tf/loadBalancerIPs: 192.168.1.244
+      metallb.universe.tf/loadBalancerIPs: 192.168.1.240
   listeners:
     - name: http
       protocol: HTTP

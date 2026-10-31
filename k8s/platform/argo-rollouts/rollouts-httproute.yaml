@@ -1,6 +1,4 @@
-# http://rollouts.local through the shared Gateway (ADR 0013 step 3). Same host and backend as
-# rollouts-ingress.yaml next to it; both stay live until the cutover (ingress-nginx on .240,
-# Gateway on .244).
+# http://rollouts.local through the shared Gateway (ADR 0013). Replaced rollouts-ingress.yaml at the cutover.
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
