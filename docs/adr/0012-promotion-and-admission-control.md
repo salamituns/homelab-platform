@@ -3,6 +3,8 @@
 - Status: Accepted
 - Date: 2026-10-30
 
+> 2026-10-31: the ingress-nginx v1.15.1 upgraded here was then replaced by NGINX Gateway Fabric; see ADR 0013.
+
 ## Context
 
 Week 3 builds, scans and signs BelleShop images in Nexus. None of that reaches the cluster yet:

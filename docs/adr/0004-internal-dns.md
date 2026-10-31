@@ -3,6 +3,8 @@
 - Status: Accepted
 - Date: 2026-10-25
 
+> 2026-10-31: ingress-nginx was replaced by NGINX Gateway Fabric on the same address (192.168.1.240); new apps now need an `HTTPRoute`, not a DNS change. See ADR 0013.
+
 ## Context
 
 Everything is addressed by IP (`192.168.1.90`, `192.168.1.181:8006`). IPs change, are easy to

@@ -26,7 +26,7 @@ per-host internal CA. Names come from `*.home.arpa` on the gateway (ADR 0004).
 | jenkins | 126 · .88 | Jenkins LTS controller, JCasC, 0 executors | Terraform + Ansible | 443 (admins, agent, gitea, sonarqube) |
 | ci-agent | 127 · .93 | Build agent: Docker, Trivy, Syft, Cosign, Gitleaks; gates in `/opt/ci-gates` | Terraform + Ansible | 22 only (dials out) |
 | Master | 108 · .90 | Kubernetes 1.33 control plane (kubeadm, etcd) | imported into Terraform | 6443, 10250 (whole LAN) |
-| WorkerNode1/2 | 107, 102 · .89, .84 | Argo CD, Kyverno, monitoring, ingress-nginx v1.15.1, BelleShop | imported into Terraform | 10250, MetalLB .240–.243 |
+| WorkerNode1/2 | 107, 102 · .89, .84 | Argo CD, Kyverno, monitoring, NGINX Gateway Fabric v2.8.0, BelleShop | imported into Terraform | 10250, MetalLB .240–.243 |
 | Tomcat, DockerApp | 103, 111 · .85, .92 | Legacy app hosts | hand + Ansible | app ports (DockerApp allowlisted) |
 
 Parked: LocalAI 100 (off), UbuntuNew 101 (incident evidence, delete after 2026-11-25), old CI 104–106
@@ -203,7 +203,7 @@ by Ansible with logging off; they travel on stdin or in files, never as command-
 | Secrets moved by hand or by Ansible | No rotation, no audit; signing key on the controller; `belleshop-secrets` was in git | Week 5: secrets manager, External Secrets |
 | One CA per service host | Each client trusts several roots | Week 6: one lab CA, cert-manager |
 | One copy of backups, on the same disks | A double disk failure loses the lab and the vault | Deferred: PBS stage 2 (off-host copy) |
-| ingress-nginx retired upstream | No fixes after March 2026; v1.15.1 is the last release | ADR 0013 (Gateway API), drafted |
+| ingress-nginx retired upstream | No fixes after March 2026; v1.15.1 is the last release | Closed 2026-10-31: NGINX Gateway Fabric v2.8.0 (ADR 0013) |
 | Python dependencies unpinned | Two builds of one commit can differ | A lock file with hashes |
 | Promote stage inline in the Jenkinsfile | Runs only on `main`, so its bugs showed up only there | `ci/gates/promote.sh` with tests, in progress |
 | Trivy DB from ghcr.io | A download failure fails a build | Trivy DB through Nexus, in progress |

@@ -6,7 +6,7 @@ shows up as a reviewable diff. Upgrade: download the new file, check it, update 
 | File | Upstream | SHA-256 |
 |---|---|---|
 | `metallb/vendor/metallb-native-v0.14.8.yaml` | `https://raw.githubusercontent.com/metallb/metallb/v0.14.8/config/manifests/metallb-native.yaml` | `11b5906021fde56040cf10d1bcbaf5c2b7a4206045ebb103915347dfcc533f0e` |
-| `ingress-nginx/vendor/ingress-nginx-cloud-v1.15.1.yaml` | `https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.15.1/deploy/static/provider/cloud/deploy.yaml` | `502fddca66b09c20dd48b6d0a792a9671cd663a3a0d2a8bda5ae990d13b6c5b2` |
+| ~~`ingress-nginx/vendor/ingress-nginx-cloud-v1.15.1.yaml`~~ | removed 2026-10-31 with the ingress-nginx app (ADR 0013) | — |
 | `argo-rollouts/vendor/argo-rollouts-install-v1.9.1.yaml` | `https://github.com/argoproj/argo-rollouts/releases/download/v1.9.1/install.yaml` | `78c82343803c2bbc13a36049e269a532dd67f25b7e2cb3603c99e31d8d8a40b5` |
 | `argo-rollouts/vendor/argo-rollouts-dashboard-install-v1.9.1.yaml` | `https://github.com/argoproj/argo-rollouts/releases/download/v1.9.1/dashboard-install.yaml` | `e5ca7da00c597738e07b94c02731119a2ac00d49405f78a1c1d0737f7e93eff4` |
 | `local-path/vendor/local-path-storage-v0.0.28.yaml` | `https://raw.githubusercontent.com/rancher/local-path-provisioner/v0.0.28/deploy/local-path-storage.yaml` | `569fe4c806d8a967b3be1c97ead3dec5fa6931fc983c731a755c0e8ad82ea336` |

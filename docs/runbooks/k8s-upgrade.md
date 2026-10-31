@@ -19,7 +19,7 @@ Order is fixed: control plane before any kubelet. A kubelet may be older than th
 
 ## 0. Before
 
-- Check the add-ons for the target version: the Kyverno and ingress-nginx support tables, and
+- Check the add-ons for the target version: the Kyverno and NGINX Gateway Fabric support tables, and
   `kubectl get --raw /metrics | grep apiserver_requested_deprecated_apis` (empty = nothing calls a removed API).
 - Find the newest patch release of the target minor:
   ```sh
@@ -52,6 +52,7 @@ kubectl get nodes                                  # all Ready, all on the new v
 kubectl get pods -A --no-headers | grep -v -E 'Running|Completed' || echo "all pods Running/Completed"
 kubectl get applications -n argocd                 # all Synced/Healthy
 kubectl get csr | grep Pending || echo "no pending CSRs"   # kubelet serving certs (ADR 0009)
+kubectl -n nginx-gateway get gateway homelab-gateway    # Programmed=True, address 192.168.1.240
 kubectl top nodes
 ```
 

@@ -3,6 +3,8 @@
 - Status: Accepted
 - Date: 2026-10-27
 
+> 2026-10-31: the ingress-nginx add-on was removed in the Gateway API cutover; its Application and namespace no longer exist. See ADR 0013.
+
 ## Context
 
 The cluster add-ons were installed by hand in August: MetalLB, ingress-nginx, Argo Rollouts and
