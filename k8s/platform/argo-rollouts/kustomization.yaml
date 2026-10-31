@@ -6,3 +6,27 @@ resources:
   - vendor/argo-rollouts-install-v1.9.1.yaml
   - vendor/argo-rollouts-dashboard-install-v1.9.1.yaml
   - rollouts-ingress.yaml   # http://rollouts.local (moved from BelleShop 2026-10-27)
+patches:
+  # Gateway API traffic router for canaries (ADR 0013). The controller downloads the binary at start and refuses it
+  # unless the SHA-256 matches (verified 2026-10-31 against our own download and the GitHub release digest).
+  # Permissions on HTTPRoutes are a Role in the namespace that owns the route (belleshop-deploy), not a ClusterRole.
+  - target:
+      kind: ConfigMap
+      name: argo-rollouts-config
+    patch: |-
+      - op: add
+        path: /data
+        value:
+          trafficRouterPlugins: |-
+            - name: "argoproj-labs/gatewayAPI"
+              location: "https://github.com/argoproj-labs/rollouts-plugin-trafficrouter-gatewayapi/releases/download/v0.17.0/gatewayapi-plugin-linux-amd64"
+              sha256: "1904ca787d33107c140521899d61fff030ee75d99908bd175fca5a4647759061"
+  # Plugins load at start: changing this value restarts the controller through Argo CD when the plugin changes.
+  - target:
+      kind: Deployment
+      name: argo-rollouts
+    patch: |-
+      - op: add
+        path: /spec/template/metadata/annotations
+        value:
+          homelab.arpa/traffic-router-plugins: gatewayapi-v0.17.0
