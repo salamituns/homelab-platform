@@ -17,9 +17,18 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: dev
+  # Argo Rollouts steps the canary weights on this route during a rollout (ADR 0013). Without this, self-heal would
+  # put git's 100/0 back mid-canary. Only the weights are ignored; any other change to the route still shows as drift.
+  ignoreDifferences:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: belleshop-api
+      jqPathExpressions:
+        - .spec.rules[]?.backendRefs[]?.weight
   syncPolicy:
     automated:
       prune: true
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
+      - RespectIgnoreDifferences=true
