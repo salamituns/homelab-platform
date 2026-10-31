@@ -1,11 +1,12 @@
-# Architecture (weeks 1–3)
+# Architecture (weeks 1–4)
 
-The engineering view of the lab as built on 2026-10-30: where every component runs, which zones trust which,
+The engineering view of the lab as built on 2026-10-31: where every component runs, which zones trust which,
 how a commit becomes a signed image, and what is still open. Decisions behind it are in [`docs/adr/`](adr/);
 every credential in detail is in [`credentials.md`](credentials.md); every way in is in [`entry-points.md`](entry-points.md).
 
 - 18 VMs on one Proxmox host (13 running), 11 of them owned by Terraform
 - 6 security gates on every build, 0 ports published to the internet
+- Only signed, digest-pinned images from Nexus are admitted to the app namespace (`dev`); written to [the docs standard](standards/architecture-docs.md)
 
 ## 1. Topology
 
@@ -24,8 +25,8 @@ per-host internal CA. Names come from `*.home.arpa` on the gateway (ADR 0004).
 | sonarqube | 125 · .86 | SonarQube Community Build + local PostgreSQL 16 | Terraform + Ansible | 443 (admins, jenkins, agent) |
 | jenkins | 126 · .88 | Jenkins LTS controller, JCasC, 0 executors | Terraform + Ansible | 443 (admins, agent, gitea, sonarqube) |
 | ci-agent | 127 · .93 | Build agent: Docker, Trivy, Syft, Cosign, Gitleaks; gates in `/opt/ci-gates` | Terraform + Ansible | 22 only (dials out) |
-| Master | 108 · .90 | Kubernetes 1.31 control plane (kubeadm, etcd) | imported into Terraform | 6443, 10250 (whole LAN) |
-| WorkerNode1/2 | 107, 102 · .89, .84 | Argo CD, monitoring, ingress, BelleShop | imported into Terraform | 10250, MetalLB .240–.243 |
+| Master | 108 · .90 | Kubernetes 1.33 control plane (kubeadm, etcd) | imported into Terraform | 6443, 10250 (whole LAN) |
+| WorkerNode1/2 | 107, 102 · .89, .84 | Argo CD, Kyverno, monitoring, ingress-nginx v1.15.1, BelleShop | imported into Terraform | 10250, MetalLB .240–.243 |
 | Tomcat, DockerApp | 103, 111 · .85, .92 | Legacy app hosts | hand + Ansible | app ports (DockerApp allowlisted) |
 
 Parked: LocalAI 100 (off), UbuntuNew 101 (incident evidence, delete after 2026-11-25), old CI 104–106
@@ -63,6 +64,7 @@ flowchart LR
     end
     subgraph K8S["Kubernetes · no host firewall yet"]
       argo[Argo CD]
+      kyv[Kyverno<br/>admission, dev]
       nodes[nodes .90 .89 .84]
     end
     home[phones, TV, IoT]
@@ -77,6 +79,8 @@ flowchart LR
   argo -. "7 read-only token" .-> gitea
   tuns -- "8 backup-only token" --> pbs
   home -. "9 no network rule (open)" .-> nodes
+  agent -- "10 PR as ci-promote" --> gitea
+  kyv -. "11 read signatures: k8s-pull" .-> nexus
 ```
 
 | # | Crossing | Authenticated by | Limited to |
@@ -87,9 +91,11 @@ flowchart LR
 | 4 | ci-agent → Jenkins | Agent secret read from a file, never argv | Outbound WebSocket on 443; the controller holds no SSH key to anything |
 | 5 | ci-agent → Nexus (push) | `ci-push` via a Jenkins credential, password on stdin | Repo `belleshop` only; a tag can never be overwritten |
 | 6 | k8s nodes → Nexus (pull) | `k8s-pull` imagePullSecret; containerd trusts the Nexus CA | Read only: a push is refused with 403 |
-| 7 | Argo CD → Gitea | Read-only Gitea token in a Kubernetes Secret | Cannot write: nothing pushes into the cluster |
+| 7 | Argo CD → Gitea | Read-only Gitea token in a Kubernetes Secret | Cannot write: nothing pushes into the cluster. Reads `belleshop-deploy` for the app since Week 4 |
 | 8 | tuns → PBS | `pve@pbs!tuns` API token | Datastore.Backup: add backups, never delete them |
 | 9 | Any home device → k8s nodes | none at the network layer | **Open**: Kubernetes RBAC and TLS only; host firewall in Week 6 |
+| 10 | ci-agent → Gitea (promotion PR) | `ci-promote` token (Jenkins credential), on stdin to curl | Collaborator on `belleshop-deploy` only; `main` is protected and only the owner merges |
+| 11 | Kyverno → Nexus | `k8s-pull` copy in `kyverno/nexus-pull`; Nexus CA in the chart values | Read only; used to resolve digests and fetch Cosign bundles |
 
 The two pressure points are the CI agent, which runs code from pull requests (its Docker group is root on that VM,
 which is why it is a VM of its own), and the cluster, whose API and kubelets any home device can reach today.
@@ -115,7 +121,8 @@ flowchart LR
   sbom -->|main only| push[Push<br/>Nexus, ci-push]
   push --> dig[Digest of our repo<br/>not RepoDigests 0]
   dig --> sign[Sign + attest SBOM<br/>Cosign, no tlog]
-  sign --> arch[(reports, SBOMs,<br/>digests.txt archived)]
+  sign --> promo[Promote<br/>PR in belleshop-deploy<br/>as ci-promote]
+  promo --> arch[(reports, SBOMs,<br/>digests.txt archived)]
 ```
 
 Double-bordered stages are gates.
@@ -128,7 +135,8 @@ Double-bordered stages are gates.
 | Build, bases by digest | `FROM python:3.12-slim@sha256:aa94…`. When a reference has both a tag and a digest, Docker uses the digest and the tag is only a comment for people. | A tag like `3.12-slim` is moved upstream every week. A digest is a hash of the exact bytes, so the build gets the same base until someone changes it in a reviewed PR. That also blocks a hijacked or re-pushed upstream tag. The cost is no free base-image updates; bumping is a deliberate PR. |
 | Image, Trivy image *(gate)* | Scans the built image: OS packages from the base (dpkg, apk) plus language packages inside it. It runs twice, first to write a full JSON report and then to enforce HIGH/CRITICAL that have a fix. | Trivy fs only sees what the repo declares. The image also holds everything the base image brought, which no repo file mentions: curl and brotli in nginx, CVEs vendored inside pip. It runs before the push, so a failing image never reaches Nexus. |
 | SBOM, Syft, SPDX | Syft lists every package in that same image (name, version, licence, purl) as SPDX JSON, the ISO/IEC 5962 standard format. | Not a gate; it's the evidence that goes with the image. On `main` it is signed and attached to the image digest (`cosign attest`). When a new CVE is announced, you can check which images contain the package by reading the SBOMs, without rebuilding anything. PRs generate it too, but only `main` publishes it. |
-| Digest | After the push, read the `sha256:` that Nexus stored for *our* repo. Docker's `RepoDigests[0]` can be another registry's digest. | Signatures, attestations and (Week 4) the `k8s/` pin all point at the digest, never at the tag. |
+| Digest | After the push, read the `sha256:` that Nexus stored for *our* repo. Docker's `RepoDigests[0]` can be another registry's digest. | Signatures, attestations and the promotion PR all point at the digest, never at the tag. |
+| Promote | On `main`: opens a PR in `belleshop-deploy` that pins both digests (`kustomize edit set image`), as the `ci-promote` bot. Skips when nothing changed. | CI never writes what Argo CD deploys. The owner's merge is the release; reverting the PR is the rollback. |
 
 | Gate | Tool (pinned) | Fails the build when | Caught for real |
 |---|---|---|---|
@@ -143,11 +151,12 @@ Rules around the pipeline:
 - A branch that has a PR is built once, as `PR-n`. Two builds of one commit raced into the one SonarQube project
   (Community Build keeps a single history per project) and one was rejected.
 - Fork PRs are not discovered at all.
-- BelleShop's `main` is what Argo CD deploys, so changes go through PRs and a merge waits for the owner.
-- Deploy is a separate loop: merge to `main` → Argo CD pulls `k8s/` from Gitea → nodes pull images from Nexus.
-  Week 4 pins the digest from `digests.txt` into `k8s/` and adds signature checks at admission.
+- Every merge, in BelleShop and in `belleshop-deploy`, waits for the owner.
+- Deploy is a separate loop (ADR 0012): merge the promotion PR → Argo CD syncs `belleshop-deploy` → Pod Security and
+  Kyverno check every pod at admission → the backend rolls out as a canary with a success-rate analysis.
 
 Proof of Week 3: [`evidence/week-03-image-gate-blocked.png`](evidence/week-03-image-gate-blocked.png).
+Proof of Week 4: [`evidence/week-04-admission.txt`](evidence/week-04-admission.txt).
 
 ## 4. Supply chain
 
@@ -157,10 +166,12 @@ Proof of Week 3: [`evidence/week-03-image-gate-blocked.png`](evidence/week-03-im
 | 2. Build | Isolated agent VM; base images pinned by digest; pip and curl removed from runtime images | in place |
 | 3. Artifact | Nexus registry; a tag never changes; push and pull users separated | in place |
 | 4. Signature | Cosign signature on the digest; SBOM as a signed attestation; verified with `cosign.pub` | in place |
-| 5. Admission | Kyverno: signed by our key, from Nexus, by digest, no `:latest` | **Week 4** |
+| 5. Promotion | A bot PR in the config repo pins the digest; only the owner merges | in place |
+| 6. Admission | Kyverno (Deny): signed by our key with a signed SBOM, from Nexus, by digest, no `:latest`, limits set; Pod Security `restricted` | in place |
 
-Until link 5 exists the chain is produced but not enforced: the cluster runs whatever image a manifest names.
-The signing key is on the Jenkins controller (encrypted, password stored separately) until the Week 5 secrets manager.
+Third-party images (mysql) come through the Nexus `dockerhub` proxy (`registry.home.arpa/library/…`) and are pinned by
+digest, but not re-signed by us. The signing key is on the Jenkins controller (encrypted, password stored separately)
+until the Week 5 secrets manager.
 
 ## 5. Identities and secrets (summary)
 
@@ -176,7 +187,8 @@ by Ansible with logging off; they travel on stdin or in files, never as command-
 | Gitea `argocd-readonly` | Read repositories | k8s Secret in `argocd` |
 | Gitea `jenkins` token | Repo read/write (status, hooks), user read | Mac `private/` → Jenkins credential |
 | `pve@pbs!tuns` | Add backups, never delete | tuns storage config |
-| Nexus `ci-push` / `k8s-pull` | Push+read `belleshop` / read only | nexus host → Jenkins credential / Secret `dev/nexus-pull` |
+| Nexus `ci-push` / `k8s-pull` | Push+read `belleshop` / read `belleshop` + `dockerhub` | nexus host → Jenkins credential / Secrets `dev/nexus-pull`, `kyverno/nexus-pull` |
+| Gitea `ci-promote` token | `write:repository`; collaborator on `belleshop-deploy` only | Mac `private/` → Jenkins credential `gitea-ci-promote` |
 | SonarQube `jenkins` token | Browse and scan `belleshop` only | sonarqube host → Jenkins credential |
 | Cosign key + password | Sign images and attestations | Mac `private/` → Jenkins credentials |
 | Jenkins agent secret | Connect as `ci-agent` | agent `/etc/jenkins-agent/secret` (0600) |
@@ -187,11 +199,15 @@ by Ansible with logging off; they travel on stdin or in files, never as command-
 
 | Gap | Why it matters | Closes with |
 |---|---|---|
-| Signatures not enforced | The cluster runs any image a manifest names | Week 4: Kyverno verify-images, digest pins, Pod Security `restricted` |
-| No promotion write-back | Manifests still name local images; digests sit in `digests.txt` | Week 4: CI opens a PR that bumps the digest in `k8s/` |
 | Cluster reachable from any home device | API, etcd and kubelets have no network allowlist | Week 6: Proxmox firewall per VM |
-| Secrets moved by hand or by Ansible | No rotation, no audit; signing key on the controller | Week 5: secrets manager, External Secrets |
+| Secrets moved by hand or by Ansible | No rotation, no audit; signing key on the controller; `belleshop-secrets` was in git | Week 5: secrets manager, External Secrets |
 | One CA per service host | Each client trusts several roots | Week 6: one lab CA, cert-manager |
 | One copy of backups, on the same disks | A double disk failure loses the lab and the vault | Deferred: PBS stage 2 (off-host copy) |
-| Kubernetes 1.31 out of support | No upstream security fixes | Backlog: one minor version at a time |
-| Test tools in the backend image | pytest and httpx ship to production | Open: split `requirements-dev.txt` |
+| ingress-nginx retired upstream | No fixes after March 2026; v1.15.1 is the last release | ADR 0013 (Gateway API), drafted |
+| Python dependencies unpinned | Two builds of one commit can differ | A lock file with hashes |
+| Promote stage inline in the Jenkinsfile | Runs only on `main`, so its bugs showed up only there | `ci/gates/promote.sh` with tests, in progress |
+| Trivy DB from ghcr.io | A download failure fails a build | Trivy DB through Nexus, in progress |
+| nginx:alpine has no fixed brotli-libs yet | The image upgrades one package itself | Bump the base when upstream moves |
+
+Closed in Week 4: signatures enforced at admission, promotion write-back, Kubernetes 1.31 out of support,
+mysql from Docker Hub by tag. Test tools in the backend image: BelleShop PR #8.
