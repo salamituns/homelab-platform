@@ -104,11 +104,23 @@ bao token revoke -self           # with the root token in BAO_TOKEN
 If root access is needed later, `bao operator generate-root` mints a new root token using unseal
 shares, in your terminal, without a stored root token.
 
-## Later (not this role)
+## ESO on the cluster (ADR 0014 step 3)
 
-- ESO on the cluster needs to reach `bao.home.arpa`: the 443 rule on sectools must then name the
-  node IPs (ESO pods appear as node IPs after SNAT, ADR 0014). That firewall change belongs to
-  the ESO step, not to this role.
-- That same 443 rule would also let the nodes reach the S3 state endpoint (`s3.home.arpa`) at
-  network level, because Caddy serves both on one port. Whether that is acceptable is part of the
-  ESO step; decide it there, not here.
+1. Platform repo (all in git, nothing hand-applied):
+   - Argo app `external-secrets` (chart 2.14.0, one replica, ServerSideApply) installs ESO in namespace
+     `external-secrets`; the CRDs come with the chart.
+   - `cluster-config/eso-tokenreview.yaml` binds `system:auth-delegator` to ServiceAccount `dev/eso-belleshop`
+     (the ServiceAccount itself lives in belleshop-deploy), so OpenBao verifies ESO's JWT through TokenReview
+     with no stored reviewer token.
+   - The 443 rule on sectools names the three k8s nodes: ESO pods appear as node IPs after SNAT. Caddy keeps
+     `s3.home.arpa` admin-only (`allowed_clients` on the site), so the nodes reach the port but not the
+     Terraform state.
+2. OpenBao (your terminal; secrets stay out of the repo):
+   ```sh
+   scripts/openbao-setup-belleshop.sh   # kv-v2 at secret/, kubernetes auth, policy, role, secrets
+   ```
+   It skips what already exists, loads `private/belleshop-secrets.env` over stdin, and prints statuses, never
+   values. `--overwrite` replaces the secrets only when you mean it.
+3. belleshop-deploy: ServiceAccount `eso-belleshop`, `SecretStore` (carrying the sectools Caddy root CA) and an
+   `ExternalSecret` for `secret/belleshop/app`. Step 3 ends when the synced Secret equals today's
+   `belleshop-secrets` and nothing changed for the app.

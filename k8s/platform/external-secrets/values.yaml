@@ -1,0 +1,12 @@
+# External Secrets Operator chart 2.14.0 values for homelab-platform (ADR 0014 step 3).
+# The CRDs (SecretStore, ExternalSecret, ...) come with the chart (installCRDs, default on).
+# One controller replica and modest requests: the 4 GB workers already run Argo CD, Kyverno,
+# monitoring and the gateway data plane. The image stays the chart default (ghcr.io), the
+# same direct-upstream pull the Kyverno and kube-prometheus-stack charts use.
+replicaCount: 1
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    memory: 256Mi

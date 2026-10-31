@@ -117,8 +117,10 @@ Each step is separately reversible.
    `CREATE USER` (decision 5). ESO's Vault provider is checked in step 3 instead: a local dev server is not reachable
    from the cluster.
 2. **OpenBao on `sectools`:** Ansible role, dry run first. The owner initialises it and stores the shares.
-3. **ESO on the cluster,** then sync `belleshop-secrets` from OpenBao with the current values. Nothing should change for
-   the app at this point.
+3. **In progress 2026-10-31:** ESO on the cluster, then sync `belleshop-secrets` from OpenBao with the current values.
+   Nothing should change for the app at this point. In git so far: the Argo app with chart values, the TokenReview
+   binding (cluster-config), the sectools firewall and Caddy rules, and the setup script; the ServiceAccount,
+   `SecretStore` and `ExternalSecret` follow in `belleshop-deploy`.
 4. **Dedicated MySQL account and the `.244` path,** with a negative test from a host outside the source range.
 5. **App change:** the owner writes the `get_db()` file read and the retry behaviour.
 6. **The proof:** rotate in OpenBao and keep a traffic probe running. Show the new password in use, no git change, and no
