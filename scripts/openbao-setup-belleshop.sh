@@ -25,9 +25,13 @@ for var in BAO_ADDR BAO_CACERT BAO_TOKEN; do
   fi
 done
 
-# Every OpenBao call goes through this wrapper: pinned CA, bearer token, no secret on argv.
+# Every OpenBao call goes through this wrapper: pinned CA, and the token reaches curl through a
+# config file descriptor, so it never appears on argv or in ps (printf is a shell builtin).
 # --fail-with-body: on a non-2xx it prints OpenBao's error JSON and fails the script.
-bao_api() { curl -q -sS --fail-with-body --cacert "$BAO_CACERT" -H "Authorization: Bearer $BAO_TOKEN" "$@"; }
+bao_api() {
+  curl -q -sS --fail-with-body --cacert "$BAO_CACERT" \
+    --config <(printf 'header = "Authorization: Bearer %s"\n' "$BAO_TOKEN") "$@"
+}
 
 # --- KV v2 at secret/ ------------------------------------------------------------------------------------
 if bao_api "$BAO_ADDR/v1/sys/mounts" 2>/dev/null | jq -e '."secret/".options.version == "2"' >/dev/null 2>&1; then
