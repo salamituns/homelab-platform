@@ -76,8 +76,9 @@ gitea_api() {
 }
 
 askpass="$(mktemp "${TMPDIR:-/tmp}/promote-askpass.XXXXXX")"
-cleanup_askpass() { rm -f "${askpass}"; }
-trap cleanup_askpass EXIT
+tmpfiles=("${askpass}")
+cleanup() { rm -f "${tmpfiles[@]}"; }
+trap cleanup EXIT
 cat >"${askpass}" <<'EOF'
 #!/bin/sh
 case "$1" in
@@ -165,6 +166,7 @@ git -c user.name=ci-promote -c user.email=ci-promote@home.arpa \
 GIT_TERMINAL_PROMPT=0 git_auth push -u origin "${BRANCH}"
 
 pulls_body="$(mktemp "${TMPDIR:-/tmp}/promote-pulls.XXXXXX")"
+tmpfiles+=("${pulls_body}")
 pulls_code="$(gitea_api -sS -o "${pulls_body}" -w '%{http_code}' \
 	"${api}?state=open&limit=50")"
 if [[ "${pulls_code}" != 200 ]]; then
@@ -188,6 +190,7 @@ if [[ -n "${existing}" ]]; then
 fi
 
 pr_json="$(mktemp "${TMPDIR:-/tmp}/promote-pr.XXXXXX")"
+tmpfiles+=("${pr_json}")
 python3 - "${IMAGE_TAG}" "${BACKEND_REF}" "${FRONTEND_REF}" "${pr_json}" <<'PY'
 import json, os, sys
 
@@ -209,6 +212,7 @@ with open(path, "w", encoding="utf-8") as fh:
 PY
 
 create_body="$(mktemp "${TMPDIR:-/tmp}/promote-create.XXXXXX")"
+tmpfiles+=("${create_body}")
 # JSON is a file, not stdin: stdin is already the curl -K config.
 create_code="$(gitea_api -sS -o "${create_body}" -w '%{http_code}' \
 	-H "Content-Type: application/json" \
