@@ -18,8 +18,5 @@ spec:
             type: PathPrefix
             value: /
       backendRefs:
-        - group: ""   # the API server's defaults, spelled out so a server-side apply shows no drift
-          kind: Service
-          name: prometheus-stack-grafana
+        - name: prometheus-stack-grafana
           port: 80
-          weight: 1

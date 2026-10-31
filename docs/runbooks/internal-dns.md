@@ -11,7 +11,7 @@ ansible-playbook playbooks/dns.yml --limit gateway
 ansible-playbook playbooks/dns.yml --limit gateway        # again: changed=0
 
 dig +short @192.168.1.96 proxmox.home.arpa                # 192.168.1.181
-dig +short @192.168.1.96 argocd.apps.home.arpa            # 192.168.1.240 (wildcard)
+dig +short @192.168.1.96 argocd.apps.home.arpa            # 192.168.1.240 (wildcard, the Gateway's data plane)
 dig @192.168.1.96 nothere.home.arpa | grep status         # NXDOMAIN (zone is authoritative)
 dig +short @192.168.1.96 example.com                      # an IP (forwarded upstream)
 ssh tunsadmin@192.168.1.96 'sudo ss -lunp | grep ":53 "'  # dnsmasq only on 192.168.1.96

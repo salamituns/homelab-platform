@@ -78,7 +78,7 @@ See [postmortem](docs/postmortems/2026-10-25-gitea-rce-cve-2026-60004.md).
 - **Proof:** rotate the DB password in Vault and the app picks it up with no git change
 
 ## Week 6: TLS, network and runtime security
-- [ ] cert-manager with an internal CA, TLS on every ingress (and on the Proxmox UI); move `*.local` ingress hosts to `*.apps.home.arpa`
+- [ ] cert-manager with an internal CA, TLS on every `HTTPRoute` (and on the Proxmox UI); move `*.local` hosts to `*.apps.home.arpa`
 - [ ] NetworkPolicies: default-deny per namespace
 - [ ] Proxmox firewall: `tuns` 22/8006 only from the Mac and `tailscale0`, not from every VM (ADR 0003 gap)
 - [ ] Falco for runtime detection, alerts to Alertmanager

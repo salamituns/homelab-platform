@@ -1,7 +1,7 @@
 # Entry points into the lab
 
 Every way to reach a lab system from outside the home network, who can use it, and how to close it.
-Review when anything network-facing changes. Last reviewed: 2026-10-27.
+Review when anything network-facing changes. Last reviewed: 2026-10-31.
 
 ## From the internet
 
@@ -37,7 +37,7 @@ Review when anything network-facing changes. Last reviewed: 2026-10-27.
 | Gitea `https://gitea.home.arpa` on `gitea` (`.97`, VMID 122) | Holds platform and app git repositories | **Rebuilt 2026-10-26** ([ADR 0005](adr/0005-gitea-rebuild.md)): Caddy TLS on `443/tcp` allowed by ufw only from `master` (`.90`), `workernode1` (`.89`), `workernode2` (`.84`), `gateway` (`.96`), and Mac (`.121`); Gitea itself on `127.0.0.1:3000`; Gitea SSH off; replaced by lab CA in week 6 |
 | `UbuntuNew` (`.83`, VMID 101), retired Gitea host | Ran attacker-supplied code on 2026-10-25 ([postmortem](postmortems/2026-10-25-gitea-rce-cve-2026-60004.md)) | Shut down (`onboot 0`), retained for forensic snapshot until **2026-11-25**, then delete |
 | Flat LAN: lab shares 192.168.1.0/24 with IoT, phones, TV | A compromised home device can reach Proxmox UI and SSH on every VM | VLAN for the lab (needs router/switch support); Proxmox firewall (week 6) |
-| Argo CD (.241), Grafana (.242), Rollouts dashboard (.243) on their own LAN IPs | Admin UIs reachable by any home device, without TLS | Grafana admin password moved off the chart default 2026-10-26 (Secret `grafana-admin`). Behind ingress with TLS, week 6 |
+| Argo CD (.241), Grafana (.242), Rollouts dashboard (.243) on their own LAN IPs | Admin UIs reachable by any home device, without TLS | Grafana admin password moved off the chart default 2026-10-26 (Secret `grafana-admin`). Behind `homelab-gateway` with TLS, week 6 |
 | VM 100 "LocalAI" (.91), unmanaged local-LLM test VM (also hosted the retired Clawdbot) | Not in inventory, not baselined, missed the 2026-10-24 key revocation | **Shut down 2026-10-25**, `onboot 0`. Delete after 2026-11-01 if nothing missed it |
 | SonarQube (`.86:9000`), Nexus (`.87:8081-8085`), Jenkins (`.88:8080`) | CI services: Sonar admin and Nexus artifacts; Jenkins runs code | **Restricted 2026-10-26** (`playbooks/service-firewall.yml`): Sonar and Nexus publish through Docker, which bypasses ufw, so the allowlist is in the `DOCKER-USER` chain (Mac, `gateway`, Jenkins); Jenkins `8080` in ufw (Mac, `gateway`, `gitea`). Legacy `10.2.0.0/21` and dead `8177`/`8502` rules removed. Verified: refused from `sectools` |
 | PBS (`.98`): API and UI `8007` | Holds every VM backup | **Added 2026-10-26** (`playbooks/pbs.yml`): Mac, `gateway`, `tuns` only; root@pam has TOTP; `tuns` uses token `pve@pbs!tuns` with `Datastore.Backup` only. Verified: refused from `sectools` |

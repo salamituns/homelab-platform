@@ -17,8 +17,5 @@ spec:
             type: PathPrefix
             value: /
       backendRefs:
-        - group: ""   # the API server's defaults, spelled out so a server-side apply shows no drift
-          kind: Service
-          name: argo-rollouts-dashboard
+        - name: argo-rollouts-dashboard
           port: 3100
-          weight: 1
