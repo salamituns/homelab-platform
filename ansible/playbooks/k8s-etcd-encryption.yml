@@ -1,0 +1,294 @@
+# etcd encryption at rest on the single control-plane node (ADR 0014 step 7).
+# Existing Secrets stay readable: identity is kept as the second provider until they are rewritten
+# by scripts/k8s-rewrite-secrets.sh. The provider is secretbox (XSalsa20 + Poly1305): the Kubernetes
+# docs rate it Strong and Faster, while aescbc is rated Weak (CBC padding-oracle). secretbox needs
+# exactly a 32-byte key.
+# A kubeadm upgrade regenerates /etc/kubernetes/manifests/kube-apiserver.yaml, so the same flags and
+# volume are ALSO written into the kubeadm-config ClusterConfiguration (apiServer.extraArgs/extraVolumes,
+# v1beta4). kubeadm then re-emits them itself on the next k8s-upgrade.yml run; this playbook only needs
+# to re-add them if the manifest was regenerated with different formatting.
+# Usage (run from ansible/):
+#   ansible-playbook playbooks/k8s-etcd-encryption.yml --check --diff   # dry run: reads + server-side dry-run of the CM patch
+#   ansible-playbook playbooks/k8s-etcd-encryption.yml                  # snapshot, then enable
+# Then: scripts/k8s-rewrite-secrets.sh and the verification steps in docs/runbooks/etcd-encryption.md
+# In --check: the reads and asserts run, the manifest diff is printed (nothing is written), the
+# ConfigMap patch is validated with --dry-run=server and not stored; the snapshot, key generation
+# and restart are skipped (they cannot be simulated).
+# Undo: docs/runbooks/etcd-encryption.md (identity first, rewrite, then remove the flags).
+- name: Etcd encryption at rest
+  hosts: k8s_control
+  serial: 1   # single control plane; a playbook that touches the API server must never fan out
+  become: true
+  vars:
+    enc_dir: /etc/kubernetes/enc
+    enc_config: /etc/kubernetes/enc/encryption-config.yaml
+    apiserver_manifest: /etc/kubernetes/manifests/kube-apiserver.yaml
+    etcd_pod: etcd-{{ inventory_hostname | lower }}   # kubeadm names the static pod after the node
+    etcd_snapshot_dir: /root/etcd-encryption-backups/{{ ansible_facts['date_time']['iso8601_basic_short'] }}-pre-enable
+    manifest_tmp_prefix: /root/kube-apiserver.enc-new   # outside /etc/kubernetes/manifests, which kubelet runs
+  tasks:
+    - name: Read the current API server manifest (read-only, runs in --check too)
+      ansible.builtin.command:
+        cmd: cat {{ apiserver_manifest }}
+      register: manifest_now
+      changed_when: false
+      check_mode: false
+
+    - name: Read the kubeadm ClusterConfiguration (read-only, runs in --check too)
+      ansible.builtin.command:
+        cmd: kubectl -n kube-system get cm kubeadm-config -o jsonpath={.data.ClusterConfiguration}
+      register: kubeadm_cc
+      changed_when: false
+      check_mode: false
+
+    - name: Check the etcd static pod is Running (read-only, runs in --check too)
+      ansible.builtin.command:
+        cmd: kubectl -n kube-system get pod {{ etcd_pod }} -o jsonpath={.status.phase}
+      register: etcd_phase
+      changed_when: false
+      check_mode: false
+
+    - name: Stop before touching anything if the cluster is not in the shape we know
+      ansible.builtin.assert:
+        that:
+          - etcd_phase.stdout == 'Running'
+          # Anchors for the manifest edits; fail instead of appending to the wrong place
+          - manifest_now.stdout is search('(?m)^    - --enable-bootstrap-token-auth=true$')
+          - "manifest_now.stdout is search('(?m)^  hostNetwork: true$')"
+          - "manifest_now.stdout is search('(?m)^status: {}$')"
+          # We only patch the apiServer section we know: empty, or already carrying our flags
+          - "kubeadm_cc.stdout is search('(?m)^apiServer: {}$') or kubeadm_cc.stdout is search('encryption-provider-config')"
+        fail_msg: >-
+          Preflight failed (etcd pod phase, kube-apiserver.yaml anchors, or kubeadm-config shape).
+          Refusing to patch a layout we have not seen. Compare against
+          docs/runbooks/etcd-encryption.md and update this playbook first.
+        quiet: true
+
+    - name: Snapshot directory, root only
+      ansible.builtin.file:
+        path: "{{ etcd_snapshot_dir }}"
+        state: directory
+        mode: "0700"
+      when: not ansible_check_mode
+
+    - name: Take and verify the etcd snapshot BEFORE any change (ADR ordering; fails hard if it breaks)
+      # etcdctl only exists inside the etcd image (crictl is not installed on the master),
+      # so we exec through the static pod. snapshot status verifies the file is a complete,
+      # readable snapshot; its table output carries sizes and revisions, never Secret data.
+      ansible.builtin.shell: |
+        set -euo pipefail
+        kubectl exec -n kube-system {{ etcd_pod }} -- etcdctl \
+          --endpoints=https://127.0.0.1:2379 \
+          --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+          --cert=/etc/kubernetes/pki/etcd/server.crt \
+          --key=/etc/kubernetes/pki/etcd/server.key \
+          snapshot save /var/lib/etcd/pre-encryption.db
+        kubectl exec -n kube-system {{ etcd_pod }} -- etcdctl \
+          snapshot status /var/lib/etcd/pre-encryption.db -w table
+        mv /var/lib/etcd/pre-encryption.db "{{ etcd_snapshot_dir }}/etcd.db"
+        chmod 0600 "{{ etcd_snapshot_dir }}/etcd.db"
+      args:
+        executable: /bin/bash
+      when: not ansible_check_mode
+      changed_when: true   # every run takes a fresh snapshot on purpose
+
+    - name: Encryption config directory, root only
+      ansible.builtin.file:
+        path: "{{ enc_dir }}"
+        state: directory
+        mode: "0700"
+
+    - name: Generate the 32-byte key and write the EncryptionConfiguration (only if absent, never overwritten)
+      # secretbox needs a 32-byte key: openssl rand -base64 32 emits exactly that, base64-encoded.
+      # Write to a temp file and mv into place so a failed write can never leave a truncated config
+      # for the API server to load. no_log keeps the key out of Ansible output; nothing fetches
+      # it back. The heredoc body sits at this task's base indent, so the written file starts at
+      # column 0.
+      ansible.builtin.shell: |
+        set -euo pipefail
+        umask 077
+        key="$(openssl rand -base64 32)"
+        tmp="$(mktemp {{ enc_dir }}/encryption-config.yaml.XXXXXX)"
+        cat > "$tmp" <<EOF
+        apiVersion: apiserver.config.k8s.io/v1
+        kind: EncryptionConfiguration
+        resources:
+          - resources:
+              - secrets
+            providers:
+              - secretbox:
+                  keys:
+                    - name: key1
+                      secret: ${key}
+              - identity: {}
+        EOF
+        chmod 0600 "$tmp"
+        mv "$tmp" "{{ enc_config }}"
+      args:
+        executable: /bin/bash
+        creates: "{{ enc_config }}"
+      no_log: true
+
+    - name: Keep the encryption config root-only, 0600
+      ansible.builtin.file:
+        path: "{{ enc_config }}"
+        state: file
+        mode: "0600"
+        owner: root
+        group: root
+      when: not ansible_check_mode   # state:file errors on the absent path a --check run never creates
+
+    - name: Put the encryption flags into the kubeadm ClusterConfiguration (survives k8s-upgrade.yml)
+      # v1beta4 wants extraArgs as a list of {name,value} pairs, not a map (kubeadm config validate
+      # rejects the map form, checked on v1.33.13). The whole transform stays in shell variables,
+      # no temp files. In --check the patch runs with --dry-run=server, so the API server validates
+      # it and nothing is stored.
+      ansible.builtin.shell: |
+        set -euo pipefail
+        cc_old="$(kubectl -n kube-system get cm kubeadm-config -o jsonpath={.data.ClusterConfiguration})"
+        cc_new="$(awk '
+          /^apiServer: \{\}$/ {
+            print "apiServer:"
+            print "  extraArgs:"
+            print "  - name: encryption-provider-config"
+            print "    value: /etc/kubernetes/enc/encryption-config.yaml"
+            print "  - name: encryption-provider-config-automatic-reload"
+            print "    value: \"true\""
+            print "  extraVolumes:"
+            print "  - hostPath: /etc/kubernetes/enc"
+            print "    mountPath: /etc/kubernetes/enc"
+            print "    name: enc"
+            print "    pathType: DirectoryOrCreate"
+            print "    readOnly: true"
+            next
+          }
+          { print }
+        ' <<< "$cc_old")"
+        grep -q '^  - name: encryption-provider-config$' <<< "$cc_new"   # the transform really applied
+        patch="data:
+          ClusterConfiguration: |
+        $(printf '%s\n' "$cc_new" | sed 's/^/    /')"
+        if [ "{{ ansible_check_mode }}" = "True" ]; then
+          kubectl -n kube-system patch cm kubeadm-config --type merge --dry-run=server --patch "$patch" > /dev/null
+        else
+          kubeadm config validate --config <(printf '%s\n' "$cc_new")   # fail here, not at the next upgrade
+          kubectl -n kube-system patch cm kubeadm-config --type merge --patch "$patch" > /dev/null
+        fi
+      args:
+        executable: /bin/bash
+      check_mode: false
+      changed_when: true   # in --check the dry-run patch is validated, and a real run stores it
+      when: "kubeadm_cc.stdout is not search('encryption-provider-config')"
+
+    - name: Patch the API server manifest in ONE atomic step (edits must never land one by one in the dir kubelet watches)
+      # kubelet starts a pod for any file in /etc/kubernetes/manifests, so a flag arriving without
+      # its mount would crashloop the API server mid-play. So: build the new manifest in memory,
+      # parse-check it with a kubectl client dry run (no server contact), show the diff, and only
+      # then write it to a temp file OUTSIDE the manifests dir and mv it into place once. The
+      # original is kept beside the etcd snapshot, also outside that dir. In --check the diff is
+      # printed and nothing is written.
+      ansible.builtin.shell: |
+        set -euo pipefail
+        cur="$(cat {{ apiserver_manifest }})"
+        new="$(python3 - '{{ apiserver_manifest }}' <<'PY'
+        import sys
+        m = open(sys.argv[1]).read()
+        # four conditional, anchored insertions; the preflight assert guarantees the anchors,
+        # so a replace() that cannot apply fails loudly instead of silently changing nothing
+        if '--encryption-provider-config=' not in m:
+            m = m.replace('    - --enable-bootstrap-token-auth=true\n',
+                          '    - --enable-bootstrap-token-auth=true\n'
+                          '    - --encryption-provider-config=/etc/kubernetes/enc/encryption-config.yaml\n', 1)
+        if '--encryption-provider-config-automatic-reload' not in m:
+            m = m.replace('    - --enable-bootstrap-token-auth=true\n',
+                          '    - --enable-bootstrap-token-auth=true\n'
+                          '    - --encryption-provider-config-automatic-reload=true\n', 1)
+        if '    - mountPath: /etc/kubernetes/enc' not in m:
+            m = m.replace('  hostNetwork: true\n',
+                          '    - mountPath: /etc/kubernetes/enc\n'
+                          '      name: enc\n'
+                          '      readOnly: true\n'
+                          '  hostNetwork: true\n', 1)
+        if '      path: /etc/kubernetes/enc' not in m:
+            m = m.replace('status: {}\n',
+                          '  - hostPath:\n'
+                          '      path: /etc/kubernetes/enc\n'
+                          '      type: DirectoryOrCreate\n'
+                          '    name: enc\n'
+                          'status: {}\n', 1)
+        sys.stdout.write(m)
+        PY
+        )"
+        if [ "$cur" = "$new" ]; then
+          echo "UNCHANGED: the manifest already carries the encryption config"
+          exit 0
+        fi
+        echo "manifest diff:"
+        diff <(printf '%s\n' "$cur") <(printf '%s\n' "$new") || true
+        kubectl create --dry-run=client --validate=false -f <(printf '%s\n' "$new") -o name > /dev/null
+        if [ "{{ ansible_check_mode }}" = "True" ]; then
+          echo "check mode: nothing written"
+          exit 0
+        fi
+        cp {{ apiserver_manifest }} "{{ etcd_snapshot_dir }}/kube-apiserver.yaml.pre-enc"
+        chmod 0600 "{{ etcd_snapshot_dir }}/kube-apiserver.yaml.pre-enc"
+        tmp="$(mktemp {{ manifest_tmp_prefix }}.XXXXXX)"
+        cp -p {{ apiserver_manifest }} "$tmp"   # keep the file mode kubelet already reads
+        printf '%s\n' "$new" > "$tmp"
+        mv "$tmp" {{ apiserver_manifest }}
+        echo "manifest updated with one atomic mv"
+      args:
+        executable: /bin/bash
+      check_mode: false
+      register: manifest_patch
+      changed_when: "'UNCHANGED' not in manifest_patch.stdout"
+
+    - name: Show the manifest change (the shell task itself never prints in --check)
+      ansible.builtin.debug:
+        msg: "{{ manifest_patch.stdout_lines }}"
+      when: "'UNCHANGED' not in manifest_patch.stdout"
+
+    - name: >-
+        Wait until the NEW API server proves itself: the mirror pod kube-apiserver-<node> must
+        carry --encryption-provider-config and be Ready, and /readyz must answer 200. /readyz
+        alone is not enough: kubelet may not have replaced the pod yet, and the OLD server
+        happily answers 200 while Secrets are still stored in plaintext. Expect one brief API
+        outage on this single control plane; running workloads are not affected. If this task
+        fails, the API server rejected the config: copy the pre-enc manifest backup back over
+        /etc/kubernetes/manifests/kube-apiserver.yaml (runbook undo section) and kubelet
+        restarts the previous, working pod.
+      ansible.builtin.shell: |
+        set -euo pipefail
+        pod="kube-apiserver-{{ inventory_hostname | lower }}"
+        # every failure below just means "not yet": the API can be down while kubelet replaces the pod
+        spec="$(kubectl -n kube-system get pod "$pod" -o jsonpath='{.spec.containers[0].command}' 2>/dev/null)" || exit 1
+        grep -q -- '--encryption-provider-config=/etc/kubernetes/enc/encryption-config.yaml' <<< "$spec" \
+          || { echo "mirror pod not carrying the flag yet"; exit 1; }
+        ready="$(kubectl -n kube-system get pod "$pod" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)" || exit 1
+        [ "$ready" = "True" ] || { echo "mirror pod not Ready yet"; exit 1; }
+        code="$(curl -sk -o /dev/null -w '%{http_code}' https://127.0.0.1:6443/readyz)" || exit 1
+        [ "$code" = "200" ] || { echo "/readyz answered $code"; exit 1; }
+        echo "new API server is Ready and carrying the encryption config"
+      args:
+        executable: /bin/bash
+      register: apiserver_ready
+      until: apiserver_ready.rc == 0
+      retries: 36
+      delay: 5
+      changed_when: false   # waiting changes nothing; the manifest task is the change
+      when:
+        - not ansible_check_mode
+        - manifest_patch is changed
+
+    - name: Next steps
+      ansible.builtin.debug:
+        msg:
+          - "etcd encryption is enabled for NEW writes. Existing Secrets stay in plaintext until rewritten."
+          - "Do these in order (docs/runbooks/etcd-encryption.md):"
+          - "1. Copy the key off the master to the password manager NOW (runbook, key custody). If the master is lost"
+          - "   after the rewrite with the key never copied, every encrypted Secret is unrecoverable."
+          - "2. scripts/k8s-rewrite-secrets.sh          # rewrite every Secret so it is stored encrypted"
+          - "3. Defrag etcd to reclaim the plaintext revisions (runbook, plaintext that remains)"
+          - "4. Verify the k8s:enc:secretbox:v1: prefix (runbook, verify)"
+          - "5. Delete the plaintext pre-enable snapshot once the change has settled (runbook, plaintext that remains)"
+      when: not ansible_check_mode
