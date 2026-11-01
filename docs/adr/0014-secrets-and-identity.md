@@ -75,8 +75,10 @@ Changing a value in a secret store does not change a password in MySQL, so the p
    the file into running pods once it does, verified on the cluster 2026-10-31).
 8. **Enable etcd encryption at rest** with an `EncryptionConfiguration`, then rewrite existing Secrets. ESO copies
    secrets into etcd, so this belongs in the same week.
-9. **Scope cluster access.** Create per-namespace Roles, issue short-lived client certificates through the
-   `CertificateSigningRequest` API, and keep the admin kubeconfig on the control-plane node only.
+9. **Scope cluster access.** Create per-namespace Roles for day-to-day mutate (starting with `dev`), a
+   ClusterRole only for cluster-wide status (nodes, Argo Applications), issue short-lived client
+   certificates through the `CertificateSigningRequest` API, and keep the admin kubeconfig on the
+   control-plane node only.
 
 ## How rotation works
 
@@ -151,8 +153,15 @@ Each step is separately reversible.
 6. **The proof:** rotate in OpenBao and keep a traffic probe running. Show the new password in use, no git change, and no
    failed requests.
 7. **etcd encryption at rest,** following a backup of etcd.
-8. **Cluster access:** Roles and short-lived certificates, then move the admin kubeconfig off the Mac.
-   This runs last because every earlier step uses that access.
+8. **In progress 2026-11-01:** cluster access. In git: Role `belleshop-operator` in `dev` (no Secret
+   get/list/watch; `pods/exec` allowed and recorded as indirect access to mounted files; pod create
+   denied), ClusterRole `platform-viewer` for cluster-wide status (nodes, Argo Applications, Rollouts,
+   ExternalSecret status — the ADR's per-namespace Role cannot cover cluster-scoped objects), bindings
+   to groups `belleshop-operators` / `platform-viewers`, and `scripts/k8s-issue-access-cert.sh`
+   (key stays on the Mac, approval over SSH to `Master`, refuses `system:masters` and
+   `kubeadm:cluster-admins`). The Mac's existing admin client certificate `notAfter` is
+   2027-08-17; deleting the kubeconfig file does not revoke it. Owner issues a limited cert, then
+   removes the Mac admin kubeconfig; admin.conf stays on the control-plane node.
 
 ## References
 
