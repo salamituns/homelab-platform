@@ -73,7 +73,8 @@ Changing a value in a secret store does not change a password in MySQL, so the p
    script creates the role only behind an explicit `--create-static-role` flag, after the app already reads the
    optional file mount (the volume is `optional: true`, so pods start before the Secret exists and kubelet delivers
    the file into running pods once it does, verified on the cluster 2026-10-31).
-8. **Enable etcd encryption at rest** with an `EncryptionConfiguration`, then rewrite existing Secrets. ESO copies
+8. **Enable etcd encryption at rest** with an `EncryptionConfiguration` (secretbox, the docs' Strong
+   and Faster provider; aescbc is rated Weak), then rewrite existing Secrets. ESO copies
    secrets into etcd, so this belongs in the same week.
 9. **Scope cluster access.** Create per-namespace Roles, issue short-lived client certificates through the
    `CertificateSigningRequest` API, and keep the admin kubeconfig on the control-plane node only.
@@ -121,6 +122,10 @@ only until the next rotation, so a pod that has missed one full period starts to
 - `sectools` runs without swap: mlock is off with Raft, and a swapped-out page could otherwise carry secrets to the disk
   PBS copies nightly.
 - Audit devices are declared in OpenBao's config file; 2.7.2 refuses to create them through the API.
+- etcd Secrets are encrypted with a key that lives on the master, and PBS backs the master VM up
+  nightly, so until the PBS client-side encryption decision (`TODO(encryption)` in the backups
+  runbook) is made, the PBS copies hold both the key and the encrypted data. The runbook keeps the
+  off-host copy of the key in the password manager as the real custody move.
 - While MySQL is unreachable, OpenBao keeps serving the current password and retries in the background; in the test it
   rotated about 8 seconds after MySQL came back.
 - The app gains a dependency on a mounted file. Local `docker compose` keeps using environment variables, so the code has
@@ -150,7 +155,22 @@ Each step is separately reversible.
 5. **App change:** the owner writes the `get_db()` file read and the retry behaviour.
 6. **The proof:** rotate in OpenBao and keep a traffic probe running. Show the new password in use, no git change, and no
    failed requests.
-7. **etcd encryption at rest,** following a backup of etcd.
+7. **In progress 2026-11-01:** etcd encryption at rest, following a backup of etcd. In git: the
+   playbook (etcd snapshot first, verified; secretbox key generated on the master only, `no_log`,
+   never overwritten; flags in both the kube-apiserver manifest and the kubeadm
+   ClusterConfiguration so `k8s-upgrade.yml` regenerates them), the Secrets rewrite script, and
+   the runbook. The provider is secretbox: the Kubernetes docs rate it Strong and Faster, while
+   aescbc is rated Weak (padding-oracle). What proved different while building it: kubeadm
+   v1beta4 takes `apiServer.extraArgs` as a **list** of `{name, value}` pairs (the map form most
+   examples still show fails `kubeadm config validate` on 1.33.13), etcdctl only exists inside
+   the etcd image (crictl is not installed on the master), so the snapshot goes through
+   `kubectl exec` into the etcd static pod, and v1.33.13 supports
+   `--encryption-provider-config-automatic-reload`, so key rotation needs no API server restart.
+   The manifest edits were tested against a fetched copy of the real kube-apiserver.yaml (twice
+   for idempotency, plus a simulated kubeadm regeneration), the ConfigMap transform passed
+   `kubeadm config validate` on the master and a server dry run of the patch, and the rewrite
+   script dry run listed the live cluster Secrets read-only; the owner still applies the playbook
+   and the rewrite.
 8. **Cluster access:** Roles and short-lived certificates, then move the admin kubeconfig off the Mac.
    This runs last because every earlier step uses that access.
 
