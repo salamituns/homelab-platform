@@ -140,32 +140,50 @@ LoadBalancer:
   also answers on a high port for ANY source, which bypasses the range entirely. Verified: the blocked client
   connected through `nodeIP:nodePort` on all three nodes, and stopped once the Service was recreated without
   node ports.
-- MySQL never sees `192.168.1.95`: kube-proxy masquerades the traffic to the receiving node's own address in the
-  Calico pod CIDR (observed `10.244.3.1`). The OpenBao account is therefore `bao-admin@'10.244.%'`, not the
-  `192.168.1.%` first sketched.
+- MySQL never sees `192.168.1.95`: kube-proxy masquerades the traffic to the receiving node's own address in its
+  Flannel pod subnet (kube-flannel-ds gives each node a /24 out of 10.244.0.0/16; observed `10.244.3.1`). The
+  OpenBao account is therefore `bao-admin@'10.244.%'`, not the `192.168.1.%` first sketched.
 
-Run it (your terminal, once):
+Two phases, because the static role starts a clock:
 
 ```sh
-scripts/openbao-setup-mysql-rotation.sh
+scripts/openbao-setup-mysql-rotation.sh                     # phase 1: account, connection, rotate-root, policy
+scripts/openbao-setup-mysql-rotation.sh --create-static-role  # phase 2: only when the app reads the file mount
 ```
 
-It is idempotent, needs `kubectl` for the cluster, and reads `MYSQL_ROOT_PASSWORD` from
-`private/belleshop-secrets.env` over stdin (never printed). It creates the `bao-admin` MySQL account (REQUIRE SSL,
-global `CREATE USER` only), enables `database/`, configures the connection to `.244`, rotates that root credential
-(only OpenBao knows the password afterwards), creates the static role `belleshop` (24h period, RETAIN CURRENT
-PASSWORD) and adds `database/static-creds/belleshop` to the `belleshop-read` policy. Re-running it while the
-connection config exists changes no password.
+Both are idempotent and need `kubectl`; the root password comes from `private/belleshop-secrets.env` over stdin
+(never printed, never on any command line). Phase 1 creates the `bao-admin` MySQL account (REQUIRE SSL, global
+`CREATE USER` only), enables `database/`, configures the connection to `.244`, rotates that root credential (only
+OpenBao knows the password afterwards) and writes the `belleshop-read` policy with both paths. Phase 1 alone
+changes nothing for the app: no clock runs.
 
-Know before running:
+Phase 2 (`--create-static-role`) rotates the app password **immediately** and starts the 24h clock:
 
-- Creating the static role rotates the app user's password **immediately** (OpenBao must learn it). The old
-  password keeps working for one rotation period (24h) because of RETAIN CURRENT PASSWORD, so the running app is
-  fine until then — but step 5 should not wait a full period.
+- The old password keeps working only until the NEXT rotation. Running pods and the hand-made
+  `belleshop-secrets` still hold the old password, so an app that still reads the environment variable breaks
+  24h after phase 2 — and restarting pods does not help, they restart with the same old value.
 - Reading `static-creds` never triggers a rotation; that is all ESO does, once a minute.
 - `rotate-root` needs `root_rotation_statements` here: the plugin default targets `'{{username}}'@'%'`, which
   fails with MySQL error 1396 for the host-scoped account. REQUIRE SSL survives the rotation with no extra
   statement (`ssl_type=ANY`; the script asserts it and fails loudly otherwise).
+
+Order for step 5 (the catch-22 and its answer): the generator cannot read `static-creds` before the role exists,
+and the role cannot exist before its first rotation, so `belleshop-db-eso` can never be ready before the first
+rotation. It does not need to be: with the Secret volume mounted `optional: true`, a pod starts while the Secret
+is absent, and the app falls back to the environment variable, which RETAIN CURRENT PASSWORD keeps valid for the
+whole first 24h. When the Secret appears, kubelet materialises the file into the running pod's mount (verified
+2026-10-31 in a throwaway namespace: pod started with an empty mount, the file appeared after the Secret was
+created, no restart), and the app picks the new password up on its next connection. No rollout is needed.
+
+1. Deploy the app version that reads the mounted file when present and falls back to `MYSQL_PASSWORD` when not,
+   with the `belleshop-db-eso` volume marked `optional: true`. Pods must start and serve on the env password
+   (today's behaviour, unchanged).
+2. Run phase 1. Nothing changes for the app; check the statuses and the negative test below.
+3. Run phase 2. The clock starts; ESO syncs `belleshop-db-eso` within ~1m and kubelet delivers the file to the
+   running pods.
+4. Before 24h pass, confirm the backend uses the file password (a probe plus `bao write -f
+   database/rotate-role/belleshop` is the full step-6 proof). After that, `MYSQL_PASSWORD` in the hand-made
+   `belleshop-secrets` is dead weight for the backend; the other keys stay as they are.
 
 Check afterwards (no values printed):
 
@@ -175,11 +193,21 @@ nc -z 192.168.1.244 3306 && echo REACHED   # from a host that is NOT sectools: t
 bao write -f database/rotate-role/belleshop # manual rotation, what the 24h schedule runs (step 6 uses it)
 ```
 
+If a run fails part-way:
+
+- Before phase 2, nothing is time-critical: fix and re-run, the script skips what exists.
+- During or after phase 2 the clock is running. First try to complete rather than undo: re-run with
+  `--create-static-role` (idempotent) and verify the Secret and the file mount as above. To abort instead:
+  `bao delete database/static-roles/belleshop` stops further rotations; the app password stays at whatever
+  OpenBao last set, so set one you know by hand (`ALTER USER 'belleshop'@'%' IDENTIFIED BY '...'`), put it in
+  the hand-made Secret, and re-create the role later only after the app reads the file.
+
 Undo (also in the script header):
 
 ```sh
+bao delete database/static-roles/belleshop   # if the static role exists
 bao secrets disable database/
 kubectl -n dev exec -it mysql-0 -- mysql -uroot -p   # DROP USER 'bao-admin'@'10.244.%';
                                                       # ALTER USER 'belleshop'@'%' IDENTIFIED BY '...';
-scripts/openbao-setup-belleshop.sh                   # rewrites the policy without the database path
+scripts/openbao-setup-belleshop.sh                   # rewrites the same two-path policy
 ```

@@ -62,14 +62,17 @@ Changing a value in a secret store does not change a password in MySQL, so the p
    with a verified certificate. Two additions from the step 4 spike (2026-10-31): the Service also sets
    `allocateLoadBalancerNodePorts: false`, because a NodePort is open to any source and bypasses the range; and the
    account is `bao-admin@'10.244.%'`, because kube-proxy masquerades LoadBalancer traffic to the receiving node's
-   Calico pod-CIDR address (MySQL sees `10.244.x.y`, never the `192.168.1.x` client IP). `rotate-root` works on
-   OpenBao 2.7.2 and REQUIRE SSL survives it, but `root_rotation_statements` are needed: the plugin default targets
-   `'{{username}}'@'%'`, which fails with MySQL error 1396 on a host-scoped account.
+   own address in its Flannel pod subnet (the CNI is kube-flannel-ds; MySQL sees `10.244.x.y`, never the
+   `192.168.1.x` client IP). `rotate-root` works on OpenBao 2.7.2 and REQUIRE SSL survives it, but
+   `root_rotation_statements` are needed: the plugin default targets `'{{username}}'@'%'`, which fails with MySQL
+   error 1396 on a host-scoped account.
 7. **Have the app read the password from a mounted file** on each new connection, so it needs no restart. Use MySQL's
    `RETAIN CURRENT PASSWORD` so the old and new passwords both work during the switch (confirmed on 8.0.46, 2026-10-31:
    after a rotation both log in, and the older one stops working at the next rotation). Creating the static role
-   rotates the app password immediately (verified on OpenBao 2.7.2), so the switch to the synced Secret must not
-   wait a full period.
+   rotates the app password immediately (verified on OpenBao 2.7.2) and starts the rotation clock, so the setup
+   script creates the role only behind an explicit `--create-static-role` flag, after the app already reads the
+   optional file mount (the volume is `optional: true`, so pods start before the Secret exists and kubelet delivers
+   the file into running pods once it does, verified on the cluster 2026-10-31).
 8. **Enable etcd encryption at rest** with an `EncryptionConfiguration`, then rewrite existing Secrets. ESO copies
    secrets into etcd, so this belongs in the same week.
 9. **Scope cluster access.** Create per-namespace Roles, issue short-lived client certificates through the
@@ -105,7 +108,10 @@ only until the next rotation, so a pod that has missed one full period starts to
   `mysql-bao` disables node ports for that reason (checked on the cluster, 2026-10-31). Any later LoadBalancer that
   must stay source-limited needs the same field.
 - The `bao-admin` account is scoped to `10.244.%`, not `192.168.1.%`: kube-proxy masquerades LoadBalancer traffic
-  to the receiving node's Calico pod-CIDR address, so a LAN-side host scope would never match.
+  to the receiving node's address in its Flannel pod subnet, so a LAN-side host scope would never match.
+- Creating the static role is a one-way door on a 24h timer: the old password (still held by running pods and the
+  hand-made `belleshop-secrets`) dies at the next rotation, and a pod restart does not help while the app reads
+  the environment variable. The role is therefore created only after the app reads the optional file mount.
 - `sectools` becomes more important, and losing it stops rotation and new secrets. Running apps keep working from their
   synced Kubernetes Secrets.
 - OpenBao's VM backup is encrypted but useless without the unseal shares. This makes the deferred off-host copy of PBS
@@ -135,7 +141,8 @@ Each step is separately reversible.
    `SecretStore` and `ExternalSecret` follow in `belleshop-deploy`.
 4. **In progress 2026-10-31:** dedicated MySQL account and the `.244` path. In git: the `mysql-bao` Service
    (sectools-only, no NodePort) and the ESO objects for the shadow Secret `belleshop-db-eso` in belleshop-deploy, and
-   `scripts/openbao-setup-mysql-rotation.sh` here (account, connection, root rotation, static role, policy path).
+   `scripts/openbao-setup-mysql-rotation.sh` here (account, connection, root rotation, policy path; the static role
+   only behind `--create-static-role`, so the 24h clock starts only once the app reads the optional file mount).
    Tested end to end on a dev OpenBao 2.7.2 against a throwaway MySQL behind a `.245` LoadBalancer: creation,
    takeover, idempotent re-run, immediate rotation on static-role creation, the one-rotation dual-password window,
    reads not rotating, and the negative test (a non-allowed host refused at the LB address but connected through the

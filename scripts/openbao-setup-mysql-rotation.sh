@@ -15,18 +15,28 @@
 # connection config is absent, followed by rotate-root; a re-run with the
 # config in place changes no password at all.
 #
-# Every OpenBao call goes through the bao_api wrapper below; every MySQL call
-# goes through mysql_exec, which pipes the root password into the pod over
-# stdin (sh reads it as the first line and passes it to mysql as MYSQL_PWD, so
-# it never appears on argv or in ps; the mysql client's own -p prompt cannot be
-# fed from a pipe: it swallows the whole stdin buffer, verified 2026-10-31).
+# The static role is created ONLY with --create-static-role, because creating
+# it starts a clock: OpenBao rotates the app user's password immediately, and
+# RETAIN CURRENT PASSWORD keeps the old one valid only until the next rotation
+# (24h by default). Running pods and the hand-made belleshop-secrets still hold
+# the old password, so the app must be deployed and reading the file mount from
+# dev/belleshop-db-eso BEFORE the flag is used; a pod restart does not help.
+#
+# Secrets never reach a process command line. Every OpenBao call goes through
+# the bao_api wrapper below (token in a config file descriptor); every MySQL
+# call goes through mysql_exec, which pipes the root password into the pod over
+# stdin (sh reads it as the first line and passes it to mysql as MYSQL_PWD; the
+# mysql client's own -p prompt cannot be fed from a pipe: it swallows the whole
+# stdin buffer, verified 2026-10-31); values that must reach jq travel through
+# the environment (env.NAME), which ps cannot see, not through --arg.
 #
 # Undo (your terminal; the app user's password was rotated, set a new one by hand):
-#   bao secrets disable database/           # connection config + static role
+#   bao delete database/static-roles/belleshop   # if the static role exists
+#   bao secrets disable database/                # connection config goes with it
 #   kubectl -n dev exec -it mysql-0 -- mysql -uroot -p
 #     DROP USER 'bao-admin'@'10.244.%';
 #     ALTER USER 'belleshop'@'%' IDENTIFIED BY '<your-new-password>';
-#   scripts/openbao-setup-belleshop.sh      # rewrites belleshop-read without the database path
+#   scripts/openbao-setup-belleshop.sh      # rewrites belleshop-read (same two paths)
 #
 # Overridable for throwaway test setups (local dev bao server + spike namespace):
 #   OPENBAO_ROTATION_ENV_FILE  (default private/belleshop-secrets.env)
@@ -43,14 +53,17 @@
 set -euo pipefail
 
 ENV_FILE="${OPENBAO_ROTATION_ENV_FILE:-private/belleshop-secrets.env}"
+CREATE_STATIC_ROLE=false
+if [[ "${1:-}" == "--create-static-role" ]]; then CREATE_STATIC_ROLE=true; fi
 NS="${OPENBAO_ROTATION_NS:-dev}"
 POD="${OPENBAO_ROTATION_POD:-mysql-0}"
 LB_IP="${OPENBAO_ROTATION_LB_IP:-192.168.1.244}"
 ADMIN_USER="${OPENBAO_ROTATION_ADMIN_USER:-bao-admin}"
 # Host scope: kube-proxy (iptables mode) masquerades LoadBalancer traffic to the
-# receiving node's own address in the Calico pod CIDR, so MySQL sees 10.244.x.y
-# (one address per node), never the 192.168.1.x client IP; verified on this
-# cluster 2026-10-31 (sectools -> MetalLB .245 appeared as 10.244.3.1). The LB
+# receiving node's own address in its Flannel pod subnet (kube-flannel-ds gives
+# each node a /24 out of 10.244.0.0/16), so MySQL sees 10.244.x.y (one address
+# per node), never the 192.168.1.x client IP; verified on this cluster
+# 2026-10-31 (sectools -> MetalLB .245 appeared as 10.244.3.1). The LB
 # source range (192.168.1.95/32 on the mysql-bao Service) stays the real door
 # control; this scope is the second layer and matches nothing outside the pod
 # CIDR.
@@ -149,14 +162,16 @@ GRANT CREATE USER ON *.* TO '${ADMIN_USER}'@'${ADMIN_HOST}';" >/dev/null
   # root_rotation_statements: needed not to keep REQUIRE SSL (ALTER USER ...
   # IDENTIFIED BY leaves ssl_type alone, asserted below) but because the plugin
   # default targets '{{username}}'@'%', and this account is host-scoped.
-  conn_json="$(jq -n \
+  # The password reaches jq through the environment (env.admin_pw): ps shows a
+  # process command line, not its environment, and --arg would put the value
+  # on jq's argv.
+  conn_json="$(admin_pw="$admin_pw" jq -n \
     --arg plugin mysql-database-plugin \
     --arg url "{{username}}:{{password}}@tcp(${LB_IP}:3306)/?tls=skip-verify" \
     --arg user "$ADMIN_USER" \
-    --arg pass "$admin_pw" \
     --arg rootrot "ALTER USER '{{username}}'@'${ADMIN_HOST}' IDENTIFIED BY '{{password}}'" \
     --argjson allowed "[\"${APP_USER}\"]" \
-    '{plugin_name: $plugin, allowed_roles: ($allowed | join(",")), connection_url: $url, username: $user, password: $pass, root_rotation_statements: [$rootrot]}')"
+    '{plugin_name: $plugin, allowed_roles: ($allowed | join(",")), connection_url: $url, username: $user, password: env.admin_pw, root_rotation_statements: [$rootrot]}')"
   printf '%s' "$conn_json" \
     | bao_api -X POST "$BAO_ADDR/v1/${MOUNT}/config/${CONN}" -H 'Content-Type: application/json' \
       --data-binary @- >/dev/null
@@ -177,21 +192,37 @@ if [[ "$admin_touched" == true ]]; then
   echo "rotation: REQUIRE SSL survived (ssl_type=ANY)"
 fi
 
-# --- static role for the app user ------------------------------------------------------------------------------
-role_json="$(jq -n \
-  --arg db "$CONN" \
-  --arg user "$APP_USER" \
-  --arg stmt "ALTER USER '{{name}}'@'${APP_HOST}' IDENTIFIED BY '{{password}}' RETAIN CURRENT PASSWORD" \
-  --arg period "$PERIOD" \
-  '{db_name: $db, username: $user, rotation_statements: [$stmt], rotation_period: $period}')"
-
-if bao_api "$BAO_ADDR/v1/${MOUNT}/static-roles/${APP_USER}" >/dev/null 2>&1; then
-  echo "static-role: ${MOUNT}/static-roles/${APP_USER} already present; keeping it"
+# --- static role for the app user (explicit --create-static-role only) ----------------------------------------
+# Creating the role rotates the app password immediately and starts the 24h
+# clock: the previous password stops working at the NEXT rotation, and running
+# pods plus the hand-made belleshop-secrets still hold it. Only run this once
+# the app reads the file mount from dev/belleshop-db-eso (runbook order).
+if [[ "$CREATE_STATIC_ROLE" != true ]]; then
+  if bao_api "$BAO_ADDR/v1/${MOUNT}/static-roles/${APP_USER}" >/dev/null 2>&1; then
+    echo "static-role: ${MOUNT}/static-roles/${APP_USER} already present (clock running; nothing to do)"
+  else
+    echo "static-role: skipped (pass --create-static-role to create it; read the runbook first)"
+  fi
 else
-  printf '%s' "$role_json" \
-    | bao_api -X POST "$BAO_ADDR/v1/${MOUNT}/static-roles/${APP_USER}" -H 'Content-Type: application/json' \
-      --data-binary @- >/dev/null
-  echo "static-role: created ${MOUNT}/static-roles/${APP_USER} (user ${APP_USER}@'${APP_HOST}', RETAIN CURRENT PASSWORD, period ${PERIOD})"
+  role_json="$(jq -n \
+    --arg db "$CONN" \
+    --arg user "$APP_USER" \
+    --arg stmt "ALTER USER '{{name}}'@'${APP_HOST}' IDENTIFIED BY '{{password}}' RETAIN CURRENT PASSWORD" \
+    --arg period "$PERIOD" \
+    '{db_name: $db, username: $user, rotation_statements: [$stmt], rotation_period: $period}')"
+
+  if bao_api "$BAO_ADDR/v1/${MOUNT}/static-roles/${APP_USER}" >/dev/null 2>&1; then
+    echo "static-role: ${MOUNT}/static-roles/${APP_USER} already present; keeping it"
+  else
+    printf '%s' "$role_json" \
+      | bao_api -X POST "$BAO_ADDR/v1/${MOUNT}/static-roles/${APP_USER}" -H 'Content-Type: application/json' \
+        --data-binary @- >/dev/null
+    echo "static-role: created ${MOUNT}/static-roles/${APP_USER} (user ${APP_USER}@'${APP_HOST}', RETAIN CURRENT PASSWORD, period ${PERIOD})"
+    echo "WARNING: the app password was rotated NOW; the previous one stops working at the next"
+    echo "         rotation (in ${PERIOD}). Running pods still use it. The app must read"
+    echo "         dev/belleshop-db-eso (ESO syncs it within ~1m) before that deadline;"
+    echo "         restarting a pod does not help while it still reads the old env password."
+  fi
 fi
 
 # --- policy: add the static-creds read path --------------------------------------------------------------------

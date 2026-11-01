@@ -68,11 +68,14 @@ printf '%s' "$config_json" | bao_api -X POST "$BAO_ADDR/v1/auth/kubernetes/confi
 echo "auth: kubernetes/ configured (host, CA from kube-public, no reviewer token)"
 
 # --- Policy and role ---------------------------------------------------------------------------------------
+# Both paths, same as openbao-setup-mysql-rotation.sh: re-running either script
+# keeps the other one's path (the database one is unused until that script has
+# run; it just fails closed until then).
 bao_api -X PUT "$BAO_ADDR/v1/sys/policies/acl/belleshop-read" -H 'Content-Type: application/json' \
   --data-binary @- <<'POLICY' >/dev/null
-{"policy": "path \"secret/data/belleshop/*\" {\n  capabilities = [\"read\"]\n}\n"}
+{"policy": "path \"secret/data/belleshop/*\" {\n  capabilities = [\"read\"]\n}\npath \"database/static-creds/belleshop\" {\n  capabilities = [\"read\"]\n}\n"}
 POLICY
-echo "policy: belleshop-read written (read-only on secret/data/belleshop/*)"
+echo "policy: belleshop-read written (read-only on secret/data/belleshop/* and database/static-creds/belleshop)"
 
 role_json="$(jq -n \
   --arg sa "eso-belleshop" \
@@ -108,12 +111,10 @@ if [[ ${#missing[@]} -gt 0 ]]; then
 fi
 
 # Over stdin, never argv: the values travel pipe-to-TLS, not through ps or shell history.
+# The dotenv sourcing above (set -a) already exported them, so jq reads them from its
+# environment (env.NAME; ps shows a command line, not an environment) instead of --arg.
 secrets_json="$(jq -n \
-  --arg user "$MYSQL_APP_USER" \
-  --arg password "$MYSQL_APP_PASSWORD" \
-  --arg root_password "$MYSQL_ROOT_PASSWORD" \
-  --arg secret_key "$SECRET_KEY" \
-  '{data: {MYSQL_USER: $user, MYSQL_PASSWORD: $password, MYSQL_ROOT_PASSWORD: $root_password, SECRET_KEY: $secret_key, MYSQL_DATABASE: "belle_shop"}}')"
+  '{data: {MYSQL_USER: env.MYSQL_APP_USER, MYSQL_PASSWORD: env.MYSQL_APP_PASSWORD, MYSQL_ROOT_PASSWORD: env.MYSQL_ROOT_PASSWORD, SECRET_KEY: env.SECRET_KEY, MYSQL_DATABASE: "belle_shop"}}')"
 printf '%s' "$secrets_json" | bao_api -X POST "$BAO_ADDR/v1/secret/data/belleshop/app" \
   -H 'Content-Type: application/json' --data-binary @- >/dev/null
 echo "secrets: loaded into secret/belleshop/app (5 keys; values not shown)"
