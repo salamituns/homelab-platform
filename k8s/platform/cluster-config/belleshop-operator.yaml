@@ -1,10 +1,12 @@
 # Day-to-day access in dev (ADR 0014 step 8). Bound to a group, not a user.
-# Secrets: no get/list/watch. Pod create is also denied: a created pod can mount
-# any Secret in the namespace. pods/exec is allowed — it can still cat files
-# already mounted into running pods (the backend DB password file, mysql env).
-# That is accepted so the owner can debug and so scripts/openbao-setup-mysql-rotation.sh
-# can exec into mysql-0 without the admin kubeconfig. Restart is pods/delete plus
-# patch on Rollouts/Deployments/StatefulSets, not pod create.
+#
+# This Role is not a Secret boundary inside `dev`:
+# - pods/exec can read files and env already mounted from Secrets
+# - patch on Rollouts (needed to promote) can change spec.template, including
+#   volume mounts; Argo CD self-heal reverts that only after it has run
+# Restart of a pod is delete, not patch of Deployments/StatefulSets (that patch
+# is the same as creating a pod that mounts any Secret).
+# It is a boundary for every other namespace and for cluster-scoped Secrets.
 # Managed by Argo CD (app cluster-config).
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -22,11 +24,14 @@ rules:
     resources: [pods/exec]
     verbs: [create]
   - apiGroups: [apps]
-    resources: [deployments, deployments/scale, statefulsets, statefulsets/scale, replicasets]
-    verbs: [get, list, watch, patch, update]
+    resources: [deployments, statefulsets, replicasets]
+    verbs: [get, list, watch]
   - apiGroups: [argoproj.io]
-    resources: [rollouts, rollouts/scale, rollouts/status, analysisruns, analysistemplates]
-    verbs: [get, list, watch, patch, update]
+    resources: [rollouts, rollouts/status]
+    verbs: [get, list, watch, patch]
+  - apiGroups: [argoproj.io]
+    resources: [analysisruns, analysistemplates]
+    verbs: [get, list, watch]
   - apiGroups: [gateway.networking.k8s.io]
     resources: [httproutes]
     verbs: [get, list, watch]

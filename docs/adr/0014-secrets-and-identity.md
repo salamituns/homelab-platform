@@ -154,14 +154,13 @@ Each step is separately reversible.
    failed requests.
 7. **etcd encryption at rest,** following a backup of etcd.
 8. **In progress 2026-11-01:** cluster access. In git: Role `belleshop-operator` in `dev` (no Secret
-   get/list/watch; `pods/exec` allowed and recorded as indirect access to mounted files; pod create
-   denied), ClusterRole `platform-viewer` for cluster-wide status (nodes, Argo Applications, Rollouts,
-   ExternalSecret status — the ADR's per-namespace Role cannot cover cluster-scoped objects), bindings
-   to groups `belleshop-operators` / `platform-viewers`, and `scripts/k8s-issue-access-cert.sh`
-   (key stays on the Mac, approval over SSH to `Master`, refuses `system:masters` and
-   `kubeadm:cluster-admins`). The Mac's existing admin client certificate `notAfter` is
-   2027-08-17; deleting the kubeconfig file does not revoke it. Owner issues a limited cert, then
-   removes the Mac admin kubeconfig; admin.conf stays on the control-plane node.
+   get/list/watch; no patch on Deployments/StatefulSets; `pods/exec` and Rollout `patch` mean this is
+   **not** a Secret boundary inside `dev`, only outside it), ClusterRole `platform-viewer` for
+   cluster-wide status, bindings to groups `belleshop-operators` / `platform-viewers`, and
+   `scripts/k8s-issue-access-cert.sh` (allowlist of those two groups only). The Mac admin client
+   certificate `notAfter` is 2027-08-17; removing files does not revoke it. Cutover is after the
+   etcd-encryption Secret rewrite. Owner issues a limited cert, then removes only this cluster's
+   admin user from the Mac kubeconfig files; admin.conf stays on the control-plane node.
 
 ## References
 

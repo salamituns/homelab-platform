@@ -7,8 +7,8 @@
 #
 # Usage:
 #   scripts/k8s-issue-access-cert.sh <username> [group ...]
-# Groups default to belleshop-operators platform-viewers. Any of system:masters or
-# kubeadm:cluster-admins is refused.
+# Groups default to both allowlisted names. Only belleshop-operators and
+# platform-viewers are accepted.
 #
 # Env:
 #   K8S_ACCESS_DIR              default private/k8s-access (gitignored)
@@ -30,12 +30,45 @@ if [[ -z "$USER_NAME" || "$USER_NAME" == -* ]]; then
   exit 2
 fi
 shift
+
+ALLOWED_GROUPS=(belleshop-operators platform-viewers)
 # Do not name this GROUPS: bash already has a readonly GROUPS array of numeric GIDs.
 if [[ $# -gt 0 ]]; then
   CERT_GROUPS=("$@")
 else
-  CERT_GROUPS=(belleshop-operators platform-viewers)
+  CERT_GROUPS=("${ALLOWED_GROUPS[@]}")
 fi
+
+bad_chars='/=,+'
+if [[ "$USER_NAME" == system:* ]]; then
+  echo "ERROR: refusing username $USER_NAME (system: prefix)." >&2
+  exit 1
+fi
+if [[ "$USER_NAME" == *["$bad_chars"]* ]]; then
+  echo "ERROR: refusing username $USER_NAME (characters that change the certificate subject)." >&2
+  exit 1
+fi
+
+is_allowed_group() {
+  local g="$1" a
+  for a in "${ALLOWED_GROUPS[@]}"; do
+    if [[ "$g" == "$a" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+for g in "${CERT_GROUPS[@]}"; do
+  if [[ "$g" == *["$bad_chars"]* ]]; then
+    echo "ERROR: refusing group $g (characters that change the certificate subject)." >&2
+    exit 1
+  fi
+  if ! is_allowed_group "$g"; then
+    echo "ERROR: refusing group $g (allowlist is ${ALLOWED_GROUPS[*]})." >&2
+    exit 1
+  fi
+done
 
 DIR="${K8S_ACCESS_DIR:-private/k8s-access}"
 EXPIRY="${K8S_ACCESS_EXPIRY_SECONDS:-28800}"
@@ -43,23 +76,13 @@ REMOTE="${K8S_ACCESS_REMOTE:-ssh}"
 SSH_HOST="${K8S_ACCESS_SSH_HOST:-Master}"
 ADMIN_KUBECONFIG="${K8S_ACCESS_ADMIN_KUBECONFIG:-}"
 API_SERVER="${K8S_ACCESS_API_SERVER:-}"
-FORBIDDEN_GROUPS=(system:masters kubeadm:cluster-admins)
-
-for g in "${CERT_GROUPS[@]}"; do
-  for bad in "${FORBIDDEN_GROUPS[@]}"; do
-    if [[ "$g" == "$bad" ]]; then
-      echo "ERROR: refusing group $g (would be cluster-admin)." >&2
-      exit 1
-    fi
-  done
-done
 
 KEY="$DIR/${USER_NAME}.key"
 KCFG="$DIR/${USER_NAME}.kubeconfig"
 CSR_NAME="homelab-access-${USER_NAME}-$(date +%s)"
 
 home_kube="${HOME}/.kube/config"
-if [[ "$KCFG" == "$home_kube" || "${KUBECONFIG:-}" == "$KCFG" && "$KCFG" == "$home_kube" ]]; then
+if [[ "$KCFG" == "$home_kube" ]]; then
   echo "ERROR: refusing to write the current admin kubeconfig path." >&2
   exit 1
 fi
@@ -71,6 +94,22 @@ if [[ "$REMOTE" == "local" && -n "$ADMIN_KUBECONFIG" && "$ADMIN_KUBECONFIG" == "
   echo "ERROR: admin kubeconfig and output kubeconfig are the same file." >&2
   exit 1
 fi
+
+admin_kubectl() {
+  if [[ "$REMOTE" == "local" ]]; then
+    if [[ -n "$ADMIN_KUBECONFIG" ]]; then
+      kubectl --kubeconfig "$ADMIN_KUBECONFIG" "$@"
+    else
+      kubectl "$@"
+    fi
+  else
+    ssh -o BatchMode=yes "$SSH_HOST" "sudo kubectl --kubeconfig /etc/kubernetes/admin.conf $(printf '%q ' "$@")"
+  fi
+}
+
+cleanup_csr() {
+  admin_kubectl delete csr "$CSR_NAME" --ignore-not-found >/dev/null || true
+}
 
 mkdir -p "$DIR"
 chmod 700 "$DIR"
@@ -117,23 +156,8 @@ csr_json="$(jq -n \
     }
   }')"
 
-admin_kubectl() {
-  if [[ "$REMOTE" == "local" ]]; then
-    if [[ -n "$ADMIN_KUBECONFIG" ]]; then
-      kubectl --kubeconfig "$ADMIN_KUBECONFIG" "$@"
-    else
-      kubectl "$@"
-    fi
-  else
-    # Admin kubeconfig stays on the control-plane node. Arguments are passed as
-    # a single remote command; YAML is piped on stdin when present.
-    ssh -o BatchMode=yes "$SSH_HOST" "sudo kubectl --kubeconfig /etc/kubernetes/admin.conf $(printf '%q ' "$@")"
-  fi
-}
-
-cleanup_csr() {
-  admin_kubectl delete csr "$CSR_NAME" --ignore-not-found >/dev/null || true
-}
+# Before the first API call, so a failed approve or issue still removes the CSR.
+trap cleanup_csr EXIT
 
 printf '%s' "$csr_json" | admin_kubectl apply -f - >/dev/null
 echo "csr: created $CSR_NAME (signer kubernetes.io/kube-apiserver-client, requested ${EXPIRY}s)"
@@ -205,5 +229,6 @@ echo "groups: ${CERT_GROUPS[*]}"
 
 cleanup_csr
 echo "csr: removed $CSR_NAME"
-trap - EXIT
+trap 'rm -f "$tmp_ca" "$tmp_cert"' EXIT
 rm -f "$tmp_ca" "$tmp_cert"
+trap - EXIT
