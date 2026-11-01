@@ -76,8 +76,10 @@ Changing a value in a secret store does not change a password in MySQL, so the p
 8. **Enable etcd encryption at rest** with an `EncryptionConfiguration` (secretbox, the docs' Strong
    and Faster provider; aescbc is rated Weak), then rewrite existing Secrets. ESO copies
    secrets into etcd, so this belongs in the same week.
-9. **Scope cluster access.** Create per-namespace Roles, issue short-lived client certificates through the
-   `CertificateSigningRequest` API, and keep the admin kubeconfig on the control-plane node only.
+9. **Scope cluster access.** Create per-namespace Roles for day-to-day mutate (starting with `dev`), a
+   ClusterRole only for cluster-wide status (nodes, Argo Applications), issue short-lived client
+   certificates through the `CertificateSigningRequest` API, and keep the admin kubeconfig on the
+   control-plane node only.
 
 ## How rotation works
 
@@ -181,8 +183,14 @@ Each step is separately reversible.
    `kubeadm config validate` on the master and a server dry run of the patch, and the rewrite
    script refuses to run while the live API server does not carry the flag; the owner still
    applies the playbook and the rewrite.
-8. **Cluster access:** Roles and short-lived certificates, then move the admin kubeconfig off the Mac.
-   This runs last because every earlier step uses that access.
+8. **In progress 2026-11-01:** cluster access. In git: Role `belleshop-operator` in `dev` (no Secret
+   get/list/watch; no patch on Deployments/StatefulSets; `pods/exec` and Rollout `patch` mean this is
+   **not** a Secret boundary inside `dev`, only outside it), ClusterRole `platform-viewer` for
+   cluster-wide status, bindings to groups `belleshop-operators` / `platform-viewers`, and
+   `scripts/k8s-issue-access-cert.sh` (allowlist of those two groups only). The Mac admin client
+   certificate `notAfter` is 2027-08-17; removing files does not revoke it. Cutover is after the
+   etcd-encryption Secret rewrite. Owner issues a limited cert, then removes only this cluster's
+   admin user from the Mac kubeconfig files; admin.conf stays on the control-plane node.
 
 ## References
 
