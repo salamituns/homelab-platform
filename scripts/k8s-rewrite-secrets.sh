@@ -9,11 +9,13 @@
 #
 # Each Secret is retried on conflict: ESO rewrites one Secret on every rotation
 # (refreshInterval 1m), so a Secret can change between the get and the replace.
-# Retrying re-reads the newer version, so no update is lost.
+# Retrying re-reads the newer version, so no update is lost. Any other failure
+# (a webhook denial, missing permissions) is reported, not retried: it will not
+# heal on its own.
 #
 # Usage:
 #   scripts/k8s-rewrite-secrets.sh             # rewrite all Secrets, print counts
-#   scripts/k8s-rewrite-secrets.sh --dry-run   # list Secrets per namespace, rewrite nothing
+#   scripts/k8s-rewrite-secrets.sh --dry-run   # report flag state + counts, rewrite nothing
 #
 # Undo: a rewrite writes each object back unchanged, so there is nothing to
 # undo here. To stop encrypting at all, see docs/runbooks/etcd-encryption.md:
@@ -29,6 +31,32 @@ elif [[ $# -gt 0 ]]; then
 fi
 
 RETRIES=5        # per Secret; a conflict resolves in well under a minute
+
+# The static kube-apiserver pods appear as mirror pods carrying the command the
+# running process got. Refuse to rewrite without the flag: the run would report
+# success while Secrets keep landing in etcd in plaintext.
+apiserver_flag_state() {
+  local node state=yes
+  for node in $(kubectl get nodes -l node-role.kubernetes.io/control-plane -o jsonpath='{.items[*].metadata.name}'); do
+    if ! kubectl -n kube-system get pod "kube-apiserver-$node" -o jsonpath='{.spec.containers[0].command}' 2>/dev/null \
+         | grep -q -- '--encryption-provider-config='; then
+      state="no (kube-apiserver-$node is not running with --encryption-provider-config)"
+    fi
+  done
+  echo "$state"
+}
+
+FLAG_STATE="$(apiserver_flag_state)"
+if $DRY_RUN; then
+  echo "API server carries --encryption-provider-config: $FLAG_STATE"
+else
+  if [[ "$FLAG_STATE" != "yes" ]]; then
+    echo "Refusing to rewrite: $FLAG_STATE." >&2
+    echo "Run ansible/playbooks/k8s-etcd-encryption.yml first (docs/runbooks/etcd-encryption.md)." >&2
+    exit 2
+  fi
+fi
+
 total=0
 failed_total=0
 
@@ -47,21 +75,30 @@ for ns in $(kubectl get namespaces -o jsonpath='{.items[*].metadata.name}'); do
     fi
 
     ok=false
+    err=""
     for _ in $(seq 1 "$RETRIES"); do
-      # json-to-pipe replace: kubectl replace rejects a stale resourceVersion
-      # with a 409 conflict, which is exactly the ESO race we retry here
-      if kubectl -n "$ns" get secret "$secret" -o json | kubectl replace -f - >/dev/null 2>&1; then
+      # json-to-pipe replace; stderr of both kubectls is captured, stdout data never is
+      if err="$( { kubectl -n "$ns" get secret "$secret" -o json | kubectl replace -f - >/dev/null; } 2>&1 )"; then
         ok=true
         break
       fi
-      sleep 1
+      if grep -q '(Conflict)' <<< "$err"; then
+        sleep 1   # the Secret changed under us; a retry re-reads the newer version
+        continue
+      fi
+      break   # other errors do not heal by retrying
     done
 
     if $ok; then
       rewritten=$((rewritten + 1))
     else
       failed=$((failed + 1))
-      echo "FAILED: $ns/$secret (conflict $RETRIES times in a row)" >&2
+      # Only the HTTP reason word is printed ("Conflict", "Forbidden", ...): it comes
+      # from the server status line, so it cannot carry Secret data. The rest of the
+      # stderr stays suppressed for the same reason.
+      reason="$(sed -n 's/^Error from server (\([A-Za-z ]*\)).*/\1/p' <<< "$err" | head -1)"
+      [[ -n "$reason" ]] || reason="error (stderr suppressed; re-run this one by hand to see it)"
+      echo "FAILED: $ns/$secret: $reason" >&2
     fi
   done
 
@@ -81,6 +118,6 @@ fi
 
 echo "total: $total rewritten, $failed_total failed"
 if [[ $failed_total -gt 0 ]]; then
-  echo "Re-run the script: it skips nothing and only retries what changes under it." >&2
+  echo "Re-run the script to try the failures again; rewriting an already-encrypted Secret is harmless." >&2
   exit 1
 fi

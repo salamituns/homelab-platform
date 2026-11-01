@@ -126,6 +126,11 @@ only until the next rotation, so a pod that has missed one full period starts to
   nightly, so until the PBS client-side encryption decision (`TODO(encryption)` in the backups
   runbook) is made, the PBS copies hold both the key and the encrypted data. The runbook keeps the
   off-host copy of the key in the password manager as the real custody move.
+- Encrypting new writes does not erase old copies: plaintext Secret revisions stay in etcd until
+  compaction and a `defrag`, the pre-enable snapshot is plaintext, and PBS backups of the master
+  taken before the change keep plaintext until the 7/4/3 retention prunes them (about three
+  months). Of the stored values only the database password ages out on its own (24h rotation); the
+  MySQL root password, `SECRET_KEY` and pull credentials stay valid until rotated by hand.
 - While MySQL is unreachable, OpenBao keeps serving the current password and retries in the background; in the test it
   rotated about 8 seconds after MySQL came back.
 - The app gains a dependency on a mounted file. Local `docker compose` keeps using environment variables, so the code has
@@ -159,18 +164,23 @@ Each step is separately reversible.
    playbook (etcd snapshot first, verified; secretbox key generated on the master only, `no_log`,
    never overwritten; flags in both the kube-apiserver manifest and the kubeadm
    ClusterConfiguration so `k8s-upgrade.yml` regenerates them), the Secrets rewrite script, and
-   the runbook. The provider is secretbox: the Kubernetes docs rate it Strong and Faster, while
+   the runbook. The manifest is patched with ONE atomic write: kubelet starts a pod for anything
+   in `/etc/kubernetes/manifests`, so the flag, its mount and its volume must never arrive one
+   by one. The success wait checks the mirror pod `kube-apiserver-<node>` carries the flag and
+   is Ready, because `/readyz` alone answers 200 from the old server. The provider is secretbox:
+   the Kubernetes docs rate it Strong and Faster, while
    aescbc is rated Weak (padding-oracle). What proved different while building it: kubeadm
    v1beta4 takes `apiServer.extraArgs` as a **list** of `{name, value}` pairs (the map form most
    examples still show fails `kubeadm config validate` on 1.33.13), etcdctl only exists inside
    the etcd image (crictl is not installed on the master), so the snapshot goes through
    `kubectl exec` into the etcd static pod, and v1.33.13 supports
    `--encryption-provider-config-automatic-reload`, so key rotation needs no API server restart.
-   The manifest edits were tested against a fetched copy of the real kube-apiserver.yaml (twice
-   for idempotency, plus a simulated kubeadm regeneration), the ConfigMap transform passed
+   The atomic manifest change was tested against a fetched copy of the real kube-apiserver.yaml
+   (check mode writes nothing, apply once, idempotent re-run, simulated kubeadm regeneration),
+   the ConfigMap transform passed
    `kubeadm config validate` on the master and a server dry run of the patch, and the rewrite
-   script dry run listed the live cluster Secrets read-only; the owner still applies the playbook
-   and the rewrite.
+   script refuses to run while the live API server does not carry the flag; the owner still
+   applies the playbook and the rewrite.
 8. **Cluster access:** Roles and short-lived certificates, then move the admin kubeconfig off the Mac.
    This runs last because every earlier step uses that access.
 
