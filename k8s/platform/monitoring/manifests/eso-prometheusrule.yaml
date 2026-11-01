@@ -1,0 +1,35 @@
+# Alert when ExternalSecret dev/belleshop-db-eso stops syncing (ADR 0014 follow-up).
+# OpenBao rotates the MySQL static role every 24h and RETAIN CURRENT PASSWORD covers only one
+# missed rotation, so an ESO or OpenBao outage lasting ~24h locks the backend out of MySQL.
+# Note: Alertmanager currently routes all alerts to the "null" receiver (no external notifications
+# are configured yet), so this alert surfaces in Prometheus / Alertmanager / Grafana UIs only.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: belleshop-eso-rules
+  namespace: monitoring
+  labels:
+    release: prometheus-stack
+spec:
+  groups:
+    - name: belleshop-eso
+      rules:
+        - alert: BelleShopDbEsoSyncFailed
+          expr: |
+            externalsecret_status_condition{namespace="dev",name="belleshop-db-eso",condition="Ready",status="True"} == 0
+            or absent(externalsecret_status_condition{namespace="dev",name="belleshop-db-eso",condition="Ready",status="True"})
+          for: 30m
+          labels:
+            severity: critical
+          annotations:
+            summary: "ExternalSecret dev/belleshop-db-eso has not been Ready for 30m"
+            description: >-
+              ExternalSecret dev/belleshop-db-eso has been unready (or missing from ESO metrics) for 30m.
+              OpenBao rotates the MySQL password every 24h and RETAIN CURRENT PASSWORD covers only one
+              missed rotation, so an outage lasting ~24h locks the backend out of MySQL.
+              Action: (1) inspect `kubectl -n dev describe externalsecret belleshop-db-eso vaultdynamicsecret belleshop-db`
+              and `kubectl -n external-secrets logs deploy/external-secrets`;
+              (2) check OpenBao health with `curl -q -s -o /dev/null -w '%{http_code}\n' https://bao.home.arpa/v1/sys/health`
+              (503 means sealed — unseal with `bao operator unseal` per docs/runbooks/openbao.md);
+              (3) once OpenBao is unsealed and reachable, trigger an immediate sync with
+              `kubectl -n dev annotate externalsecret belleshop-db-eso force-sync=$(date +%s) --overwrite`.
