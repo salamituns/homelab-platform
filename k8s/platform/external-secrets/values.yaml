@@ -10,3 +10,14 @@ resources:
     memory: 128Mi
   limits:
     memory: 256Mi
+
+# Expose :8080/metrics via Service + ServiceMonitor so Prometheus scrapes externalsecret_status_condition
+# (ADR 0014 follow-up).
+# - renderMode: alwaysRender is required because Argo CD renders Helm charts offline without live CRD
+#   discovery; the chart default (skipIfMissing) omits both the metrics Services and ServiceMonitors.
+# - honorLabels: true preserves the ExternalSecret's own namespace="dev" label instead of overwriting
+#   it with the ESO pod's namespace="external-secrets" (same setting kube-state-metrics uses).
+serviceMonitor:
+  enabled: true
+  renderMode: alwaysRender
+  honorLabels: true
