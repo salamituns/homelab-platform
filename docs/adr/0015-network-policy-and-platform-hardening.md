@@ -253,14 +253,23 @@ the recovery paths at every stage.
   (`hostport`, endpoint `/api/v2/alerts`, `minimumpriority`; default severity map sends notice→information,
   [chart values](https://github.com/falcosecurity/charts/blob/falcosidekick-0.14.1/charts/falcosidekick/values.yaml)).
   Alertmanager routes everything to `null` today, so a real receiver is required, closing the Week 5 gap.
-  **Owner decision: Gmail SMTP, the existing mailbox (`docs/runbooks/proxmox.md`), with the credential not in OpenBao.**
-  The owner creates a hand-made Secret in `monitoring` over the admin SSH path, and the chart reads the
-  Alertmanager config from it. The whole config goes in that Secret because Alertmanager can read the password from a
-  file but not the addresses, and addresses don't belong in this public repo; the repo holds a template and an owner-run
-  script that reads the password at a silent prompt and never prints it. Cost: no audit trail or rotation from OpenBao,
-  and it is outside git, so a rebuild must recreate it (add to `docs/credentials.md`). It is encrypted at rest (ADR 0014).
-  A Gmail app password also opens the mailbox, so use a separate one for this purpose: it can be revoked without
-  breaking PVE's notifications. No new SecretStore or root token.
+  **Owner decision, updated 2026-11-02: Gmail SMTP with a new, separate app password, stored in OpenBao.**
+  A new kv-v2 entry `secret/monitoring/alertmanager` holds the SMTP username, the app password, the from address and
+  the to address — the addresses live there too, so they never enter this public repo. A new policy grants read on
+  that one path only, and a new role on the existing `auth/kubernetes` mount is bound to one service account in
+  `monitoring`, following the `belleshop` role pattern in `scripts/openbao-setup-belleshop.sh`. A new SecretStore in
+  `monitoring`, carrying the sectools Caddy root CA like the dev one, and an ExternalSecret that templates the full
+  Alertmanager config Secret into the name `alertmanagerSpec.configSecret` reads ("The secret is mounted into
+  /etc/alertmanager/config", chart values 88.3.0). Nothing else in `monitoring` can read any other OpenBao path.
+  Benefits over the hand-made Secret this replaces: OpenBao's audit log records every read, and rotation is the
+  owner writing a new value and ESO refreshing — no manual export, and the definition is in git. The connection to
+  OpenBao comes from the ESO controller in `external-secrets` (already allowed in the appendix), not from
+  Alertmanager itself. Writing the value is an owner step in a separate terminal of their own, never through `!` in
+  an agent session: mint a root token with the documented `bao operator generate-root` flow (openbao.md §6), write
+  with the provided script — it reads the password at a silent prompt and passes it via stdin, never argv — then
+  revoke the root token. The app password is a **new, separate** one: an app password opens the mailbox, so a
+  dedicated one can be revoked without breaking the hypervisor's own notifications
+  (`docs/runbooks/proxmox.md`).
 
 **Proof:** `kubectl -n dev exec -it <pod> -- /bin/sh`, spawn a shell, and the Falco event travels the whole chain:
 Falco log, falcosidekick forward, Alertmanager receiver.
@@ -286,7 +295,7 @@ cluster-scoped objects, cannot get Services in most namespaces, and cannot list 
 | 2 | B: Proxmox UI cert (CSR on `tuns`, owner-signed, 3-year) | Remove the files, pveproxy restart | Owner only |
 | 3 | A: DaemonSet; allow policies; default-deny `dev` + proof; then the other namespaces one at a time, webhook namespaces last, with the step checks of section A | Delete the DaemonSet (fail-open: traffic returns to pre-install behavior); delete policies one at a time | Agent (PRs), Argo CD, Owner (dummy create, rotation test) |
 | 4 | A: remove NodePorts 30080/30081 (belleshop-deploy) | Revert the Service PR | Agent (PR), Owner (belleshop-deploy) |
-| 5 | D: Falco + falcosidekick + Alertmanager receiver from a hand-made Secret | Delete the falco app; revert the receiver route | Agent (PRs, template, script), Owner (app password, runs the script) |
+| 5 | D: Falco + falcosidekick + Alertmanager receiver from OpenBao (kv-v2 entry, read-only policy, role, SecretStore, ExternalSecret) | Delete the falco app, ExternalSecret and SecretStore; delete the OpenBao role and policy; `bao kv metadata delete secret/monitoring/alertmanager`; revoke the app password in Google | Agent (PRs: manifests and the owner-run write script), Owner (creates the app password, mints a root token, runs the write, revokes the token) |
 | 6 | C: iDRAC reachable and tested; then the Proxmox firewall staged on `tuns` with dead-man switch | Timed revert; `pve-firewall stop` or input ACCEPT over any working path | Owner only |
 
 Order and why: B first (pure additions; unlocks TLS everywhere), A second (the core gap; the controller alone
@@ -299,7 +308,7 @@ changes nothing, so the risk is staged inside it), D third (independent once the
 |---|---|---|
 | 1 | Policy controller | kube-network-policies v1.1.2 (fail-open default, verdict logs, one-command rollback), watching for the release carrying PR #420; Canal v3.31.7 is the fallback if the day-one checks fail |
 | 2 | CA tiers | Offline name-constrained root (10 y, owner custody) + intermediate in cert-manager (5 y, calendar at 4 y) |
-| 3 | Alertmanager receiver | **Decided by the owner:** Gmail SMTP, credential not in OpenBao. Hand-made Secret; recommend a separate app password |
+| 3 | Alertmanager receiver | **Decided by the owner, updated 2026-11-02:** Gmail SMTP with a new, separate app password, stored in OpenBao — kv-v2 entry `secret/monitoring/alertmanager`, read-only policy, role and SecretStore in `monitoring` |
 | 4 | Proxmox firewall recovery | **No physical access (owner).** Make iDRAC reachable first; if impossible, the owner decides whether to proceed on the timer and two network paths. Firewall goes last |
 | 5 | Move the five Caddy VM roots to the lab CA now or later | Later, one host per PR; the lab CA proves itself on cluster and Proxmox first |
 | 6 | New API host name | `api-belleshop.apps.home.arpa` (one label, wildcard-covered; the two-label form is not) |
