@@ -12,7 +12,7 @@ spec:
   dnsNames:
     - '*.apps.home.arpa'
   duration: 2160h      # 90 days; renewed automatically at 30 days left
-  renewalBefore: 720h
+  renewBefore: 720h
   issuerRef:
     name: lab-ca
     kind: ClusterIssuer
