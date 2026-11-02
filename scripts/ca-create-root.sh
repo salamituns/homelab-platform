@@ -10,7 +10,7 @@
 # enforcement evidence).
 #
 # Design facts from ADR 0015 B: root ECDSA P-256, 10 years, pathlen:1; intermediate ECDSA P-256,
-# 5 years, pathlen:0; both carry the critical DNS name constraint permitted;DNS=home.arpa.
+# 5 years, pathlen:0; both carry the critical DNS name constraint permitted;DNS:home.arpa.
 #
 # Usage:
 #   scripts/ca-create-root.sh --dry-run    # show the plan and commands, change nothing
@@ -93,7 +93,7 @@ CN = Homelab Platform Root CA 2026
 basicConstraints = critical, CA:true, pathlen:1
 keyUsage = critical, keyCertSign, cRLSign
 subjectKeyIdentifier = hash
-nameConstraints = critical, permitted;DNS=home.arpa
+nameConstraints = critical, permitted;DNS:home.arpa
 EOF
 cat >"$INT_EXT" <<'EOF'
 [v3_intermediate]
@@ -101,7 +101,7 @@ basicConstraints = critical, CA:true, pathlen:0
 keyUsage = critical, keyCertSign, cRLSign
 subjectKeyIdentifier = hash
 authorityKeyIdentifier = keyid:always
-nameConstraints = critical, permitted;DNS=home.arpa
+nameConstraints = critical, permitted;DNS:home.arpa
 EOF
 
 echo "Creating the lab CA in $CA_DIR (root ${ROOT_DAYS}d, intermediate ${INT_DAYS}d, both ECDSA P-256,"
