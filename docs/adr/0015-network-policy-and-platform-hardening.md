@@ -168,6 +168,10 @@ at every renewal (draft error). Considered and rejected for now: trusting PVE's 
 (`/etc/pve/pve-root-ca.pem` copied to the Mac) — zero renewal work and PVE-native, but the CA key then lives on the
 hypervisor, which is worse custody than the lab design.
 
+Implementation note 2026-11-02: the leaf is signed by the lab **intermediate**, not the offline root, so the root
+key stays untouched after CA creation — same client trust chain (root -> intermediate -> leaf), one deliberate
+root-key use less. Owner steps and the pvenode syntax (PVE 9.1.2): `docs/runbooks/proxmox-ui-cert.md`.
+
 ### Named follow-up (out of scope here)
 
 MySQL TLS for the `mysql-bao` path (ADR 0014 step 6 wanted it in week 6): needs MySQL configuration and a restart,
