@@ -207,8 +207,8 @@ Each step is separately reversible.
    get secrets in `dev`, create pods, patch deployments, list secrets in `kube-system`,
    delete pods in `kube-system`: no; `get pods -n dev` returned 5 pods), then removed only this
    cluster's admin entries from `~/.kube/config` and deleted `~/.kube/config-homelab`; the
-   `.bak` copies are kept for a day of limited-cert work and then deleted, and they still hold
-   the admin key until then; the admin path over SSH
+   `.bak` copies were deleted the same day after the limited-cert checks passed, and the admin
+   path over SSH
    (`/etc/kubernetes/admin.conf` on the control-plane node) was confirmed working.
 
 ## References
