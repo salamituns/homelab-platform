@@ -161,7 +161,7 @@ signed by the cluster CA; a custom cert goes in `/etc/pve/local/pveproxy-ssl.pem
 validation), which `home.arpa` cannot satisfy — ruled out.
 
 Chosen: **key and CSR generated on `tuns`, signed outside the cluster.** The key never leaves the hypervisor; the
-owner signs the CSR with the offline root (3-year leaf, calendar reminder at 30 months; the runbook records the
+owner signs the CSR with the offline root (825-day leaf, the macOS maximum for TLS server certificates; calendar reminder at 24 months; the runbook records the
 date). `pvenode`/file placement and a pveproxy restart are owner steps. This keeps the hypervisor's private key out
 of Kubernetes entirely — a Certificate object there would put the key in a cluster Secret and force a hand export
 at every renewal (draft error). Considered and rejected for now: trusting PVE's own cluster CA
@@ -296,7 +296,7 @@ cluster-scoped objects, cannot get Services in most namespaces, and cannot list 
 |---|---|---|---|
 | 0 | Add `cert-manager`, `falco`, `kube-network-policies` to the AppProject destinations | Revert the PR | Agent (PR), Argo CD |
 | 1 | B: root + intermediate + ClusterIssuer + wildcard Certificate + HTTPS listener + redirects; per-host route renames; route-smoke and BelleShop script updates | Revert the PRs; DNS wildcard covers both names | Owner (root, Mac), Agent (PRs), Argo CD |
-| 2 | B: Proxmox UI cert (CSR on `tuns`, owner-signed, 3-year) | Remove the files, pveproxy restart | Owner only |
+| 2 | B: Proxmox UI cert (CSR on `tuns`, owner-signed, 825 days) | Remove the files, pveproxy restart | Owner only |
 | 3 | A: DaemonSet; allow policies; default-deny `dev` + proof; then the other namespaces one at a time, webhook namespaces last, with the step checks of section A | Delete the DaemonSet (fail-open: traffic returns to pre-install behavior); delete policies one at a time | Agent (PRs), Argo CD, Owner (dummy create, rotation test) |
 | 4 | A: remove NodePorts 30080/30081 (belleshop-deploy) | Revert the Service PR | Agent (PR), Owner (belleshop-deploy) |
 | 5 | D: Falco + falcosidekick + Alertmanager receiver from OpenBao (kv-v2 entry, read-only policy, role, SecretStore, ExternalSecret) | Delete the falco app, ExternalSecret and SecretStore; delete the OpenBao role and policy; `bao kv metadata delete secret/monitoring/alertmanager`; revoke the app password in Google | Agent (PRs: manifests and the owner-run write script), Owner (creates the app password, mints a root token, runs the write, revokes the token) |

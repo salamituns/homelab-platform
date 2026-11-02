@@ -2,7 +2,8 @@
 
 The pveproxy web UI on `tuns` (`:8006`) serves the PVE node certificate, signed by PVE's own
 cluster CA, which no client trusts. This runbook puts a lab-CA leaf there instead:
-`proxmox.home.arpa` / `tuns.home.arpa` (both resolve to `192.168.1.181`), 3 years. The private
+`proxmox.home.arpa` / `tuns.home.arpa` (both resolve to `192.168.1.181`), 825 days (Apple's maximum for TLS server
+certificates, enforced even for a user-trusted CA; a 1095-day leaf failed with `CSSMERR_TP_CERT_SUSPENDED`). The private
 key is generated ON `tuns` and never leaves it; only the CSR comes to the Mac and only the
 public chain goes back. ACME was ruled out in the ADR: `home.arpa` is not publicly resolvable,
 so http-01/dns-01 cannot validate.
@@ -37,7 +38,7 @@ What it does: `umask 077`, then an ECDSA P-256 key and a CSR at `/root/pve-ui-ce
 ./scripts/pve-ui-cert.sh sign
 ```
 
-Signs with the intermediate: 1095 days, `subjectAltName` `DNS:proxmox.home.arpa`,
+Signs with the intermediate: 825 days, `subjectAltName` `DNS:proxmox.home.arpa`,
 `DNS:tuns.home.arpa`, `IP:192.168.1.181`, EKU `serverAuth`, `keyUsage` `digitalSignature`,
 `basicConstraints CA:false`. The script sets all of these itself: the CSR subject must be
 `CN=proxmox.home.arpa` and nothing from the CSR's extensions is copied. The `IP` SAN sits
@@ -51,7 +52,7 @@ Record the dates now (renewal section below):
 
 - Issued: ____________
 - Expires (notAfter printed by the sign step): ____________
-- Renewal reminder (30 months after issue): ____________
+- Renewal reminder (24 months after issue): ____________
 
 ## 3. install: chain to `tuns`, pvenode, verify
 

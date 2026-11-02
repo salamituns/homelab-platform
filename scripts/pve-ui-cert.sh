@@ -38,7 +38,8 @@
 #                     becomes a local directory and the CA a throwaway in it; install and
 #                     rollback refuse to run. Nothing here is for production use.
 #
-# Renewal: the leaf lives 1095 days; docs/runbooks/proxmox-ui-cert.md records the issue date
+# Renewal: the leaf lives 825 days (macOS rejects TLS leaves over 825 days, even from a
+# user-trusted CA: CSSMERR_TP_CERT_SUSPENDED, seen 2026-11-02); docs/runbooks/proxmox-ui-cert.md records the issue date
 # and the 30-month reminder. Reissue = csr is NOT needed (the key on tuns is reused): sign +
 # install again, after moving the old leaf/chain aside (this script never overwrites them).
 #
@@ -127,7 +128,7 @@ CHAIN="$PVE_UI_DIR/tuns-chain.pem"
 INT_CRT="$CA_DIR/lab-intermediate.crt"
 INT_KEY="$CA_DIR/lab-intermediate.key"
 ROOT_CRT="$CA_DIR/lab-root.crt"
-LEAF_DAYS=1095   # 3 years (ADR 0015 B); reminder at 30 months in the runbook
+LEAF_DAYS=825    # Apple's maximum for TLS server certs; reminder at 24 months in the runbook
 
 cmd_csr() {
   # 1. key + CSR on the hypervisor: umask 077, refuse to overwrite, key never printed and
@@ -188,7 +189,7 @@ subjectKeyIdentifier = hash
 authorityKeyIdentifier = keyid:always
 EOF
 
-  # Sign with the intermediate (the deviation in the header): 3-year leaf, SHA-256.
+  # Sign with the intermediate (the deviation in the header): 825-day leaf, SHA-256.
   run "$OPENSSL_BIN" x509 -req -in "$CSR" -CA "$INT_CRT" -CAkey "$INT_KEY" -CAcreateserial \
     -out "$LEAF" -days "$LEAF_DAYS" -sha256 -extfile "$EXT" -extensions v3_leaf
   # The chain clients need: leaf + intermediate (the root is already in the trust stores).
@@ -207,7 +208,7 @@ EOF
   fi
 
   # Public certificate facts only: subject, SAN, notAfter, fingerprint. Record the date in
-  # docs/runbooks/proxmox-ui-cert.md (renewal reminder at 30 months).
+  # docs/runbooks/proxmox-ui-cert.md (renewal reminder at 24 months).
   if ! $DRY_RUN; then
     "$OPENSSL_BIN" x509 -in "$LEAF" -noout -subject -enddate -fingerprint -sha256
     "$OPENSSL_BIN" x509 -in "$LEAF" -noout -ext subjectAltName,extendedKeyUsage
@@ -246,10 +247,28 @@ cmd_install() {
   # (PVE::CLI::pvenode mapping -> RESTHandler file_get_contents), so pass the path, not the PEM text.
 
   echo "4/4 verify from the Mac (lab root as trust anchor; DNS via the lab resolver):"
-  run curl -q -s -o /dev/null -w 'proxmox.home.arpa:8006 -> %{http_code}\n' \
-    --cacert "$VENDORED_ROOT" https://proxmox.home.arpa:8006/
-  run curl -q -s -o /dev/null -w 'tuns.home.arpa:8006 -> %{http_code}\n' \
-    --cacert "$VENDORED_ROOT" --resolve tuns.home.arpa:8006:192.168.1.181 https://tuns.home.arpa:8006/
+  # /usr/bin/curl, not whatever is first on PATH (conda ships its own); pveproxy needs a few
+  # seconds after the restart, so retry for up to ~30s before reporting.
+  wait_https() {
+    local name=$1 code=000 i
+    for i in 1 2 3 4 5 6 7 8 9 10; do
+      code=$(/usr/bin/curl -q -s -o /dev/null -m 5 -w '%{http_code}' --cacert "$VENDORED_ROOT" \
+        --resolve "$name:8006:192.168.1.181" "https://$name:8006/") || true
+      [ "$code" != 000 ] && break
+      sleep 3
+    done
+    echo "$name:8006 -> $code"
+  }
+  if $DRY_RUN; then
+    note "/usr/bin/curl --cacert $VENDORED_ROOT https://proxmox.home.arpa:8006/ and https://tuns.home.arpa:8006/ (retry ~30s)"
+    note "security verify-cert -p ssl -s proxmox.home.arpa (macOS trust, the browser's view)"
+  else
+    wait_https proxmox.home.arpa
+    wait_https tuns.home.arpa
+    echo "    macOS trust check (what Safari/Chrome use; expect 'successful'):"
+    security verify-cert -c "$LEAF" -c "$CA_DIR/lab-intermediate.crt" -p ssl -s proxmox.home.arpa 2>&1 \
+      | grep -E 'Cert Verify Result|successful' || true
+  fi
   echo "    issuer check (expect the lab intermediate and verify ok):"
   run "$OPENSSL_BIN" s_client -connect 192.168.1.181:8006 -servername proxmox.home.arpa \
     -CAfile "$VENDORED_ROOT" </dev/null
