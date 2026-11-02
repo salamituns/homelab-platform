@@ -148,10 +148,13 @@ Each step is separately reversible.
    from the cluster.
 2. **Done 2026-10-31:** OpenBao on `sectools`. Ansible role, dry run first. The owner initialised
    it and stored the shares.
-3. **Done 2026-11-01:** ESO on the cluster, then sync `belleshop-secrets` from OpenBao with the current
-   values. Nothing changed for the app at this point. In git: the Argo app with chart values, the TokenReview
-   binding (cluster-config), the sectools firewall and Caddy rules, and the setup script; the ServiceAccount,
-   `SecretStore` and `ExternalSecret` in `belleshop-deploy`.
+3. **Done 2026-11-01:** ESO on the cluster. What exists is the shadow Secret
+   `belleshop-secrets-eso`, synced from OpenBao, which no workload reads. Only the app's
+   database password moved: workloads still read the MySQL root password, user, database name
+   and `SECRET_KEY` from the hand-made `belleshop-secrets`. In git: the Argo app with chart
+   values, the TokenReview binding (cluster-config), the sectools firewall and Caddy rules,
+   the setup script; the ServiceAccount, `SecretStore` and `ExternalSecret` in
+   `belleshop-deploy`.
 4. **Done 2026-11-01:** dedicated MySQL account and the `.244` path. In git: the `mysql-bao` Service
    (sectools-only, no NodePort) and the ESO objects for the shadow Secret `belleshop-db-eso` in belleshop-deploy, and
    `scripts/openbao-setup-mysql-rotation.sh` here (account, connection, root rotation, policy path; the static role
@@ -162,7 +165,9 @@ Each step is separately reversible.
    NodePort until node ports were disabled). The owner ran both phases against the real store; `root'@'%'` was
    dropped (only `root@localhost` remains), and a manual rotation afterwards succeeded (MySQL
    `password_last_changed` moved, `bao-admin` unchanged).
-5. **Done by 2026-11-01:** the owner wrote the `get_db()` file read and the retry behaviour.
+5. **Done 2026-11-01:** BelleShop reads the password from the mounted file on each connection
+   (`get_db_password()`, BelleShop PRs #14 and #15); the env var was removed from the Rollout
+   afterwards (belleshop-deploy #19).
 6. **Done 2026-11-01:** the proof. Rotate in OpenBao and keep a traffic probe running: 457/457 DB-backed logins
    during rotation, 0 restarts, no git change. A manual rotation afterwards also succeeded, with the file in both
    backend pods matching the Secret by hash and 10/10 DB-backed login probes.
@@ -202,7 +207,8 @@ Each step is separately reversible.
    get secrets in `dev`, create pods, patch deployments, list secrets in `kube-system`,
    delete pods in `kube-system`: no; `get pods -n dev` returned 5 pods), then removed only this
    cluster's admin entries from `~/.kube/config` and deleted `~/.kube/config-homelab`; the
-   `.bak` copies were deleted after a day of limited-cert work, and the admin path over SSH
+   `.bak` copies are kept for a day of limited-cert work and then deleted, and they still hold
+   the admin key until then; the admin path over SSH
    (`/etc/kubernetes/admin.conf` on the control-plane node) was confirmed working.
 
 ## References

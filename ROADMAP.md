@@ -73,7 +73,8 @@ See [postmortem](docs/postmortems/2026-10-25-gitea-rce-cve-2026-60004.md).
 
 ## Week 5: Secrets + identity
 - [x] OpenBao on `sectools` ([ADR 0014](docs/adr/0014-secrets-and-identity.md)); External Secrets Operator (done 2026-11-01)
-- [x] Move BelleShop MySQL creds out of manifests (done 2026-11-01; `MYSQL_PASSWORD` removed from the hand-made Secret 2026-11-01/02)
+- [x] Move BelleShop MySQL creds out of manifests (the application database password moved, done 2026-11-01;
+      the remaining keys are carried over below)
 - [x] k8s RBAC: per-namespace dev roles, no cluster-admin kubeconfigs on laptops (done 2026-11-02)
 - [x] etcd encryption at rest (done 2026-11-01/02: 34 Secrets rewritten, 34/34 read back encrypted, plaintext count 0 after defrag)
 - **Proof:** rotate the DB password in Vault and the app picks it up with no git change —
@@ -81,8 +82,14 @@ See [postmortem](docs/postmortems/2026-10-25-gitea-rce-cve-2026-60004.md).
 
 Carried over (kept at the level described in [ADR 0014](docs/adr/0014-secrets-and-identity.md) and its runbooks):
 - [ ] Alert notifications: Alertmanager routes to null, nothing is delivered yet
-- [ ] MySQL datadir recreation does not recreate the rotation accounts
+- [ ] The hand-made `belleshop-secrets` still holds the MySQL root password, user, database name and `SECRET_KEY`;
+      only the application database password moved (the shadow `belleshop-secrets-eso` is read by no workload)
 - [ ] The unread dead value in `secret/belleshop/app` and the shadow `belleshop-secrets-eso`
+- [ ] Old PBS backups keep plaintext Secrets until retention expires (about three months), and values that do not
+      rotate stay valid in them
+- [ ] The Mac `.bak` kubeconfig copies are deleted after a day of limited-cert work (they still hold the admin key
+      until then)
+- [ ] MySQL datadir recreation does not recreate the rotation accounts
 - [ ] etcd restore is not drilled yet
 - [ ] NetworkPolicy and NodePorts (Week 6)
 - [ ] Confirm Jenkins holds no copied `admin.conf`

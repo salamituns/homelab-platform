@@ -144,9 +144,11 @@ automatically every 5 minutes by default; our manifest does not override
 `--etcd-compaction-interval`). Compaction stops the old revisions being reachable, but the disk
 space is only reclaimed by a defragmentation.
 
-Wait at least one compaction interval, then **check the plaintext count**: the count is the
-proof, not a timer. Count by searching the raw db file for the fixed Secret protobuf prefix
-`k8s\x00\n\x0c\n\x02v1\x12\x06Secret` — matches are counted, nothing is decoded or printed:
+Wait at least one compaction interval, **defrag**, then run the count: it must read 0. If it
+does not, wait another compaction interval and defrag again. The count is the proof, not a
+timer. For a baseline before the defrag, count by searching the raw db file for the fixed
+Secret protobuf prefix `k8s\x00\n\x0c\n\x02v1\x12\x06Secret` — matches are counted, nothing is
+decoded or printed:
 
 ```sh
 ssh tunsadmin@192.168.1.90
@@ -154,7 +156,7 @@ sudo -i
 python3 -c 'd=open("/var/lib/etcd/member/snap/db","rb").read(); print(d.count(b"k8s\x00\n\x0c\n\x02v1\x12\x06Secret"))'
 ```
 
-Defrag once that prints 0:
+Then:
 
 ```sh
 kubectl exec -n kube-system etcd-master -- etcdctl \
@@ -169,7 +171,8 @@ kubectl exec -n kube-system etcd-master -- etcdctl \
   --cert=/etc/kubernetes/pki/etcd/server.crt \
   --key=/etc/kubernetes/pki/etcd/server.key \
   defrag
-# endpoint status and the count again: DB SIZE drops, the count stays 0
+# endpoint status and the count again: DB SIZE drops; the count must read 0, or repeat
+# interval + defrag
 ```
 
 On this single-member cluster `defrag` touches only the one member and takes seconds at this

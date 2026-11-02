@@ -101,8 +101,9 @@ into `~/.kube/config`.
 
 **Cutover done 2026-11-02.** The limited certificate carries the daily path, only this
 cluster's admin entries were removed from `~/.kube/config`, `~/.kube/config-homelab` is
-deleted, and the `.bak` copies were deleted after a day of work with the limited
-certificate. Admin is the SSH path above (`ssh Master`, `/etc/kubernetes/admin.conf`).
+deleted, and the `.bak` copies are kept for a day of work with the limited certificate and
+then deleted; they still hold the admin key until then. Admin is the SSH path above
+(`ssh Master`, `/etc/kubernetes/admin.conf`).
 
 Observed with the real limited certificate (issued 2026-11-01/02, 8h lifetime, groups
 `belleshop-operators` + `platform-viewers`). Note `kubectl auth can-i` needs
