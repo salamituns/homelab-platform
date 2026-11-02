@@ -1,0 +1,15 @@
+# cert-manager chart v1.21.3 values (ADR 0015 section B). The lab CA is two-tier: the offline
+# root stays with the owner (scripts/ca-create-root.sh), cert-manager holds only the
+# intermediate as the Secret lab-ca-intermediate (owner-loaded, docs/runbooks/internal-ca.md)
+# and issues 90-day leafs through the lab-ca ClusterIssuer in manifests/. One controller
+# replica and modest requests: the 4 GB workers already run Argo CD, Kyverno, monitoring and
+# the gateway data plane (same sizing reasoning as external-secrets).
+crds:
+  enabled: true   # CRDs come with the chart; Argo upgrades them on every app sync
+replicaCount: 1
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    memory: 256Mi

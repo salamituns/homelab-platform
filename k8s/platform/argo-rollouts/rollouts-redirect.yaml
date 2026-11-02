@@ -1,0 +1,20 @@
+# The http->https redirect for rollouts.apps.home.arpa (ADR 0015 B). Separate route, per-host
+# and reversible on its own (see argocd-redirect.yaml for the NGF filter notes).
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: argo-rollouts-redirect
+  namespace: argo-rollouts
+spec:
+  parentRefs:
+    - name: homelab-gateway
+      namespace: nginx-gateway
+      sectionName: http
+  hostnames:
+    - rollouts.apps.home.arpa
+  rules:
+    - filters:
+        - type: RequestRedirect
+          requestRedirect:
+            scheme: https
+            port: 443

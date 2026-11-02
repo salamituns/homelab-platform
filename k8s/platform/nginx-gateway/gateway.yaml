@@ -24,3 +24,22 @@ spec:
           selector:
             matchLabels:
               homelab.arpa/gateway-routes: "true"
+    # TLS termination for every *.apps.home.arpa host (ADR 0015 B). The Secret is issued by the
+    # wildcard Certificate (cert-manager app) in THIS namespace, so no ReferenceGrant is needed
+    # and no cross-namespace grant is opened. group/kind are spelled out because the API
+    # defaults a bare reference to a Service (ADR 0013 spell-out lesson).
+    - name: https
+      protocol: HTTPS
+      port: 443
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - group: ""
+            kind: Secret
+            name: apps-home-arpa-tls
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              homelab.arpa/gateway-routes: "true"   # same opt-in as http: one label admits a namespace to both

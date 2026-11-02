@@ -1,0 +1,18 @@
+# The wildcard leaf for every Gateway host (ADR 0015 B). It lives in nginx-gateway, the same
+# namespace as the Gateway, so the Gateway's certificateRefs needs no ReferenceGrant. The
+# wildcard matches exactly one label, which is why every new host is single-label
+# (api-belleshop.apps.home.arpa, not api.belleshop.apps.home.arpa).
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: apps-home-arpa
+  namespace: nginx-gateway
+spec:
+  secretName: apps-home-arpa-tls   # what the Gateway https listener references
+  dnsNames:
+    - '*.apps.home.arpa'
+  duration: 2160h      # 90 days; renewed automatically at 30 days left
+  renewalBefore: 720h
+  issuerRef:
+    name: lab-ca
+    kind: ClusterIssuer

@@ -1,0 +1,47 @@
+# cert-manager issues the lab's TLS certificates from the lab-ca ClusterIssuer (ADR 0015 B).
+# The chart is pinned; the CRDs ship with the chart (crds.enabled in values). The ClusterIssuer
+# and the wildcard Certificate live in manifests/ next to this app. The intermediate Secret is
+# NOT in git: the owner loads it over the admin SSH path (scripts/ca-load-intermediate.sh,
+# docs/runbooks/internal-ca.md), so until that step the issuer is NotReady by design.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cert-manager
+  namespace: argocd
+  annotations:
+    # The cert-manager controller patches caBundle into its webhook at runtime; the chart
+    # renders none, so the legacy diff would be permanently OutOfSync (same lesson as ESO,
+    # ADR 0014 step 3).
+    argocd.argoproj.io/compare-options: ServerSideDiff=true
+spec:
+  project: platform
+  sources:
+    - repoURL: https://charts.jetstack.io
+      chart: cert-manager
+      targetRevision: v1.21.3
+      helm:
+        releaseName: cert-manager
+        valueFiles:
+          - $values/k8s/platform/cert-manager/values.yaml
+    - repoURL: https://gitea.home.arpa/tunsgit/homelab-platform.git
+      targetRevision: main
+      ref: values
+    - repoURL: https://gitea.home.arpa/tunsgit/homelab-platform.git
+      targetRevision: main
+      path: k8s/platform/cert-manager/manifests   # ClusterIssuer + wildcard Certificate
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cert-manager
+  ignoreDifferences:
+    - group: admissionregistration.k8s.io
+      kind: ValidatingWebhookConfiguration
+      jqPathExpressions:
+        - .webhooks[]?.clientConfig.caBundle
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
+      - CreateNamespace=true
+      - RespectIgnoreDifferences=true

@@ -1,5 +1,7 @@
-# http://argocd.local through the shared Gateway (ADR 0013). Replaced argocd-ingress.yaml at the cutover; that
-# Ingress's backend-protocol: "HTTP" is simply the default on the http listener.
+# https://argocd.apps.home.arpa through the shared Gateway (ADR 0013; renamed and moved to the
+# https listener by ADR 0015 B). Replaced argocd-ingress.yaml at the cutover; that Ingress's
+# backend-protocol: "HTTP" is simply the default on the https listener too (TLS ends at the Gateway).
+# http:// on the old and new name now gets the argocd-redirect answer (302 to https), not this route.
 # Managed by Argo CD (app cluster-config, k8s/platform/apps/cluster-config.yaml): change it in git.
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -10,9 +12,9 @@ spec:
   parentRefs:
     - name: homelab-gateway   # accepts routes only from labelled namespaces (gateway.yaml)
       namespace: nginx-gateway
-      sectionName: http
+      sectionName: https
   hostnames:
-    - argocd.local
+    - argocd.apps.home.arpa
   rules:
     - matches:
         - path:
