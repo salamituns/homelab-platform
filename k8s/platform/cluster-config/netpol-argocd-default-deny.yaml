@@ -1,0 +1,22 @@
+# The argocd default-deny (ADR 0015 section A, round 2; LAST of the four, the risky one).
+# Same PR as netpol-argocd-allow.yaml, merged last and applied while watching a sync.
+# Ingress keeps working through the UNION with the seven upstream policies (see the allow
+# file header); this deny adds the egress backstop the upstream set does not have.
+#
+# ROLLBACK IS NOT JUST REVERT: the cluster-config app syncs with prune DISABLED (CoreDNS
+# config and the Argo CD CA must never vanish with a file), so reverting this PR removes
+# the files from git but Argo CD will NOT delete the live policies. Rollback = revert the
+# PR and delete the live objects by hand:
+#   kubectl -n argocd delete networkpolicy argocd-dns-egress argocd-api-egress \
+#     argocd-redis-egress argocd-repo-server-egress argocd-server-egress \
+#     argocd-repo-server-external-egress argocd-server-gateway-ingress \
+#     argocd-applicationset-webhook-ingress argocd-default-deny
+# (the admin path if the limited cert cannot; see docs/runbooks/network-policy.md)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: argocd-default-deny
+  namespace: argocd
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]

@@ -155,3 +155,32 @@ wget present in the frontend image; the limited kubeconfig can exec in dev and r
 logs. Not verifiable with the limited cert and left to the owner at apply time: the
 server-side dry-run of NetworkPolicies (the Role is read-only for them) and the actual
 post-sync behavior, which the proof script covers.
+
+## Round 2: argocd (LAST of the four; the risky one - apply while watching a sync)
+
+Allow set + default-deny in one PR, in `k8s/platform/cluster-config/` (the cluster-config
+app's plain-manifest path; no kustomization to register). Designed ADDITIVE with the seven
+NetworkPolicies Argo CD's install already ships in the namespace (listed from live in the
+allow file header): those restrict ingress only, this PR adds the egress sides of the same
+pairs (redis/repo-server clients, dex, gitea, the public Helm repos) plus the deny
+backstop, and belt-and-braces ingress for the UI and the ApplicationSet webhook.
+
+The one trap the live read found: upstream's applicationset webhook rule uses a
+namespaceSelector, which matches pods, not the apiserver's cross-node masquerade address -
+the ipBlock 10.244.0.0/24 rule in the allow file is the reliable form for node traffic
+(the same appendix pattern as the gateway webhook).
+
+Watch after sync (while it happens):
+
+```sh
+scripts/netpol-proof.sh argocd   # UI route, every app Synced/Healthy, two denied checks, verdicts
+```
+
+Then force a REAL sync cycle: refresh + sync any app (the repo-server gitea fetch, redis
+and the webhook path all prove themselves only under a sync), and read the DENY verdicts
+for an hour. If apps go Unknown/OutOfSync, the fetch path is broken: read the verdicts,
+fix the flow, resync.
+
+Rollback: NOT just revert - cluster-config syncs with prune disabled, so deleting the
+files does not delete the live policies. Revert the PR, then delete the nine policies by
+hand (the exact kubectl command is in netpol-argocd-default-deny.yaml).

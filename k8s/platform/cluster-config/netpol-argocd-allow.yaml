@@ -1,0 +1,204 @@
+# The argocd allow set (ADR 0015 section A, appendix row "argocd"), DESIGNED TO WORK WITH
+# the seven NetworkPolicies Argo CD's own install already ships in this namespace - they
+# have been enforced since the agent went live (2026-11-02) and are additive with these:
+# multiple policies selecting a pod UNION their allowed flows. Upstream restricts INGRESS
+# only (redis 6379 from server/repo-server/controller; repo-server 8081 from the four
+# controllers and 8084 from anywhere; dex 5556/5557 from server, 5558 from anywhere;
+# applicationset 7000/8080, controller 8082 and notifications 9001 from any namespace;
+# argocd-server: ALL ingress) and says nothing about EGRESS. This file adds exactly the
+# egress sides of those pairs plus the external fetches, and belt-and-braces ingress rules
+# so the namespace keeps working if an upstream policy is ever removed.
+#
+# Live evidence, 2026-11-02: seven pods with app.kubernetes.io/name=argocd-{server,redis,
+# repo-server,application-controller,notifications-controller,applicationset-controller,
+# dex-server}; Service ports server 80/443 -> 8080, redis 6379, repo-server 8081/8084,
+# dex 5556/5557/5558, applicationset 7000/8080; the upstream policies listed above read
+# live via the admin path (the limited cert cannot list them).
+#
+# Egress matrix (every pod gets DNS and the API; the rest is per component):
+#   server               -> redis 6379, repo-server 8081, dex 5556/5557, gitea .83:443
+#   repo-server          -> redis 6379, gitea .83:443, the public Helm repos (443, minus private)
+#   application-controller -> redis 6379, repo-server 8081
+#   notifications-controller -> repo-server 8081
+#   applicationset-controller -> repo-server 8081
+#   dex-server           -> nothing beyond DNS/API (no connectors configured; local SSO only)
+---
+# DNS for every pod: components resolve kubernetes.default and gitea.home.arpa.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: argocd-dns-egress
+  namespace: argocd
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+---
+# API server egress: every controller watches objects. Post-DNAT destination = the
+# control-plane node (endpoints "kubernetes" = 192.168.1.90:6443, verified 2026-11-02).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: argocd-api-egress
+  namespace: argocd
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 192.168.1.90/32
+      ports:
+        - { protocol: TCP, port: 6443 }
+---
+# Egress side of upstream's redis ingress rule: exactly the three clients it names.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: argocd-redis-egress
+  namespace: argocd
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values: [argocd-server, argocd-repo-server, argocd-application-controller]
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: argocd-redis
+      ports:
+        - { protocol: TCP, port: 6379 }
+---
+# Egress side of upstream's repo-server ingress rule: exactly the four clients it names.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: argocd-repo-server-egress
+  namespace: argocd
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values: [argocd-server, argocd-application-controller, argocd-notifications-controller, argocd-applicationset-controller]
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: argocd-repo-server
+      ports:
+        - { protocol: TCP, port: 8081 }
+---
+# The server reaches dex for the SSO handshake and gitea for repo connection tests
+# (gitea.home.arpa = 192.168.1.83, the appendix number).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: argocd-server-egress
+  namespace: argocd
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: argocd-server
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: argocd-dex-server
+      ports:
+        - { protocol: TCP, port: 5556 }
+        - { protocol: TCP, port: 5557 }
+    - to:
+        - ipBlock:
+            cidr: 192.168.1.83/32   # gitea.home.arpa
+      ports:
+        - { protocol: TCP, port: 443 }
+---
+# The repo-server fetches git from gitea and charts from the public Helm repos the apps
+# reference (charts.external-secrets.io, kyverno.github.io, prometheus-community.github.io,
+# charts.jetstack.io). A policy cannot name hosts, so the public internet minus the
+# private ranges - NOT 0.0.0.0/0 bare, which would let the repo-server reach the whole LAN.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: argocd-repo-server-external-egress
+  namespace: argocd
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: argocd-repo-server
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 192.168.1.83/32   # gitea.home.arpa (git fetches)
+      ports:
+        - { protocol: TCP, port: 443 }
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - { protocol: TCP, port: 443 }
+---
+# UI ingress: the Gateway data plane only (argocd.apps.home.arpa). Upstream's
+# argocd-server policy already allows ALL ingress, so this is belt-and-braces that keeps
+# the UI working if that upstream policy is ever removed; it pairs with the nginx-gateway
+# PR's data-plane egress to argocd:8080.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: argocd-server-gateway-ingress
+  namespace: argocd
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: argocd-server
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: nginx-gateway
+      ports:
+        - { protocol: TCP, port: 8080 }
+---
+# ApplicationSet webhook ingress from the apiserver. Upstream allows this with a
+# namespaceSelector, which matches pods, not nodes: the apiserver on the master reaches a
+# webhook on another node as its pod-CIDR masquerade address (the appendix pattern - a
+# node IP is NOT 192.168.1.90/32 here). The ipBlock rule is the reliable form; it is
+# additive with upstream's. Git-generator ApplicationSets break silently without it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: argocd-applicationset-webhook-ingress
+  namespace: argocd
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: argocd-applicationset-controller
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - ipBlock:
+            cidr: 10.244.0.0/24   # master podCIDR: the apiserver calling the webhook
+      ports:
+        - { protocol: TCP, port: 7000 }
