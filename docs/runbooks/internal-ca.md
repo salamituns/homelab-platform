@@ -30,8 +30,8 @@ pathlen:1) and intermediate (5 years, pathlen:0), refuses to overwrite anything,
 `private/ca/` is gitignored before writing a single byte, and prints only subject, notAfter and
 fingerprint. It also vendors the public root to `ansible/files/ca/lab-root.crt`.
 
-Record the dates now (renewal section below): root created `____________`, intermediate created
-`____________`.
+Record the dates now (renewal section below): root created `2026-11-02` (expires 2036-10-30), intermediate created
+`2026-11-02` (expires 2031-11-01; the cluster wildcard expires 2027-01-31 and auto-renews).
 
 Back up `private/ca/` the same place the OpenBao unseal shares are backed up, offline.
 
