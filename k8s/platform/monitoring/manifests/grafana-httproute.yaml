@@ -1,4 +1,6 @@
-# http://grafana.local through the shared Gateway (ADR 0013). Replaced grafana-ingress.yaml at the cutover.
+# https://grafana.apps.home.arpa through the shared Gateway (ADR 0013; renamed and moved to the
+# https listener by ADR 0015 B). http:// now gets the grafana-redirect answer (302 to https).
+# Replaced grafana-ingress.yaml at the cutover.
 # Managed by Argo CD (app monitoring, k8s/platform/apps/monitoring.yaml): change it in git.
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -9,9 +11,9 @@ spec:
   parentRefs:
     - name: homelab-gateway   # accepts routes only from labelled namespaces (gateway.yaml)
       namespace: nginx-gateway
-      sectionName: http
+      sectionName: https
   hostnames:
-    - grafana.local
+    - grafana.apps.home.arpa
   rules:
     - matches:
         - path:

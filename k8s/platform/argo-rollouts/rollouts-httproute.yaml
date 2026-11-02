@@ -1,4 +1,6 @@
-# http://rollouts.local through the shared Gateway (ADR 0013). Replaced rollouts-ingress.yaml at the cutover.
+# https://rollouts.apps.home.arpa through the shared Gateway (ADR 0013; renamed and moved to the
+# https listener by ADR 0015 B). http:// now gets the argo-rollouts-redirect answer (302 to https).
+# Replaced rollouts-ingress.yaml at the cutover.
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -8,9 +10,9 @@ spec:
   parentRefs:
     - name: homelab-gateway   # accepts routes only from labelled namespaces (gateway.yaml)
       namespace: nginx-gateway
-      sectionName: http
+      sectionName: https
   hostnames:
-    - rollouts.local
+    - rollouts.apps.home.arpa
   rules:
     - matches:
         - path:
