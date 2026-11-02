@@ -79,6 +79,9 @@ cp ~/.kube/config-homelab ~/.kube/config-homelab.bak-before-cutover
 # ~/.kube/config: drop only the homelab admin context/user/cluster.
 # Other contexts stay. The homelab cluster name in this file is `kubernetes`
 # and the user is `kubernetes-admin`.
+# First, unset the current context: the removed context was the current one, so after
+# removal a plain `kubectl` must select nothing rather than silently target a wrong cluster.
+kubectl config unset current-context --kubeconfig ~/.kube/config
 kubectl config unset contexts.homelab-cluster --kubeconfig ~/.kube/config
 kubectl config unset users.kubernetes-admin --kubeconfig ~/.kube/config
 kubectl config unset clusters.kubernetes --kubeconfig ~/.kube/config
@@ -96,18 +99,39 @@ into `~/.kube/config`.
 
 ### What still used the Mac admin kubeconfig
 
-Checked with `kubectl auth can-i` where that applies (see matrix in the PR/notes).
+**Cutover done 2026-11-02.** The limited certificate carries the daily path, only this
+cluster's admin entries were removed from `~/.kube/config`, `~/.kube/config-homelab` is
+deleted, and the `.bak` copies are kept for a day of work with the limited certificate and
+then deleted; they still hold the admin key until then. Admin is the SSH path above
+(`ssh Master`, `/etc/kubernetes/admin.conf`).
+
+Observed with the real limited certificate (issued 2026-11-01/02, 8h lifetime, groups
+`belleshop-operators` + `platform-viewers`). Note `kubectl auth can-i` needs
+`--subresource=exec` for the exec check, or it answers about pods generally:
+
+```sh
+export KUBECONFIG="$PWD/private/k8s-access/<username>.kubeconfig"
+kubectl auth can-i get pods -n dev                          # yes (real run: 5 pods)
+kubectl auth can-i create pods -n dev --subresource=exec    # yes
+kubectl auth can-i patch rollouts -n dev                    # yes
+kubectl auth can-i get nodes                                # yes
+kubectl auth can-i get secrets -n dev                       # no
+kubectl auth can-i create pods -n dev                       # no
+kubectl auth can-i patch deployments -n dev                 # no
+kubectl auth can-i list secrets -n kube-system              # no
+kubectl auth can-i delete pods -n kube-system               # no
+```
 
 | Consumer | After cutover |
 |---|---|
-| Daily `kubectl` in `dev` / `kubectl argo rollouts promote` | Limited kubeconfig (promote needs `patch` on `rollouts`/`rollouts/status`; intended, Role not synced yet) |
-| `scripts/openbao-setup-mysql-rotation.sh` (`pods/exec` on `mysql-0`; DB password from `private/belleshop-secrets.env`) | Limited kubeconfig after Role sync (`create` on `pods/exec` in `dev`; intended). Today, impersonating the groups: **no** |
+| Daily `kubectl` in `dev` / `kubectl argo rollouts promote` | Limited kubeconfig (verified with the real certificate: `patch` on `rollouts` is allowed) |
+| `scripts/openbao-setup-mysql-rotation.sh` (`pods/exec` on `mysql-0`; DB password from `private/belleshop-secrets.env`) | Limited kubeconfig (verified with the real certificate: `create pods/exec` in `dev` is allowed) |
 | `scripts/openbao-setup-belleshop.sh` (`kubectl -n kube-public get configmap kube-root-ca.crt`) | **Admin path.** `system:authenticated` cannot read that ConfigMap (observed `can-i`: no) |
-| `scripts/k8s-rewrite-secrets.sh` (etcd-encryption branch; get + replace every Secret) | **Admin path.** Must finish before this cutover |
+| `scripts/k8s-rewrite-secrets.sh` (get + replace every Secret) | **Admin path.** It finished before the cutover (2026-11-01/02); re-running it means the admin SSH path |
 | Ansible drain/upgrade | `kubectl` **on the nodes**, not the Mac file |
 | Terraform | Proxmox API only; no kubeconfig |
-| Argo CD repo credential / `grafana-admin` restore | **Admin path** (`ssh Master`). Impersonated groups: get secrets in `argocd`/`monitoring`: **no** |
-| CI (Jenkins) | Untested from here. Confirm it does not use a copied Mac `admin.conf` |
+| Argo CD repo credential / `grafana-admin` restore | **Admin path** (`ssh Master`) |
+| CI (Jenkins) | Unconfirmed whether it holds a copied `admin.conf`; carried over (ROADMAP, Week 5) |
 
 ## The existing admin certificate is not revoked by deleting the file
 

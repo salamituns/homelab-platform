@@ -95,14 +95,37 @@ snapshot brings its own encrypted master key, so the shares from any later init 
 
 Once the audit log is on, the ESO role and policies exist (ADR 0014 steps 3-4) and the proof has
 passed, the root token has no remaining job. Revoke it so it cannot leak out of your password
-manager:
+manager. **Revoked 2026-11-02**, just before the week-5 closeout was pushed.
 
 ```sh
-bao token revoke -self           # with the root token in BAO_TOKEN
+read -rs BAO_TOKEN; export BAO_TOKEN    # load the token; read the safety note below first
+bao token revoke -self
 ```
 
+**Loading a token safely.** Use `read -rs BAO_TOKEN; export BAO_TOKEN` as a line of its own: if
+it sits inside a multi-line pasted block, `read` consumes the next pasted line and the paste
+breaks apart. Root tokens start with `s.`; a 44-character base64 value is an unseal share or a
+key, not a token.
+
 If root access is needed later, `bao operator generate-root` mints a new root token using unseal
-shares, in your terminal, without a stored root token.
+shares, in your terminal, without a stored root token:
+
+```sh
+bao operator generate-root -init    # prints a Nonce and an OTP; keep both
+bao operator generate-root          # paste an unseal share; repeat until the threshold is met
+bao operator generate-root -decode='<Encoded Token>' -otp='<OTP>'   # prints the new root token
+```
+
+The `-decode` line carries the encoded token and the OTP in the shell history, so revoke the new
+root token again once whatever needed it is done.
+
+Read-only: list existing tokens by accessor, then look one up without ever printing a token
+value:
+
+```sh
+bao list auth/token/accessors
+bao token lookup -accessor <accessor>   # policies, display name, TTL; no token value
+```
 
 ## ESO on the cluster (ADR 0014 step 3)
 
@@ -184,6 +207,8 @@ created, no restart), and the app picks the new password up on its next connecti
 4. Before 24h pass, confirm the backend uses the file password (a probe plus `bao write -f
    database/rotate-role/belleshop` is the full step-6 proof). After that, `MYSQL_PASSWORD` in the hand-made
    `belleshop-secrets` is dead weight for the backend; the other keys stay as they are.
+   Done 2026-11-01/02: `MYSQL_PASSWORD` was removed from the hand-made `belleshop-secrets`; the
+   other keys stayed.
 
 Check afterwards (no values printed):
 
