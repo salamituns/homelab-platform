@@ -72,11 +72,20 @@ See [postmortem](docs/postmortems/2026-10-25-gitea-rce-cve-2026-60004.md).
 - **Proof:** `kubectl run` with an unsigned image is rejected ([evidence](docs/evidence/week-04-admission.txt))
 
 ## Week 5: Secrets + identity
-- [ ] OpenBao on `sectools` ([ADR 0014](docs/adr/0014-secrets-and-identity.md)); External Secrets Operator
-- [ ] Move BelleShop MySQL creds out of manifests
-- [ ] k8s RBAC: per-namespace dev roles, no cluster-admin kubeconfigs on laptops
-- [ ] etcd encryption at rest
-- **Proof:** rotate the DB password in Vault and the app picks it up with no git change
+- [x] OpenBao on `sectools` ([ADR 0014](docs/adr/0014-secrets-and-identity.md)); External Secrets Operator (done 2026-11-01)
+- [x] Move BelleShop MySQL creds out of manifests (done 2026-11-01; `MYSQL_PASSWORD` removed from the hand-made Secret 2026-11-01/02)
+- [x] k8s RBAC: per-namespace dev roles, no cluster-admin kubeconfigs on laptops (done 2026-11-02)
+- [x] etcd encryption at rest (done 2026-11-01/02: 34 Secrets rewritten, 34/34 read back encrypted, plaintext count 0 after defrag)
+- **Proof:** rotate the DB password in Vault and the app picks it up with no git change —
+  done 2026-11-01: 457/457 DB-backed logins during rotation, 0 restarts, no git change
+
+Carried over (kept at the level described in [ADR 0014](docs/adr/0014-secrets-and-identity.md) and its runbooks):
+- [ ] Alert notifications: Alertmanager routes to null, nothing is delivered yet
+- [ ] MySQL datadir recreation does not recreate the rotation accounts
+- [ ] The unread dead value in `secret/belleshop/app` and the shadow `belleshop-secrets-eso`
+- [ ] etcd restore is not drilled yet
+- [ ] NetworkPolicy and NodePorts (Week 6)
+- [ ] Confirm Jenkins holds no copied `admin.conf`
 
 ## Week 6: TLS, network and runtime security
 - [ ] cert-manager with an internal CA, TLS on every `HTTPRoute` (and on the Proxmox UI); move `*.local` hosts to `*.apps.home.arpa`

@@ -139,17 +139,24 @@ Encrypting new writes does not erase old copies. Three places keep plaintext aft
 finishes:
 
 **Old etcd revisions.** The rewrite writes a new revision of every Secret; the plaintext
-revisions stay readable on disk until etcd compaction removes them (the API server compacts
+revisions stay on disk until etcd compaction removes them (the API server compacts
 automatically every 5 minutes by default; our manifest does not override
 `--etcd-compaction-interval`). Compaction stops the old revisions being reachable, but the disk
-space is only reclaimed by a defragmentation. On this single-member cluster `defrag` touches
-only member and takes seconds at this data size; etcd briefly blocks writes during it, the API
-server pauses with it, and running workloads are unaffected.
+space is only reclaimed by a defragmentation.
+
+Wait at least one compaction interval, then **check the plaintext count**: the count is the
+proof, not a timer. Count by searching the raw db file for the fixed Secret protobuf prefix
+`k8s\x00\n\x0c\n\x02v1\x12\x06Secret` — matches are counted, nothing is decoded or printed:
 
 ```sh
 ssh tunsadmin@192.168.1.90
 sudo -i
-# wait at least one compaction interval after the rewrite (5 min), then:
+python3 -c 'd=open("/var/lib/etcd/member/snap/db","rb").read(); print(d.count(b"k8s\x00\n\x0c\n\x02v1\x12\x06Secret"))'
+```
+
+Defrag once that prints 0:
+
+```sh
 kubectl exec -n kube-system etcd-master -- etcdctl \
   --endpoints=https://127.0.0.1:2379 \
   --cacert=/etc/kubernetes/pki/etcd/ca.crt \
@@ -162,19 +169,30 @@ kubectl exec -n kube-system etcd-master -- etcdctl \
   --cert=/etc/kubernetes/pki/etcd/server.crt \
   --key=/etc/kubernetes/pki/etcd/server.key \
   defrag
-# endpoint status -w table again: DB SIZE drops once compaction has removed the old revisions
+# endpoint status and the count again: DB SIZE drops, the count stays 0
 ```
 
+On this single-member cluster `defrag` touches only the one member and takes seconds at this
+data size; etcd briefly blocks writes during it, the API server pauses with it, and running
+workloads are unaffected.
+
+Observed on this cluster 2026-11-01/02: the rewrite rewrote 34 Secrets, 0 failed, and every
+stored Secret read back with the prefix `k8s:enc:secretbox:v1:key1:` (34/34). A Secret created
+after the change was also stored encrypted and still served by the API. The plaintext count was
+35 shortly after the rewrite, 7 before the defrag, and 0 after it; the defrag shrank the DB
+from 35.6 MB to 14.1 MB.
+
 **The pre-enable snapshot.** It contains every Secret in plaintext (it was taken before
-encryption). Keep it `root:0600` while the change is being applied, and delete it once
-verification passes:
+encryption). Keep it `root:0600` while the change is being applied, and delete it once the
+count above reads 0:
 
 ```sh
 ssh tunsadmin@192.168.1.90 'sudo rm -rf /root/etcd-encryption-backups/<timestamp>-pre-enable'
 ```
 
-If it is still on the master when today's `daily-all` PBS run happens, PBS captures it and keeps
-the plaintext for as long as its retention keeps that backup (see next point).
+Deleted on this cluster 2026-11-01/02, after the defrag. If it is still on the master when
+today's `daily-all` PBS run happens, PBS captures it and keeps the plaintext for as long as its
+retention keeps that backup (see next point).
 
 **Existing PBS backups of the master.** Every backup taken before this change stores the Secrets
 in plaintext, and PBS retention is 7 daily / 4 weekly / 3 monthly copies
@@ -275,8 +293,12 @@ Order matters; each step is safe only after the previous one.
 2. `scripts/k8s-rewrite-secrets.sh` rewrites everything, decrypting it.
 3. Remove the flags from BOTH places, or the next upgrade re-adds them from the ConfigMap:
    ```sh
-   # on the master: restore the pre-encryption manifest (one atomic write, same as applying it),
-   # or delete the two --encryption-provider-config* lines, the enc volumeMount and the enc volume
+   # on the master, two options:
+   # a) restore the pre-encryption manifest copy (one atomic write, same as applying it) — but
+   #    kube-apiserver.yaml.pre-enc lives beside the snapshot and is deleted once §4 is complete
+   #    (it was, on 2026-11-01/02), so from then on option (b) is the path;
+   # b) delete by hand: the two --encryption-provider-config* lines, the enc volumeMount and the
+   #    enc volume entry, in one edit.
    cp /root/etcd-encryption-backups/<timestamp>-pre-enable/kube-apiserver.yaml.pre-enc \
       /etc/kubernetes/manifests/kube-apiserver.yaml
    kubectl -n kube-system edit cm kubeadm-config   # restore apiServer: {} (remove extraArgs/extraVolumes)

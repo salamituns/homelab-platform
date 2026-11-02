@@ -1,6 +1,6 @@
 # ADR 0014: Secrets and identity with OpenBao, External Secrets Operator and scoped cluster access
 
-- Status: Accepted (owner, 2026-10-31); in progress.
+- Status: Accepted (owner, 2026-10-31); rollout complete 2026-11-02.
 - Date: 2026-10-31
 
 ## Context
@@ -146,23 +146,27 @@ Each step is separately reversible.
    dual-password window is one rotation, and no app fallback is needed. The least privilege the rotation needs is global
    `CREATE USER` (decision 5). ESO's Vault provider is checked in step 3 instead: a local dev server is not reachable
    from the cluster.
-2. **OpenBao on `sectools`:** Ansible role, dry run first. The owner initialises it and stores the shares.
-3. **In progress 2026-10-31:** ESO on the cluster, then sync `belleshop-secrets` from OpenBao with the current values.
-   Nothing should change for the app at this point. In git so far: the Argo app with chart values, the TokenReview
+2. **Done 2026-10-31:** OpenBao on `sectools`. Ansible role, dry run first. The owner initialised
+   it and stored the shares.
+3. **Done 2026-11-01:** ESO on the cluster, then sync `belleshop-secrets` from OpenBao with the current
+   values. Nothing changed for the app at this point. In git: the Argo app with chart values, the TokenReview
    binding (cluster-config), the sectools firewall and Caddy rules, and the setup script; the ServiceAccount,
-   `SecretStore` and `ExternalSecret` follow in `belleshop-deploy`.
-4. **In progress 2026-10-31:** dedicated MySQL account and the `.244` path. In git: the `mysql-bao` Service
+   `SecretStore` and `ExternalSecret` in `belleshop-deploy`.
+4. **Done 2026-11-01:** dedicated MySQL account and the `.244` path. In git: the `mysql-bao` Service
    (sectools-only, no NodePort) and the ESO objects for the shadow Secret `belleshop-db-eso` in belleshop-deploy, and
    `scripts/openbao-setup-mysql-rotation.sh` here (account, connection, root rotation, policy path; the static role
    only behind `--create-static-role`, so the 24h clock starts only once the app reads the optional file mount).
    Tested end to end on a dev OpenBao 2.7.2 against a throwaway MySQL behind a `.245` LoadBalancer: creation,
    takeover, idempotent re-run, immediate rotation on static-role creation, the one-rotation dual-password window,
    reads not rotating, and the negative test (a non-allowed host refused at the LB address but connected through the
-   NodePort until node ports were disabled). The owner still runs the script against the real store.
-5. **App change:** the owner writes the `get_db()` file read and the retry behaviour.
-6. **The proof:** rotate in OpenBao and keep a traffic probe running. Show the new password in use, no git change, and no
-   failed requests.
-7. **In progress 2026-11-01:** etcd encryption at rest, following a backup of etcd. In git: the
+   NodePort until node ports were disabled). The owner ran both phases against the real store; `root'@'%'` was
+   dropped (only `root@localhost` remains), and a manual rotation afterwards succeeded (MySQL
+   `password_last_changed` moved, `bao-admin` unchanged).
+5. **Done by 2026-11-01:** the owner wrote the `get_db()` file read and the retry behaviour.
+6. **Done 2026-11-01:** the proof. Rotate in OpenBao and keep a traffic probe running: 457/457 DB-backed logins
+   during rotation, 0 restarts, no git change. A manual rotation afterwards also succeeded, with the file in both
+   backend pods matching the Secret by hash and 10/10 DB-backed login probes.
+7. **Done 2026-11-01/02:** etcd encryption at rest, following a backup of etcd. In git: the
    playbook (etcd snapshot first, verified; secretbox key generated on the master only, `no_log`,
    never overwritten; flags in both the kube-apiserver manifest and the kubeadm
    ClusterConfiguration so `k8s-upgrade.yml` regenerates them), the Secrets rewrite script, and
@@ -181,16 +185,25 @@ Each step is separately reversible.
    (check mode writes nothing, apply once, idempotent re-run, simulated kubeadm regeneration),
    the ConfigMap transform passed
    `kubeadm config validate` on the master and a server dry run of the patch, and the rewrite
-   script refuses to run while the live API server does not carry the flag; the owner still
-   applies the playbook and the rewrite.
-8. **In progress 2026-11-01:** cluster access. In git: Role `belleshop-operator` in `dev` (no Secret
+   script refuses to run while the live API server does not carry the flag. Applied on the
+   cluster 2026-11-01/02: 34 Secrets rewritten (0 failed), 34/34 read back from etcd with the
+   `k8s:enc:secretbox:v1:key1:` prefix, a newly created Secret stored encrypted and still
+   served, the plaintext Secret count in the raw db file 35 shortly after the rewrite, 7 before
+   the defrag and 0 after it (DB 35.6 MB -> 14.1 MB), and the pre-enable snapshot deleted after
+   that.
+8. **Done 2026-11-02:** cluster access. In git: Role `belleshop-operator` in `dev` (no Secret
    get/list/watch; no patch on Deployments/StatefulSets; `pods/exec` and Rollout `patch` mean this is
    **not** a Secret boundary inside `dev`, only outside it), ClusterRole `platform-viewer` for
    cluster-wide status, bindings to groups `belleshop-operators` / `platform-viewers`, and
    `scripts/k8s-issue-access-cert.sh` (allowlist of those two groups only). The Mac admin client
-   certificate `notAfter` is 2027-08-17; removing files does not revoke it. Cutover is after the
-   etcd-encryption Secret rewrite. Owner issues a limited cert, then removes only this cluster's
-   admin user from the Mac kubeconfig files; admin.conf stays on the control-plane node.
+   certificate `notAfter` is 2027-08-17; removing files does not revoke it. The cutover ran after the
+   etcd-encryption Secret rewrite: the owner issued a real limited certificate (8h, both groups),
+   the allow/deny matrix held (get pods, pods/exec and patch rollouts in `dev`, get nodes: yes;
+   get secrets in `dev`, create pods, patch deployments, list secrets in `kube-system`,
+   delete pods in `kube-system`: no; `get pods -n dev` returned 5 pods), then removed only this
+   cluster's admin entries from `~/.kube/config` and deleted `~/.kube/config-homelab`; the
+   `.bak` copies were deleted after a day of limited-cert work, and the admin path over SSH
+   (`/etc/kubernetes/admin.conf` on the control-plane node) was confirmed working.
 
 ## References
 
