@@ -236,7 +236,8 @@ cmd_install() {
   echo "2/4 pre-stage the key at the pveproxy path so pvenode needs no key argument"
   echo "    (PVE: cert set accepts certificates alone when the key file exists):"
   host_exec "test -f '$HDIR/pveproxy-ssl.key' || { echo 'error: $HDIR/pveproxy-ssl.key missing (csr step first)' >&2; exit 1; }
-    install -m 0640 -o root -g www-data '$HDIR/pveproxy-ssl.key' /etc/pve/local/pveproxy-ssl.key"
+    cat '$HDIR/pveproxy-ssl.key' > /etc/pve/local/pveproxy-ssl.key"
+  # pmxcfs (/etc/pve) sets 0640 root:www-data itself and may refuse chmod/chown, so no install -m/-o/-g.
 
   echo "3/4 pvenode cert set with the public chain only (--force overwrites the default,"
   echo "    --restart 1 reloads pveproxy; verified PVE 9.1.2 syntax, positional chain):"

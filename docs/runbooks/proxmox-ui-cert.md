@@ -64,8 +64,8 @@ The steps it performs (PVE 9.1.2 syntax, verified against `pvenode(1)` and the P
 `tuns`):
 
 1. copy `private/pve-ui/tuns-chain.pem` to `tuns:/root/pve-ui-cert/pveproxy-ssl-chain.pem`;
-2. pre-stage the key: `install -m 0640 -o root -g www-data /root/pve-ui-cert/pveproxy-ssl.key
-   /etc/pve/local/pveproxy-ssl.key`, so `pvenode` never receives the key as an argument (PVE
+2. pre-stage the key: `cat /root/pve-ui-cert/pveproxy-ssl.key > /etc/pve/local/pveproxy-ssl.key`
+   (pmxcfs gives it 0640 root:www-data itself and may refuse chmod/chown), so `pvenode` never receives the key as an argument (PVE
    accepts `cert set` without the key argument when the key file already exists);
 3. `pvenode cert set "$(cat /root/pve-ui-cert/pveproxy-ssl-chain.pem)" --force --restart 1`
    (the chain, not the key, is the argument; `pvenode cert delete` takes restart as a
