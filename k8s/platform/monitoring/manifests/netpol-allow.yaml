@@ -1,0 +1,203 @@
+# The monitoring allow set (ADR 0015 section A, appendix row "monitoring"). Ships WITH
+# netpol-default-deny.yaml in the same PR: the agent is live, so selecting pods for a
+# direction already isolates that direction - allows are never inert.
+#
+# Live evidence, 2026-11-02 (pods, Services, ServiceMonitors, Endpoints via the limited
+# cert and the read-only admin path): prometheus pod (workernode2, label
+# app.kubernetes.io/name=prometheus); grafana Service port 80 -> pod 3000; operator Service
+# 443 -> pod 10250; kube-state-metrics 8080 (+8081 self); alertmanager 9093 (+8080
+# reloader; 9094 mesh unused, single replica); prometheus 9090 (+8080 reloader).
+# Scrapes (17 ServiceMonitors, all listed live): apiserver endpoints 192.168.1.90:6443;
+# kube-controller-manager 192.168.1.90:10257; kube-scheduler 192.168.1.90:10259; etcd
+# 192.168.1.90:2381 (2381, not the usual 2379 - read from the live Endpoints);
+# kube-proxy 192.168.1.{90,89,84}:10249; kubelet 10250 plus 4194/10255 on all three node
+# IPs; node-exporter hostNetwork :9100 on all three node IPs (hostNetwork pods are outside
+# policy scope themselves, but prometheus reaches them AT the node IP, which IS in scope);
+# coredns pods 10.244.x:9153; external-secrets and belleshop-backend pod targets; the
+# intra-namespace monitors (grafana, alertmanager, prometheus self, operator, ksm).
+#
+# No blanket intra-namespace allow (round 1 lesson): the intra rule below is port-limited
+# to the metric ports the monitors actually use. falcosidekick (alertmanager 9093 in the
+# appendix) is not deployed - deliberately not allowed yet.
+---
+# DNS for every pod: prometheus resolves every target name, grafana its datasources,
+# reloader sidecars and the operator the objects they watch.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: monitoring-dns-egress
+  namespace: monitoring
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+---
+# API server egress: prometheus (service discovery), the operator, kube-state-metrics and
+# the reloader sidecars all watch objects. Post-DNAT destination = the control-plane node
+# (endpoints "kubernetes" = 192.168.1.90:6443, verified 2026-11-02).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: monitoring-api-egress
+  namespace: monitoring
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 192.168.1.90/32
+      ports:
+        - { protocol: TCP, port: 6443 }
+---
+# Prometheus scrapes, from the prometheus pods only (nothing else in monitoring dials
+# out). Two rule groups:
+#  - pod targets by CIDR without ports (coredns 9153, external-secrets, belleshop backend
+#    8000 - and whatever pod target a future ServiceMonitor adds): 10.244.0.0/16.
+#  - node targets with the exact ports read from the live Endpoints. The control-plane
+#    node carries the apiserver/etcd/scheduler/controller-manager targets; all three
+#    nodes carry kube-proxy, kubelet (+cadvisor/metrics ports) and node-exporter.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: monitoring-prometheus-scrape-egress
+  namespace: monitoring
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: prometheus
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 10.244.0.0/16   # pod targets (coredns, external-secrets, belleshop, ...)
+    - to:
+        - ipBlock:
+            cidr: 192.168.1.90/32   # master: apiserver, etcd, scheduler, controller-manager
+      ports:
+        - { protocol: TCP, port: 6443 }   # apiserver (ServiceMonitor "apiserver")
+        - { protocol: TCP, port: 2381 }   # etcd (live Endpoints say 2381)
+        - { protocol: TCP, port: 10257 }  # kube-controller-manager
+        - { protocol: TCP, port: 10259 }  # kube-scheduler
+        - { protocol: TCP, port: 9100 }   # node-exporter on the master
+        - { protocol: TCP, port: 10249 }  # kube-proxy
+        - { protocol: TCP, port: 10250 }  # kubelet
+        - { protocol: TCP, port: 10255 }  # kubelet metrics
+        - { protocol: TCP, port: 4194 }   # kubelet cadvisor
+    - to:
+        - ipBlock:
+            cidr: 192.168.1.89/32   # workernode1
+        - ipBlock:
+            cidr: 192.168.1.84/32   # workernode2
+      ports:
+        - { protocol: TCP, port: 9100 }   # node-exporter (hostNetwork, node IP)
+        - { protocol: TCP, port: 10249 }  # kube-proxy
+        - { protocol: TCP, port: 10250 }  # kubelet
+        - { protocol: TCP, port: 10255 }  # kubelet metrics
+        - { protocol: TCP, port: 4194 }   # kubelet cadvisor
+---
+# Intra-namespace metric traffic, port-limited instead of a blanket allow (round 1
+# lesson): prometheus scrapes grafana 3000, itself 9090, alertmanager 9093, the operator
+# 10250 and kube-state-metrics 8080; the reloader-web ports are 8080; grafana's
+# datasources dial prometheus 9090 and alertmanager 9093.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: monitoring-intra-metrics
+  namespace: monitoring
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector: {}
+      ports:
+        - { protocol: TCP, port: 3000 }   # grafana web (Service 80 -> 3000)
+        - { protocol: TCP, port: 8080 }   # reloader-web (prometheus/alertmanager sidecars), ksm
+        - { protocol: TCP, port: 9090 }   # prometheus web
+        - { protocol: TCP, port: 9093 }   # alertmanager web
+        - { protocol: TCP, port: 10250 }  # operator (Service 443 -> 10250)
+  egress:
+    - to:
+        - podSelector: {}
+      ports:
+        - { protocol: TCP, port: 3000 }
+        - { protocol: TCP, port: 8080 }
+        - { protocol: TCP, port: 9090 }
+        - { protocol: TCP, port: 9093 }
+        - { protocol: TCP, port: 10250 }
+---
+# Alertmanager -> the gmail SMTP relay (ADR 0015 D): smtp.gmail.com:465. A policy cannot
+# name hosts, so this is the public internet minus the private ranges - deliberately NOT
+# 0.0.0.0/0-without-exceptions, which would let alertmanager reach the whole LAN.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: monitoring-alertmanager-egress
+  namespace: monitoring
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: alertmanager
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - { protocol: TCP, port: 465 }
+---
+# Grafana ingress: the Gateway data plane only (grafana.apps.home.arpa). Pairs with the
+# nginx-gateway PR's data-plane egress to monitoring:3000.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: monitoring-grafana-ingress
+  namespace: monitoring
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: grafana
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: nginx-gateway
+      ports:
+        - { protocol: TCP, port: 3000 }
+---
+# Prometheus ingress from argo-rollouts: the canary AnalysisTemplate queries Prometheus
+# (belleshop-deploy/base/rollout-analysis-template.yaml). Pairs with the argo-rollouts
+# PR's controller egress to monitoring:9090.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: monitoring-prometheus-ingress
+  namespace: monitoring
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: prometheus
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: argo-rollouts
+      ports:
+        - { protocol: TCP, port: 9090 }

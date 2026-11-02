@@ -1,0 +1,17 @@
+# The monitoring default-deny (ADR 0015 section A, round 2; second of the four).
+# Same PR as netpol-allow.yaml - with the agent live, the allow set isolates the moment
+# it lands, so the deny backstop must land with it. Rollback = revert the PR (Argo CD
+# prunes both files with the monitoring app, which has prune enabled).
+#
+# What must keep working (scripts/netpol-proof.sh monitoring + the TargetDown watch in
+# the runbook): every scrape (nodes, etcd, apiserver, coredns, pods), grafana through the
+# Gateway, the operator and kube-state-metrics against the API, alertmanager to gmail.
+# A missing flow shows up as a TargetDown alert or a DENY verdict naming the dst.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: monitoring-default-deny
+  namespace: monitoring
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
