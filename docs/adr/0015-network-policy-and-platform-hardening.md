@@ -38,8 +38,9 @@ natively enforce Network Policies". Options:
 | Cilium 1.20.4 | e2e-tested 1.33-1.36 ([compatibility](https://docs.cilium.io/en/stable/network/kubernetes/compatibility/)) | Full CNI migration; every pod recreated | Best (Hubble) | Most to operate for one lab |
 
 **Decision: kube-network-policies v1.1.2**, vendored as a manifest and deployed by Argo CD into its own namespace,
-keeping the default fail-open (availability over enforcement here; strict-mode also defaults on). The #417 noise is
-accepted until the fix ships: it adds denial-log entries, not outages. Rollback is deleting the DaemonSet — with
+keeping the default fail-open (availability over enforcement here; strict-mode also defaults on). Fail-open has a cost:
+if the agent is down, every policy silently stops applying, so a PrometheusRule on the DaemonSet's unavailable pods
+is part of this step, and its alert must reach the real receiver from section D. The #417 noise is accepted until the fix ships: it adds denial-log entries, not outages. Rollback is deleting the DaemonSet — with
 fail-open the packets then simply stop being intercepted. One day-one check: this cluster runs kube-proxy in
 iptables mode (Ubuntu 24.04, where iptables is nft-backed) and the agent adds its own nftables NFQUEUE rules; the two
 coexist in upstream deployments ([#417](https://github.com/kubernetes-sigs/kube-network-policies/issues/417) reports
@@ -188,7 +189,7 @@ Owner-applied staged plan (host changes are never agent-applied):
 
 1. **Confirm the recovery route first: the physical console.** noVNC is itself served on 8006, so it is not a
    recovery path if 8006 is misruled — the draft was wrong there.
-2. **Arm a dead-man switch** before each risky stage: `echo pve-firewall stop | at now + 15 minutes`, canceled
+2. **Arm a dead-man switch** before each risky stage (first confirm `at` is installed and `atd` is running on `tuns`): `echo pve-firewall stop | at now + 15 minutes`, canceled
    when the stage passes. "pve-firewall stop — Stop the Proxmox VE firewall service. Note, stopping actively
    removes all Proxmox related iptable rules rendering the host potentially unprotected"
    ([pve-firewall(8)](https://pve.proxmox.com/pve-docs/pve-firewall.8.html)).
@@ -300,9 +301,12 @@ Source-address rules that decide correctness:
   masquerade pattern recorded for kube-proxy in `docs/runbooks/openbao.md`. Webhook allows therefore use the
   master's pod subnet, not `192.168.1.90/32` (draft error).
 - **LoadBalancer masquerade:** `mysql-bao` has `externalTrafficPolicy: Cluster` (verified live), so MySQL sees the
-  receiving node's address in `10.244.x.y` (ADR 0014 step 6; mysql-0 is on workernode1, subnet 10.244.3.0/24). A
-  pod-identity rule cannot express the OpenBao path; allow 3306 from the mysql node's subnet and confirm the exact
-  source from the verdict log on day one.
+  receiving node's address in `10.244.x.y` (ADR 0014 step 6). The receiving node is whichever one MetalLB elected for
+  .244, not necessarily mysql-0's node, and it can move: `10.244.3.1` was observed (`docs/runbooks/openbao.md`) with
+  workernode1 receiving. A rule for one node's subnet would break rotation on failover and would also admit every
+  pod on that node. Allow 3306 from each node's single masquerade address: the flannel address when another node
+  receives and the local bridge address when mysql-0's own node receives. Confirm these from the verdict log by
+  moving the .244 announcement or by reading it on each node, before denying `dev`.
 - **Gateway ingress:** the generated `homelab-gateway-nginx` Service is not readable with this cert; its
   `externalTrafficPolicy` is unverified. With Cluster the source at the gateway pod is the MetalLB leader node's
   pod-subnet address; with Local it is the LAN client. The allow covers both (and is harmless: any pod could reach
@@ -313,14 +317,16 @@ Source-address rules that decide correctness:
 
 | Namespace | Allow (beyond intra-namespace, allowed everywhere) |
 |---|---|
-| `dev` | egress: DNS (53 UDP/TCP to kube-system/kube-dns pods); backend + backend-canary → mysql:3306. ingress: 8000/3000 from nginx-gateway pods; 8000 from monitoring (backend ServiceMonitor, 10s interval, verified in belleshop-deploy); 3306 from backend pods and from 10.244.3.0/24 (mysql-bao masquerade) |
-| `nginx-gateway` | ingress 80/443 from 192.168.1.0/24 and from 10.244.0.0/16 (both ETP cases). egress to the route backends: dev 8000/3000, monitoring grafana 3000, argocd 80, argo-rollouts 3100 |
-| `kyverno` | ingress 9443 from 10.244.0.0/24 (apiserver, cross-node). egress 6443 to .90 |
-| `external-secrets` | ingress 9443 from 10.244.0.0/24. egress 443 to 192.168.1.95 (bao.home.arpa on sectools) |
-| `argocd` | egress 443 to 192.168.1.83 (gitea.home.arpa), 6443 to .90, DNS. (redis, dex, repo-server, controller, applicationset, notifications, server are all intra-namespace, workernode1) |
-| `argo-rollouts` | ingress 3100 from nginx-gateway pods. egress 6443 to .90 |
-| `monitoring` | egress: 10250 to the three node IPs (kubelet scrapes), 10.244.0.0/16 (pod targets: node-exporter, kube-state-metrics, coredns, backend metrics), 6443 to .90 (operator), 9093 intra-ns (alertmanager). ingress: grafana 3000 from nginx-gateway pods; scrapes from prometheus pods (intra-ns) |
+| `dev` | egress: DNS (53 UDP/TCP to kube-system/kube-dns pods); backend + backend-canary → mysql:3306. ingress: 8000/3000 from nginx-gateway pods; 8000 from monitoring (backend ServiceMonitor, 10s interval, verified in belleshop-deploy); 3306 from backend pods and from the node masquerade addresses (above, not a whole subnet) |
+| `nginx-gateway` | ingress 80/443 from 192.168.1.0/24 and from 10.244.0.0/16 (both ETP cases). egress 6443 to .90 (control plane) and to the route backends: dev 8000/3000, monitoring grafana 3000, argocd 80/8080, argo-rollouts 3100 |
+| `kyverno` | ingress 9443 from 10.244.0.0/24 (apiserver, cross-node). egress 6443 to .90; **egress 443 to `registry.home.arpa`**, because `verify-belleshop-images` checks signatures and digests there, and without it BelleShop deploys are rejected at admission |
+| `external-secrets` | ingress 9443 from 10.244.0.0/24; **ingress 8080 from Prometheus**, because without this scrape the Week 5 `BelleShopDbEsoSyncFailed` alert goes silent. egress 443 to 192.168.1.95 (bao.home.arpa on sectools), 6443 to .90 |
+| `argocd` | ingress 80 and 8080 on argocd-server from nginx-gateway pods. egress 443 to 192.168.1.83 (gitea.home.arpa), 6443 to .90, DNS; **repo-server egress 443 to the public Helm repos** in `k8s/platform/apps/` (charts.external-secrets.io, kyverno.github.io, prometheus-community.github.io; 0.0.0.0/0 minus the private ranges, since a policy can't name hosts). (redis, dex, repo-server, controller, applicationset, notifications, server are all intra-namespace, workernode1) |
+| `argo-rollouts` | ingress 3100 from nginx-gateway pods. egress 6443 to .90; **egress 9090 to Prometheus in `monitoring`**, because `belleshop-deploy/base/rollout-analysis-template.yaml` queries it, and without this every canary analysis fails |
+| `monitoring` | egress: 10250 to the three node IPs (kubelet scrapes), 10.244.0.0/16 (pod targets: node-exporter, kube-state-metrics, coredns, backend metrics), 6443 to .90 (operator), 9093 intra-ns (alertmanager). ingress: grafana 3000 from nginx-gateway pods; **Prometheus 9090 from argo-rollouts; Alertmanager 9093 from falcosidekick in `falco`**; scrapes from prometheus pods (intra-ns). Egress for the Alertmanager receiver (SMTP or webhook) and 443 to bao if a SecretStore lands here |
 | `cert-manager` (new) | ingress 9443 from 10.244.0.0/24 (webhook). egress 6443 to .90. No external ACME (internal CA) |
+
+This table is the starting set, not proof of completeness: review found four flows missing from the first pass that fail quietly or at a later deploy (registry, Helm repos, canary analysis, ESO scrape). Before each namespace's deny, compare against its Services, ServiceMonitors, webhooks and outbound config. After each deny, read the agent's DENY verdicts for at least one hour, and for `dev`, `argocd` and `kyverno` also run a real deploy, because their failures only appear then.
 
 HostNetwork pods are outside policy scope: kube-flannel, kube-proxy, MetalLB speakers, the apiserver and etcd
 static pods. coredns (kube-system, master + workernode1) needs no ingress allow because kube-system is never
