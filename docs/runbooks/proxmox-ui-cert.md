@@ -67,7 +67,8 @@ The steps it performs (PVE 9.1.2 syntax, verified against `pvenode(1)` and the P
 2. pre-stage the key: `cat /root/pve-ui-cert/pveproxy-ssl.key > /etc/pve/local/pveproxy-ssl.key`
    (pmxcfs gives it 0640 root:www-data itself and may refuse chmod/chown), so `pvenode` never receives the key as an argument (PVE
    accepts `cert set` without the key argument when the key file already exists);
-3. `pvenode cert set "$(cat /root/pve-ui-cert/pveproxy-ssl-chain.pem)" --force --restart 1`
+3. `pvenode cert set /root/pve-ui-cert/pveproxy-ssl-chain.pem --force 1 --restart 1` (pvenode takes
+   file paths and reads them itself; the first run passed the PEM text and failed here, key staged, no cert set)
    (the chain, not the key, is the argument; `pvenode cert delete` takes restart as a
    positional `1` instead, see rollback);
 4. curl both names against the vendored root and show the issuer via `s_client`.

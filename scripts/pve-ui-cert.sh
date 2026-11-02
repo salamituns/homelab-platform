@@ -240,8 +240,10 @@ cmd_install() {
   # pmxcfs (/etc/pve) sets 0640 root:www-data itself and may refuse chmod/chown, so no install -m/-o/-g.
 
   echo "3/4 pvenode cert set with the public chain only (--force overwrites the default,"
-  echo "    --restart 1 reloads pveproxy; verified PVE 9.1.2 syntax, positional chain):"
-  host_exec "pvenode cert set \"\$(cat '$HDIR/pveproxy-ssl-chain.pem')\" --force --restart 1"
+  echo "    --restart 1 reloads pveproxy; the chain is a file path):"
+  host_exec "pvenode cert set '$HDIR/pveproxy-ssl-chain.pem' --force 1 --restart 1"
+  # pvenode maps <certificates> and <key> to FILE PATHS and reads them itself
+  # (PVE::CLI::pvenode mapping -> RESTHandler file_get_contents), so pass the path, not the PEM text.
 
   echo "4/4 verify from the Mac (lab root as trust anchor; DNS via the lab resolver):"
   run curl -q -s -o /dev/null -w 'proxmox.home.arpa:8006 -> %{http_code}\n' \
