@@ -99,9 +99,11 @@ Every piece is separately reversible (ADR 0015 section F):
 | Root | 10 years | Owner: generate a new root (deliberate act; the script refuses while the old one is vendored), re-sign the intermediate, redistribute the cert, re-trust. Calendar long before the notAfter recorded in section 2 |
 | Intermediate | 5 years | Owner: new intermediate from the same root, re-run `scripts/ca-load-intermediate.sh`, cert-manager reissues every leaf; clients unchanged (they trust the root). Calendar at 4 years |
 | Leaf (`*.apps.home.arpa` and later leafs) | 90 days | Automatic: cert-manager renews at 30 days left; nothing to do. The `cert-manager.io` alerts in the stack cover failures |
+| Proxmox UI leaf (`proxmox.home.arpa`) | 1095 days | Owner: `sign` + `install` again, key on `tuns` reused; see `docs/runbooks/proxmox-ui-cert.md` (issue date recorded there) |
 
 ## 8. What is deliberately not here
 
 MySQL TLS for the `mysql-bao` path (ADR 0014 step 6) is a named follow-up, not this rollout:
 it needs MySQL configuration and a restart. The Proxmox UI certificate is its own owner step
-(CSR on `tuns`, signed with this root) and lives in the Proxmox firewall/cert runbooks.
+(CSR on `tuns`, signed by the intermediate, key never leaving `tuns`):
+`docs/runbooks/proxmox-ui-cert.md`.
