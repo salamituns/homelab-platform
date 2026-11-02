@@ -1,0 +1,36 @@
+# Alert when the policy agent has unavailable pods (ADR 0015 section A). The agent is
+# fail-open: when it is down or deleted, every policy silently stops applying and traffic
+# flows as if no policy existed, so agent availability IS enforcement availability.
+# kube-state-metrics exposes the DaemonSet status; one unavailable pod means one node is
+# unenforced. Reaches the real (gmail) receiver from ADR 0015 section D, unlike the week 5
+# null-receiver carry gap noted on belleshop-eso-rules.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: kube-network-policies-rules
+  namespace: monitoring
+  labels:
+    release: prometheus-stack
+spec:
+  groups:
+    - name: kube-network-policies
+      rules:
+        - alert: KubeNetworkPoliciesAgentUnavailable
+          expr: |
+            kube_daemonset_status_number_unavailable{namespace="kube-network-policies",daemonset="kube-network-policies"} > 0
+            or absent(kube_daemonset_status_number_unavailable{namespace="kube-network-policies",daemonset="kube-network-policies"})
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "kube-network-policies has unavailable (or missing) agent pods"
+            description: >-
+              The NetworkPolicy agent DaemonSet kube-network-policies has unavailable pods, or
+              kube-state-metrics no longer reports it (agent app deleted?). The agent is fail-open:
+              while it is down NO policy is enforced anywhere - default-deny included - so this is
+              an enforcement outage, not just a workload one.
+              Action: (1) `kubectl -n kube-network-policies get pods -o wide` and check the failing
+              node (`kubectl describe pod` for the node's agent);
+              (2) `kubectl -n kube-network-policies logs <pod>` for the JSON verdict log errors;
+              (3) see docs/runbooks/network-policy.md for rollback and the manual checks that
+              replace enforcement while the agent is down.

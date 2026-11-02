@@ -1,0 +1,26 @@
+# The NetworkPolicy enforcement agent (ADR 0015 section A). Flannel ships no policy
+# enforcement of its own; this adds it without touching the CNI. The app deploys the vendored
+# upstream manifest with only the namespace move and the image-tag pin documented in
+# k8s/platform/kube-network-policies/kustomization.yaml.
+# Rollback is deleting this app: with the default fail-open, enforcement simply stops and
+# traffic flows exactly as before the agent existed (docs/runbooks/network-policy.md).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kube-network-policies
+  namespace: argocd
+spec:
+  project: platform
+  source:
+    repoURL: https://gitea.home.arpa/tunsgit/homelab-platform.git
+    targetRevision: main
+    path: k8s/platform/kube-network-policies
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-network-policies
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

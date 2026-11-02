@@ -11,6 +11,7 @@ shows up as a reviewable diff. Upgrade: download the new file, check it, update 
 | `argo-rollouts/vendor/argo-rollouts-dashboard-install-v1.9.1.yaml` | `https://github.com/argoproj/argo-rollouts/releases/download/v1.9.1/dashboard-install.yaml` | `e5ca7da00c597738e07b94c02731119a2ac00d49405f78a1c1d0737f7e93eff4` |
 | `local-path/vendor/local-path-storage-v0.0.28.yaml` | `https://raw.githubusercontent.com/rancher/local-path-provisioner/v0.0.28/deploy/local-path-storage.yaml` | `569fe4c806d8a967b3be1c97ead3dec5fa6931fc983c731a755c0e8ad82ea336` |
 | `metrics-server/vendor/metrics-server-components-v0.8.1.yaml` | `https://github.com/kubernetes-sigs/metrics-server/releases/download/v0.8.1/components.yaml` | `4a672c4891902573a3ff753cece5de1bf1f55dd053403dfec39df9d1636b7ff1` |
+| `kube-network-policies/vendor/kube-network-policies-install-v1.1.2.yaml` | `https://raw.githubusercontent.com/kubernetes-sigs/kube-network-policies/v1.1.2/install.yaml` | `a8345bd40f74e812c7f2e13c40a841d4d6c7b1fc22e245750116072807a0f4ba` |
 
 | `nginx-gateway/vendor/gateway-api-standard-v1.6.3.yaml` | `https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.6.3/standard-install.yaml` | `356c2b8e286a964dc20995435659ad1095386329974793af10bbfe3eff977fe5` |
 | `nginx-gateway/vendor/ngf-crds-v2.8.0.yaml` | `https://raw.githubusercontent.com/nginx/nginx-gateway-fabric/v2.8.0/deploy/crds.yaml` | `a652a8cdbade3a7663de77c4b293844f2126ac0a18421310129adac61bf926af` |

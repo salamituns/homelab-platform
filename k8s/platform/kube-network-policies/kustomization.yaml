@@ -1,0 +1,23 @@
+# kube-network-policies v1.1.2 (ADR 0015 section A): the SIG-Network reference NetworkPolicy
+# agent on flannel, vendored byte-for-byte (k8s/platform/VENDOR.md). Deployed into its own
+# namespace: upstream writes kube-system, but kube-system is exempt from every default-deny
+# in the ADR and should not gain a policy-relevant workload.
+#
+# The image tag is pinned to v1.1.2: the v1.1.2 release tag still ships an install.yaml
+# referencing image v1.1.1 (upstream manifest lag; the v1.1.2 image exists in registry.k8s.io,
+# verified 2026-11-02). v1.1.2 is what the ADR chose; the #420 probe-tail fix is in neither
+# and is expected in the next release, so the #417 denial-log noise is accepted until then.
+#
+# Flags stay at the upstream defaults on purpose (ADR 0015 A): --fail-open defaults true, so
+# a crash or deletion stops enforcement instead of blackholing traffic (rollback = delete the
+# DaemonSet); strict mode defaults on; --v=2 keeps the structured JSON verdict log lines the
+# ADR's proofs and the runbook's DENY reading rely on.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: kube-network-policies
+resources:
+  - vendor/kube-network-policies-install-v1.1.2.yaml
+images:
+  # see header: the tagged manifest lags the release by one image tag
+  - name: registry.k8s.io/networking/kube-network-policies
+    newTag: v1.1.2
