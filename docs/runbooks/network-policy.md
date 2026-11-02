@@ -155,3 +155,25 @@ wget present in the frontend image; the limited kubeconfig can exec in dev and r
 logs. Not verifiable with the limited cert and left to the owner at apply time: the
 server-side dry-run of NetworkPolicies (the Role is read-only for them) and the actual
 post-sync behavior, which the proof script covers.
+
+## Round 2: argo-rollouts (third of the four)
+
+Allow set + default-deny in one PR, registered in the argo-rollouts kustomization (the
+lesson from the brief: a file that exists but is not listed never deploys).
+
+Flows (live evidence in the file header): DNS + API for the controller and dashboard;
+dashboard 3100 from the Gateway; controller -> Prometheus 9090 for canary analysis. The
+controller's 8090 metrics port has no ServiceMonitor, so nothing scrapes it and no ingress
+rule exists for it.
+
+Watch after sync:
+
+```sh
+scripts/netpol-proof.sh argo-rollouts   # dashboard route, app health, a denied check, verdicts
+```
+
+Then run a REAL canary (promote or a BelleShop image bump): the analysis query to
+Prometheus only proves itself under a rollout. If the analysis fails, read the DENY
+verdicts for the controller pod.
+
+Rollback: revert the PR; the argo-rollouts app prunes both files.

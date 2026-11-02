@@ -1,0 +1,17 @@
+# The argo-rollouts default-deny (ADR 0015 section A, round 2; third of the four).
+# Same PR as netpol-allow.yaml - the allow set isolates the moment it lands, so the deny
+# backstop ships with it. Rollback = revert the PR (the argo-rollouts app prunes both
+# files).
+#
+# What must keep working (scripts/netpol-proof.sh argo-rollouts, then a real canary):
+# the dashboard through the Gateway, the controller against the API, and the analysis
+# queries to Prometheus - the last one only proves itself on a real rollout, so run a
+# canary (or the promotion script) after sync.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: argo-rollouts-default-deny
+  namespace: argo-rollouts
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
