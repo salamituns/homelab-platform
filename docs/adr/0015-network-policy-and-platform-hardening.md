@@ -187,10 +187,20 @@ port 8006 … port 22" ([firewall docs](https://pve.proxmox.com/pve-docs/chapter
 
 Owner-applied staged plan (host changes are never agent-applied):
 
-1. **Confirm the recovery route first: the physical console.** noVNC is itself served on 8006, so it is not a
-   recovery path if 8006 is misruled — the draft was wrong there.
-2. **Arm a dead-man switch** before each risky stage (first confirm `at` is installed and `atd` is running on `tuns`): `echo pve-firewall stop | at now + 15 minutes`, canceled
-   when the stage passes. "pve-firewall stop — Stop the Proxmox VE firewall service. Note, stopping actively
+1. **Set up the recovery route first: iDRAC, not a trip to the machine.** The owner has no physical access, and noVNC is
+   served on 8006, so it can't recover a bad 8006 rule. `tuns` is a PowerEdge R730xd with an iDRAC (firmware 2.86,
+   read live with `ipmitool` over the local interface, 2026-11-02). Today it can't help: it is set to its dedicated port,
+   on an old address range, and neither the Mac nor `tuns` can reach it. Nothing needs recabling to try: from `tuns`,
+   `ipmitool` can move it to shared mode on `nic0` (the one connected port) with a LAN address and a new
+   password chosen by the owner, under a timed revert. Then restrict it to the Mac, because it is full control of the
+   server, and test it from the Mac. Unverified until tried: the iDRAC licence (virtual console needs Enterprise; if
+   absent, Serial over LAN is enabled and needs a serial getty on the host) and whether shared mode works on this NIC.
+   If iDRAC can't be made to work, the owner decides whether to go ahead on the remaining layers (timer and two
+   network paths), knowing that their failure together means a trip to the machine.
+2. **Arm a dead-man switch** before each risky stage: a `systemd-run --on-active=15m` transient timer (`at` isn't installed on
+   `tuns`; checked live) that restores a saved `cluster.fw` with `enable: 0` and runs `pve-firewall stop`, canceled
+   when the stage passes. The restore matters because `stop` alone is undone by a reboot, and the timer itself doesn't
+   survive a reboot, so no stage should include one. "pve-firewall stop — Stop the Proxmox VE firewall service. Note, stopping actively
    removes all Proxmox related iptable rules rendering the host potentially unprotected"
    ([pve-firewall(8)](https://pve.proxmox.com/pve-docs/pve-firewall.8.html)).
 3. **Override the auto-allow scope.** "The user can overwrite these values in the cluster.fw alias section"
@@ -204,7 +214,8 @@ Owner-applied staged plan (host changes are never agent-applied):
 5. **Enable at datacenter level with input ACCEPT** (rules loaded, nothing denied), verify SSH and UI.
 6. **Switch input to DROP.** Tests: Mac SSH+UI pass; tailscale0 SSH+UI pass (from a tailnet device, not the LAN);
    the negative proof from sectools: SSH and `curl https://192.168.1.181:8006` both fail.
-7. VM traffic is unaffected: the datacenter firewall governs host rules; guest filtering is opt-in per VM NIC
+7. VM traffic should be unaffected, and is tested at stage 5 with the `route-smoke.sh` and SSH checks: 11 VM configs carry `firewall=1` on a NIC, but no VM has a
+   `.fw` file enabling its firewall (read live). The datacenter firewall governs host rules; guest filtering is opt-in per VM NIC
    ("Each virtual network device has its own firewall enable flag"), and forwarded/bridged rules "are currently
    only possible when using the new nftables-based proxmox-firewall … ignored by the stock pve-firewall"
    ([zones/directions](https://pve.proxmox.com/pve-docs/chapter-pve-firewall.html)).
@@ -212,7 +223,7 @@ Owner-applied staged plan (host changes are never agent-applied):
 Verified callers: Terraform (`bpg/proxmox ~> 0.117`, API on 8006) runs from the Mac; `scripts/connect-pve-to-pbs.sh`
 and the backup/restore drills are initiated on `tuns` (outbound to pbs `.98:8007`); nothing inbound connects to
 `tuns` — the Prometheus node-exporters run on the k8s nodes, and no scrape target or automation points at `.181`
-(verified by grep over both repos and the monitoring values). The dead-man switch plus the physical console are
+(verified by grep over both repos and the monitoring values). The dead-man switch, the Tailscale path and iDRAC are
 the recovery paths at every stage.
 
 ## D. Falco
@@ -241,12 +252,15 @@ the recovery paths at every stage.
 - **Delivery: falcosidekick → Alertmanager.** falcosidekick (chart dependency 0.14.x) posts to Alertmanager
   (`hostport`, endpoint `/api/v2/alerts`, `minimumpriority`; default severity map sends notice→information,
   [chart values](https://github.com/falcosecurity/charts/blob/falcosidekick-0.14.1/charts/falcosidekick/values.yaml)).
-  Alertmanager routes everything to `null` today, so a real receiver is required, closing the Week 5 gap:
-  recommended SMTP with the credential in OpenBao pulled by ESO. **New work, not an existing pattern:** only `dev`
-  has a SecretStore (in belleshop-deploy, per `docs/runbooks/openbao.md`; verified by grep — no SecretStore manifests
-  in this repo), so this needs a monitoring ServiceAccount, SecretStore and OpenBao policy+role; the root token is
-  revoked, so the owner mints a temporary one via `bao operator generate-root` (openbao.md §6) and revokes it again
-  after.
+  Alertmanager routes everything to `null` today, so a real receiver is required, closing the Week 5 gap.
+  **Owner decision: Gmail SMTP, the existing mailbox (`docs/runbooks/proxmox.md`), with the credential not in OpenBao.**
+  The owner creates a hand-made Secret in `monitoring` over the admin SSH path, and the chart reads the
+  Alertmanager config from it. The whole config goes in that Secret because Alertmanager can read the password from a
+  file but not the addresses, and addresses don't belong in this public repo; the repo holds a template and an owner-run
+  script that reads the password at a silent prompt and never prints it. Cost: no audit trail or rotation from OpenBao,
+  and it is outside git, so a rebuild must recreate it (add to `docs/credentials.md`). It is encrypted at rest (ADR 0014).
+  A Gmail app password also opens the mailbox, so use a separate one for this purpose: it can be revoked without
+  breaking PVE's notifications. No new SecretStore or root token.
 
 **Proof:** `kubectl -n dev exec -it <pod> -- /bin/sh`, spawn a shell, and the Falco event travels the whole chain:
 Falco log, falcosidekick forward, Alertmanager receiver.
@@ -272,12 +286,12 @@ cluster-scoped objects, cannot get Services in most namespaces, and cannot list 
 | 2 | B: Proxmox UI cert (CSR on `tuns`, owner-signed, 3-year) | Remove the files, pveproxy restart | Owner only |
 | 3 | A: DaemonSet; allow policies; default-deny `dev` + proof; then the other namespaces one at a time, webhook namespaces last, with the step checks of section A | Delete the DaemonSet (fail-open: traffic returns to pre-install behavior); delete policies one at a time | Agent (PRs), Argo CD, Owner (dummy create, rotation test) |
 | 4 | A: remove NodePorts 30080/30081 (belleshop-deploy) | Revert the Service PR | Agent (PR), Owner (belleshop-deploy) |
-| 5 | D: Falco + falcosidekick + Alertmanager receiver + OpenBao policy/role + monitoring SecretStore | Delete the falco app; revert the receiver route | Agent (PRs), Owner (generate-root, SMTP credential) |
-| 6 | C: Proxmox firewall staged on `tuns` with dead-man switch | `pve-firewall stop`, or input ACCEPT, from the console | Owner only |
+| 5 | D: Falco + falcosidekick + Alertmanager receiver from a hand-made Secret | Delete the falco app; revert the receiver route | Agent (PRs, template, script), Owner (app password, runs the script) |
+| 6 | C: iDRAC reachable and tested; then the Proxmox firewall staged on `tuns` with dead-man switch | Timed revert; `pve-firewall stop` or input ACCEPT over any working path | Owner only |
 
 Order and why: B first (pure additions; unlocks TLS everywhere), A second (the core gap; the controller alone
 changes nothing, so the risk is staged inside it), D third (independent once the receiver exists), C last
-(owner-only, highest lockout risk; do it when nothing else is mid-flight and the console is within reach).
+(owner-only, highest lockout risk; do it when nothing else is mid-flight and iDRAC has been tested).
 
 ## Decisions for the owner
 
@@ -285,8 +299,8 @@ changes nothing, so the risk is staged inside it), D third (independent once the
 |---|---|---|
 | 1 | Policy controller | kube-network-policies v1.1.2 (fail-open default, verdict logs, one-command rollback), watching for the release carrying PR #420; Canal v3.31.7 is the fallback if the day-one checks fail |
 | 2 | CA tiers | Offline name-constrained root (10 y, owner custody) + intermediate in cert-manager (5 y, calendar at 4 y) |
-| 3 | Alertmanager receiver | SMTP via OpenBao + ESO; the monitoring SecretStore is new work |
-| 4 | Proxmox firewall timing | Last, with the dead-man switch and physical console confirmed first |
+| 3 | Alertmanager receiver | **Decided by the owner:** Gmail SMTP, credential not in OpenBao. Hand-made Secret; recommend a separate app password |
+| 4 | Proxmox firewall recovery | **No physical access (owner).** Make iDRAC reachable first; if impossible, the owner decides whether to proceed on the timer and two network paths. Firewall goes last |
 | 5 | Move the five Caddy VM roots to the lab CA now or later | Later, one host per PR; the lab CA proves itself on cluster and Proxmox first |
 | 6 | New API host name | `api-belleshop.apps.home.arpa` (one label, wildcard-covered; the two-label form is not) |
 | 7 | Proxmox UI cert source | CSR signed offline by the lab root, key never leaving `tuns`; alternative is trusting PVE's own cluster CA (zero renewal, worse custody) |
@@ -323,7 +337,7 @@ Source-address rules that decide correctness:
 | `external-secrets` | ingress 9443 from 10.244.0.0/24; **ingress 8080 from Prometheus**, because without this scrape the Week 5 `BelleShopDbEsoSyncFailed` alert goes silent. egress 443 to 192.168.1.95 (bao.home.arpa on sectools), 6443 to .90 |
 | `argocd` | ingress 80 and 8080 on argocd-server from nginx-gateway pods. egress 443 to 192.168.1.83 (gitea.home.arpa), 6443 to .90, DNS; **repo-server egress 443 to the public Helm repos** in `k8s/platform/apps/` (charts.external-secrets.io, kyverno.github.io, prometheus-community.github.io; 0.0.0.0/0 minus the private ranges, since a policy can't name hosts). (redis, dex, repo-server, controller, applicationset, notifications, server are all intra-namespace, workernode1) |
 | `argo-rollouts` | ingress 3100 from nginx-gateway pods. egress 6443 to .90; **egress 9090 to Prometheus in `monitoring`**, because `belleshop-deploy/base/rollout-analysis-template.yaml` queries it, and without this every canary analysis fails |
-| `monitoring` | egress: 10250 to the three node IPs (kubelet scrapes), 10.244.0.0/16 (pod targets: node-exporter, kube-state-metrics, coredns, backend metrics), 6443 to .90 (operator), 9093 intra-ns (alertmanager). ingress: grafana 3000 from nginx-gateway pods; **Prometheus 9090 from argo-rollouts; Alertmanager 9093 from falcosidekick in `falco`**; scrapes from prometheus pods (intra-ns). Egress for the Alertmanager receiver (SMTP or webhook) and 443 to bao if a SecretStore lands here |
+| `monitoring` | egress: 10250 to the three node IPs (kubelet scrapes), 10.244.0.0/16 (pod targets: node-exporter, kube-state-metrics, coredns, backend metrics), 6443 to .90 (operator), 9093 intra-ns (alertmanager). ingress: grafana 3000 from nginx-gateway pods; **Prometheus 9090 from argo-rollouts; Alertmanager 9093 from falcosidekick in `falco`**; scrapes from prometheus pods (intra-ns). Alertmanager egress 465 to smtp.gmail.com (0.0.0.0/0 minus the private ranges, since a policy can't name hosts) |
 | `cert-manager` (new) | ingress 9443 from 10.244.0.0/24 (webhook). egress 6443 to .90. No external ACME (internal CA) |
 
 This table is the starting set, not proof of completeness: review found four flows missing from the first pass that fail quietly or at a later deploy (registry, Helm repos, canary analysis, ESO scrape). Before each namespace's deny, compare against its Services, ServiceMonitors, webhooks and outbound config. After each deny, read the agent's DENY verdicts for at least one hour, and for `dev`, `argocd` and `kyverno` also run a real deploy, because their failures only appear then.
