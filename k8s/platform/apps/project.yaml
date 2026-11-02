@@ -13,6 +13,7 @@ spec:
     - https://kyverno.github.io/kyverno/
     - https://kyverno.github.io/kyverno
     - https://charts.external-secrets.io
+    - https://charts.jetstack.io   # cert-manager (ADR 0015 B)
   destinations:
     - { server: https://kubernetes.default.svc, namespace: argocd }
     - { server: https://kubernetes.default.svc, namespace: kube-system }
@@ -42,5 +43,6 @@ spec:
     - { group: gateway.networking.k8s.io, kind: GatewayClass }                         # NGINX Gateway Fabric (ADR 0013)
     - { group: admissionregistration.k8s.io, kind: ValidatingAdmissionPolicy }         # Gateway API CRD upgrade guard
     - { group: admissionregistration.k8s.io, kind: ValidatingAdmissionPolicyBinding }
+    - { group: cert-manager.io, kind: ClusterIssuer }                                  # lab CA (ADR 0015 B)
   orphanedResources:
     warn: true   # show live objects in these namespaces that git does not declare

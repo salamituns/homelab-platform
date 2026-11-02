@@ -1,0 +1,11 @@
+# The lab CA issuer (ADR 0015 B): signs leafs from the intermediate Secret the owner loads
+# (scripts/ca-load-intermediate.sh, docs/runbooks/internal-ca.md). NotReady until that Secret
+# exists, by design; the intermediate key then lives only in that Secret, encrypted at rest
+# (ADR 0014 step 8), never in git.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: lab-ca
+spec:
+  ca:
+    secretName: lab-ca-intermediate
