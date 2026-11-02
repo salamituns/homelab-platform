@@ -50,9 +50,9 @@ in the test harness prove it. Outputs: `private/pve-ui/tuns.crt` and
 
 Record the dates now (renewal section below):
 
-- Issued: ____________
-- Expires (notAfter printed by the sign step): ____________
-- Renewal reminder (24 months after issue): ____________
+- Issued: 2026-11-02 (installed and verified: macOS trust "verification successful", both names 200)
+- Expires (notAfter printed by the sign step): 2029-02-04
+- Renewal reminder (24 months after issue): 2028-11-02
 
 ## 3. install: chain to `tuns`, pvenode, verify
 
