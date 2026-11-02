@@ -87,8 +87,6 @@ Carried over (kept at the level described in [ADR 0014](docs/adr/0014-secrets-an
 - [ ] The unread dead value in `secret/belleshop/app` and the shadow `belleshop-secrets-eso`
 - [ ] Old PBS backups keep plaintext Secrets until retention expires (about three months), and values that do not
       rotate stay valid in them
-- [ ] The Mac `.bak` kubeconfig copies are deleted after a day of limited-cert work (they still hold the admin key
-      until then)
 - [ ] MySQL datadir recreation does not recreate the rotation accounts
 - [ ] etcd restore is not drilled yet
 - [ ] NetworkPolicy and NodePorts (Week 6)
