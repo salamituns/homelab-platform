@@ -41,3 +41,16 @@ Set the four `enabled` flags and the five `defaultRules.rules` keys back to
 `true` in `values.yaml`. The ServiceMonitors and PrometheusRules return on the
 next sync; the false alarms return with them until the processes listen off
 loopback.
+
+## Cluster certificate expiry (replaces KubeClientCertificateExpiration)
+
+The `KubeClientCertificateExpiration` default rule is disabled (it fires permanently because the daily
+operator certificate lives 8 hours by design). Check the long-lived kubeadm certificates instead, every
+few months and before 2027-08 (the old admin client cert expires 2027-08-17):
+
+```sh
+ssh Master 'sudo kubeadm certs check-expiration'
+```
+
+kubeadm renews the control-plane certificates on each `kubeadm upgrade`; renew by hand with
+`sudo kubeadm certs renew all` on master (owner step, then restart the static pods).

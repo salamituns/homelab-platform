@@ -22,6 +22,13 @@ defaultRules:
     kubeProxy: false
     kubeSchedulerAlerting: false
     kubeSchedulerRecording: false
+  # KubeClientCertificateExpiration fires whenever ANY client presents a certificate that
+  # expires within 24h (critical) / 7d (warning). The daily operator cert is 8h by design
+  # (ADR 0014), so it fires permanently and would email critical every day once Alertmanager
+  # email is live. The rule cannot be scoped to a user. Long-lived cluster certs are tracked
+  # with `kubeadm certs check-expiration` instead (docs/runbooks/monitoring.md).
+  disabled:
+    KubeClientCertificateExpiration: true
 alertmanager:
   alertmanagerSpec:
     retention: 120h
