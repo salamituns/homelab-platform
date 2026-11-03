@@ -37,7 +37,7 @@ ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password,keyboard-int
 
 ### Rollback (if SSH keys ever stop working)
 
-Open the Proxmox web console (`https://proxmox.home.arpa:8006/` -> node `tuns` -> **Shell**) or a physical/iDRAC console and run:
+Open the Proxmox web console (`https://proxmox.home.arpa:8006/` -> node `tuns` -> **Shell**) or a physical/iDRAC console (see [idrac-and-firewall.md](idrac-and-firewall.md)) and run:
 
 ```sh
 rm /etc/ssh/sshd_config.d/10-homelab.conf && systemctl reload ssh
