@@ -14,7 +14,7 @@ metadata:
     # Applied after the allows in the same sync (Argo CD sync waves): without this the deny
     # can land first and cut existing API connections, which restarted the nginx-gateway
     # control plane once (leader election lost) when its deny synced on 2026-11-03.
-    argocd.argoproj.io/sync-wave: \"1\"
+    argocd.argoproj.io/sync-wave: "1"
   name: monitoring-default-deny
   namespace: monitoring
 spec:
