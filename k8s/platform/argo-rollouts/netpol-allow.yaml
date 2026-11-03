@@ -92,3 +92,28 @@ spec:
               kubernetes.io/metadata.name: monitoring
       ports:
         - { protocol: TCP, port: 9090 }
+---
+# The controller downloads the Gateway API traffic-router plugin from GitHub releases at every
+# start (argo-rollouts-config trafficRouterPlugins; SHA-256 pinned in the kustomization). Missed
+# in round 2: with only API/DNS/Prometheus egress the controller crash-looped on
+# "Failed to download plugins" (2026-11-03 01:08Z). GitHub's release CDN has no stable address,
+# so allow 443 to public addresses only (private ranges excluded, like Alertmanager's SMTP rule).
+# The pinned SHA-256 is what makes the download trustworthy, not the network rule.
+# Removing this needs the plugin served from inside the lab (e.g. the Nexus proxy) instead.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: argo-rollouts-plugin-download-egress
+  namespace: argo-rollouts
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: argo-rollouts
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16]
+      ports:
+        - { protocol: TCP, port: 443 }
