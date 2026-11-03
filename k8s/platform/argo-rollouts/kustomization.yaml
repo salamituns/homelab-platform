@@ -7,6 +7,8 @@ resources:
   - vendor/argo-rollouts-dashboard-install-v1.9.1.yaml
   - rollouts-httproute.yaml   # same host via the Gateway on .244 (ADR 0013 step 3)
   - rollouts-redirect.yaml    # http -> https for the same host (ADR 0015 B)
+  - netpol-allow.yaml   # allow flows (ADR 0015 A appendix, round 2); never inert with the agent live
+  - netpol-default-deny.yaml   # default-deny ingress+egress (ADR 0015 A, round 2)
 patches:
   # Gateway API traffic router for canaries (ADR 0013). The controller downloads the binary at start and refuses it
   # unless the SHA-256 matches (verified 2026-10-31 against our own download and the GitHub release digest).

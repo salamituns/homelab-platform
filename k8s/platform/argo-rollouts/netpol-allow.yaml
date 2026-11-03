@@ -1,0 +1,119 @@
+# The argo-rollouts allow set (ADR 0015 section A, appendix row "argo-rollouts"). Ships
+# WITH netpol-default-deny.yaml in the same PR: the agent is live, so an allow policy is
+# never inert - selecting pods for a direction isolates that direction immediately.
+#
+# Live evidence, 2026-11-02: two pods. Controller: label app.kubernetes.io/name=
+# argo-rollouts, containerPorts 8090 (metrics, Service argo-rollouts-metrics - but NO
+# ServiceMonitor exists, so nothing scrapes it) and 8080 (health, a same-node kubelet
+# probe the agent always accepts). Dashboard: label app.kubernetes.io/name=
+# argo-rollouts-dashboard, containerPort 3100 (Service 3100 -> 3100, served through the
+# Gateway as rollouts.apps.home.arpa).
+#
+# The controller steps canary weights on HTTPRoutes and runs AnalysisTemplates: both are
+# API-server actions (belleshop-deploy/base/rollouts-gatewayapi-role.yaml), and the
+# analysis itself queries Prometheus in monitoring - that is the one cross-namespace
+# network flow, paired with monitoring-prometheus-ingress in the monitoring PR.
+---
+# DNS and the API server for every pod (controller and dashboard both talk to the API;
+# post-DNAT destination = the control-plane node, endpoints "kubernetes" = 192.168.1.90:6443).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: argo-rollouts-dns-egress
+  namespace: argo-rollouts
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: argo-rollouts-api-egress
+  namespace: argo-rollouts
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 192.168.1.90/32
+      ports:
+        - { protocol: TCP, port: 6443 }
+---
+# Dashboard ingress: the Gateway data plane only (rollouts.apps.home.arpa). Pairs with
+# the nginx-gateway PR's data-plane egress to argo-rollouts:3100.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: argo-rollouts-dashboard-ingress
+  namespace: argo-rollouts
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: argo-rollouts-dashboard
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: nginx-gateway
+      ports:
+        - { protocol: TCP, port: 3100 }
+---
+# The canary AnalysisTemplate queries Prometheus (belleshop-deploy/base/
+# rollout-analysis-template.yaml, success-rate metrics). Without this every canary
+# analysis fails once both namespaces are denied. Pairs with
+# monitoring-prometheus-ingress in the monitoring PR.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: argo-rollouts-prometheus-egress
+  namespace: argo-rollouts
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: argo-rollouts
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - { protocol: TCP, port: 9090 }
+---
+# The controller downloads the Gateway API traffic-router plugin from GitHub releases at every
+# start (argo-rollouts-config trafficRouterPlugins; SHA-256 pinned in the kustomization). Missed
+# in round 2: with only API/DNS/Prometheus egress the controller crash-looped on
+# "Failed to download plugins" (2026-11-03 01:08Z). GitHub's release CDN has no stable address,
+# so allow 443 to public addresses only (private ranges excluded, like Alertmanager's SMTP rule).
+# The pinned SHA-256 is what makes the download trustworthy, not the network rule.
+# Removing this needs the plugin served from inside the lab (e.g. the Nexus proxy) instead.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: argo-rollouts-plugin-download-egress
+  namespace: argo-rollouts
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: argo-rollouts
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16]
+      ports:
+        - { protocol: TCP, port: 443 }
