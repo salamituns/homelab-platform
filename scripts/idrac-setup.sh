@@ -112,7 +112,7 @@ EOF
 echo "plan:"
 echo "  1. password via ipmitool exec file $EXEC_FILE (shredded; not argv)"
 echo "  2. ipmitool lan set 1 access on   # live Access Mode is disabled"
-echo "  3. ipmitool delloem lan set '${IDRAC_NIC_MODE}'"
+echo "  3. ipmitool delloem lan set ${IDRAC_NIC_MODE}   # separate words, then verified"
 echo "  4. static ${IDRAC_IP}/${IDRAC_NETMASK} gw ${IDRAC_GW}"
 echo "  5. IP range filter: skipped unless racadm exists (it does not, 2026-11-03)"
 echo "  6. systemd-run --on-active=15m --unit=$UNIT -> $REVERT_SH"
@@ -140,7 +140,22 @@ ssh_tuns "ipmitool exec $EXEC_FILE; ec=\$?; shred -u $EXEC_FILE 2>/dev/null || r
 echo "password set for user $IDRAC_USER_ID (value not printed)"
 
 ssh_tuns "ipmitool lan set 1 access on"
-ssh_tuns "ipmitool delloem lan set '$IDRAC_NIC_MODE'"
+
+# Arm the revert BEFORE touching NIC mode or address, so any failure from
+# here on (or a lost link) is undone by the timer.
+printf '%s\n' "$revert_body" | ssh_tuns "umask 077; cat > $REVERT_SH && chmod 700 $REVERT_SH"
+ssh_tuns "systemd-run --on-active=15m --timer-property=AccuracySec=1s --unit=$UNIT --description='homelab iDRAC timed revert' /bin/bash $REVERT_SH"
+echo "armed $UNIT (15m). Cancel: ssh $PVE_HOST systemctl stop ${UNIT}.timer"
+
+# Unquoted on purpose: ipmitool's delloem parser matches the mode word by
+# word (argv "shared" "with" "lom1"); one quoted argument prints usage.
+ssh_tuns "ipmitool delloem lan set $IDRAC_NIC_MODE"
+got_mode=$(ssh_tuns "ipmitool delloem lan get" | tr -d '\r' | sed '/^$/d' | tail -1)
+if [ "$(printf %s "$got_mode" | tr 'A-Z' 'a-z')" != "$(printf %s "$IDRAC_NIC_MODE" | tr 'A-Z' 'a-z')" ]; then
+  echo "error: NIC mode is '$got_mode', expected '$IDRAC_NIC_MODE'; address not changed (timer still reverts in 15m; --cancel to drop it)" >&2
+  exit 4
+fi
+echo "NIC mode now: $got_mode"
 ssh_tuns "ipmitool lan set 1 ipsrc static"
 ssh_tuns "ipmitool lan set 1 ipaddr $IDRAC_IP"
 ssh_tuns "ipmitool lan set 1 netmask $IDRAC_NETMASK"
@@ -157,9 +172,6 @@ else
   echo "note: racadm absent; set iDRAC IP Range in the web UI to $MAC_IP after you get in"
 fi
 
-printf '%s\n' "$revert_body" | ssh_tuns "umask 077; cat > $REVERT_SH && chmod 700 $REVERT_SH"
-ssh_tuns "systemd-run --on-active=15m --timer-property=AccuracySec=1s --unit=$UNIT --description='homelab iDRAC timed revert' /bin/bash $REVERT_SH"
-echo "armed $UNIT (15m). Cancel: ssh $PVE_HOST systemctl stop ${UNIT}.timer"
 echo "test from the Mac: curl -qk https://${IDRAC_IP}/  (and the web UI). Then --cancel."
 echo "SOL (optional, owner, separate from this timer — a reboot would kill the timer):"
 echo "  kernel console=ttyS1,115200n8 and systemctl enable --now serial-getty@ttyS1"
