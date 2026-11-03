@@ -344,8 +344,8 @@ re-read read-only on 2026-11-03 from the host, the sectools SSH path and the `ol
    break-glass script, `scripts/openbao-breakglass.sh`; tested against a throwaway 2.7.2 server,
    23/23) that the alert setup needs. Live read 2026-11-03: 3 falco agents (one per node) and the
    falcosidekick pod Running. Evidence: `scripts/falco-proof.sh` (exec a shell in `dev`, Falco
-   event, sidekick forward, Alertmanager route, email) - the owner verification step in
-   `docs/runbooks/falco-alerts.md` §5; the rendered Alertmanager config was validated against the
+   event, sidekick forward, Alertmanager route, email) - run by the owner 2026-11-03 and the alert email arrived
+   (`docs/runbooks/falco-alerts.md` §5); the rendered Alertmanager config was validated against the
    live Alertmanager v0.33.1 with `amtool` before the merge.
 7. **Step 6 (iDRAC + Proxmox firewall), done 2026-11-03:** iDRAC moved to shared LOM1 with a new
    LAN address under a timed revert, then the firewall staged ACCEPT, then input DROP (PRs #35,

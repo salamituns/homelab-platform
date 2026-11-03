@@ -108,8 +108,9 @@ Carried over (kept at the level described in [ADR 0014](docs/adr/0014-secrets-an
 - **Proof:** `kubectl exec` into a pod and spawn a shell, then show the Falco alert —
       `scripts/falco-proof.sh` (ADR 0015 step 5). Cluster side verified live 2026-11-03: 3 Falco
       agents and falcosidekick Running, the rendered Alertmanager config and its falco route
-      validated with `amtool` against the live Alertmanager v0.33.1; the email-delivery leg is the
-      owner-run step in `docs/runbooks/falco-alerts.md` §5.
+      validated with `amtool` against the live Alertmanager v0.33.1; end to end demoed 2026-11-03:
+      the owner ran `scripts/falco-proof.sh` and the Falco alert email arrived
+      (`docs/runbooks/falco-alerts.md` §5).
       Netpol proof: `scripts/netpol-proof.sh` (real denied connection, PR #29 hardened it).
       Firewall proof: from sectools, `curl -qk -m 5 https://192.168.1.181:8006/` -> `000` and
       `ssh root@192.168.1.181` times out, while the Mac and Tailscale paths still work.
