@@ -58,7 +58,8 @@ spec:
 ---
 # Data-plane egress to the route backends. Ports are POD ports (post-DNAT): dev
 # frontend 3000 / backend 8000; grafana 3000 (its Service maps 80 -> 3000);
-# argocd-server 8080 (Service 80/443 -> 8080); rollouts dashboard 3100. The dev side of
+# prometheus 9090 and alertmanager 9093 (the alert-email link targets); argocd-server
+# 8080 (Service 80/443 -> 8080); rollouts dashboard 3100. The dev side of
 # these pairs is already live (dev-*-gateway-ingress); the monitoring, argocd and
 # argo-rollouts ingress sides land with those namespaces' own PRs.
 # Plus the agent-grpc connection to the control plane (intra-namespace, port 8443).
@@ -86,6 +87,8 @@ spec:
               kubernetes.io/metadata.name: monitoring
       ports:
         - { protocol: TCP, port: 3000 }   # grafana (Service port 80 -> pod 3000)
+        - { protocol: TCP, port: 9090 }   # prometheus (prometheus.apps.home.arpa, alert email links)
+        - { protocol: TCP, port: 9093 }  # alertmanager (alertmanager.apps.home.arpa, alert email links)
     - to:
         - namespaceSelector:
             matchLabels:

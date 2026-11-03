@@ -45,6 +45,31 @@ collectors:
 # used by scripts/falco-proof.sh).
 tty: true
 
+# Platform-controller exemption for "Contact K8S API Server From Container".
+#
+# WHY: that rule fires for every legitimate watcher of the Kubernetes API, and it was
+# 64 of the 65 Falco events in the 24h before this change (argocd
+# argocd-application-controller-0: 44, argo-rollouts controller: 19, one monitoring
+# admission-create Job; the only other event was the deliberate shell-in-container
+# proof in dev). At falcosidekick minimumpriority notice every one became an email.
+# The upstream ruleset ships the macro as a `never_true` placeholder exactly so a
+# deployment can define "known" actors; this override replaces the placeholder with a
+# namespace allowlist of the platform controllers that live in this cluster (verified
+# against `kubectl get ns` 2026-11-03). NOT exempted: dev, default, kube-public,
+# kube-node-lease - app namespaces still page on first API contact. The
+# shell-in-container rule and all other rules are untouched.
+customRules:
+  homelab-exemptions.yaml: |-
+    # Loaded after falco_rules.yaml (chart customRules land in /etc/falco/rules.d), so
+    # this override applies to the upstream macro. `condition: replace` is the 0.45
+    # override syntax (validated for real: falco -V with the exact live falco_rules.yaml
+    # of 2026-11-03 plus this file reports Ok; the same setup with a deliberately broken
+    # condition fails with LOAD_ERR_COMPILE_CONDITION, so the check is not vacuous).
+    - macro: user_known_contact_k8s_api_server_activities
+      condition: (k8s.ns.name in ("argocd", "argo-rollouts", "cert-manager", "external-secrets", "falco", "kube-flannel", "kube-network-policies", "kube-system", "kyverno", "local-path-storage", "metallb-system", "monitoring", "nginx-gateway"))
+      override:
+        condition: replace
+
 # Sized for the 3-node lab (4 GB workers alongside Argo CD, Kyverno, and monitoring).
 resources:
   requests:

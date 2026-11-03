@@ -34,6 +34,11 @@ defaultRules:
 alertmanager:
   alertmanagerSpec:
     configSecret: alertmanager-config-eso
+    # WHY: with this set, alert emails link to https://alertmanager.apps.home.arpa (the
+    # in-cluster default is unreachable from a browser). Root path, so the UI and API
+    # stay at / (the chart derives routePrefix from the externalUrl path; "/" keeps the
+    # "/" default - verified in the 88.3.0 chart render below and in monitoring.md).
+    externalUrl: https://alertmanager.apps.home.arpa
     retention: 120h
     storage:
       volumeClaimTemplate:
@@ -73,6 +78,10 @@ nodeExporter:
 prometheus:
   enabled: true
   prometheusSpec:
+    # WHY: with this set, alert emails link to https://prometheus.apps.home.arpa via
+    # generatorURL instead of an in-cluster service URL no browser reaches. Root path,
+    # so the UI and API stay at / (chart routePrefix derivation, same as alertmanager).
+    externalUrl: https://prometheus.apps.home.arpa
     podMonitorSelectorNilUsesHelmValues: false
     retention: 7d
     ruleSelectorNilUsesHelmValues: false

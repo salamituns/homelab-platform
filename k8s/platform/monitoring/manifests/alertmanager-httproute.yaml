@@ -1,0 +1,28 @@
+# https://alertmanager.apps.home.arpa through the shared Gateway (grafana route pattern, ADR 0015 B).
+# WHY: alert emails link to the Alertmanager UI (amtool/Alertmanager annotations default to the
+# in-cluster URL) and it was browser-unreachable. Same wildcard DNS coverage as prometheus
+# (apps.home.arpa -> 192.168.1.240). Pairs with the nginx-gateway data-plane egress to
+# monitoring:9093 and `monitoring-alertmanager-ui-ingress` in netpol-allow.yaml.
+# NOTE: this UI is unauthenticated and can create silences - see docs/runbooks/monitoring.md
+# (LAN/tailnet-only behind the Gateway until the Week 7/8 OIDC/oauth2-proxy item).
+# Managed by Argo CD (app monitoring, k8s/platform/apps/monitoring.yaml): change it in git.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: alertmanager
+  namespace: monitoring
+spec:
+  parentRefs:
+    - name: homelab-gateway   # accepts routes only from labelled namespaces (gateway.yaml)
+      namespace: nginx-gateway
+      sectionName: https
+  hostnames:
+    - alertmanager.apps.home.arpa
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: prometheus-stack-kube-prom-alertmanager
+          port: 9093

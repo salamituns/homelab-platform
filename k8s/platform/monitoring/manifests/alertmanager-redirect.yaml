@@ -1,0 +1,21 @@
+# The http->https redirect for alertmanager.apps.home.arpa (grafana-redirect pattern, ADR 0015 B).
+# Separate route, per-host and reversible on its own (see argocd-redirect.yaml for the NGF filter notes).
+# Managed by Argo CD (app monitoring, k8s/platform/apps/monitoring.yaml): change it in git.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: alertmanager-redirect
+  namespace: monitoring
+spec:
+  parentRefs:
+    - name: homelab-gateway
+      namespace: nginx-gateway
+      sectionName: http
+  hostnames:
+    - alertmanager.apps.home.arpa
+  rules:
+    - filters:
+        - type: RequestRedirect
+          requestRedirect:
+            scheme: https
+            port: 443
