@@ -1,0 +1,87 @@
+# Falco chart 9.2.2 (appVersion 0.45.2, falcoctl 0.14.3, falcosidekick 2.35.1) values
+# for homelab-platform (ADR 0015 section D, step 5).
+#
+# Kernel verification (all 3 nodes: master, workernode1, workernode2):
+#   - OS / kernel: Ubuntu 24.04.3 LTS, Linux 6.8.0-147-generic
+#   - BTF exposed: /sys/kernel/btf/vmlinux present (5.9 MiB)
+#   - Runtime:     containerd://2.2.1 (/run/containerd/containerd.sock)
+# Kernel 6.8 (>= 5.8 with CONFIG_DEBUG_INFO_BTF) supports the built-in CO-RE modern
+# eBPF probe (`modern_ebpf`) without compiling or downloading kernel headers or
+# running the `falco-driver-loader` initContainer.
+
+image:
+  registry: docker.io
+  repository: falcosecurity/falco
+  tag: "0.45.2@sha256:1562a643953f938e02f47319b5214d93a235f11f646d60e9b8a516fd5a64698e"
+  pullPolicy: IfNotPresent
+
+driver:
+  enabled: true
+  # Built-in CO-RE modern eBPF probe; disables the driver-loader initContainer.
+  kind: modern_ebpf
+  modernEbpf:
+    # Grants BPF, PERFMON, SYS_RESOURCE, and SYS_PTRACE instead of full privileged: true.
+    leastPrivileged: true
+
+collectors:
+  enabled: true
+  containerEngine:
+    enabled: true
+    engines:
+      containerd:
+        enabled: true
+        sockets:
+          - /run/containerd/containerd.sock
+      cri:
+        enabled: true
+        sockets:
+          - /run/containerd/containerd.sock
+      docker:
+        enabled: false
+      podman:
+        enabled: false
+
+# Attach a TTY so Falco flushes stdout events immediately (`kubectl -n falco logs`
+# used by scripts/falco-proof.sh).
+tty: true
+
+# Sized for the 3-node lab (4 GB workers alongside Argo CD, Kyverno, and monitoring).
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 1000m
+    memory: 512Mi
+
+falcoctl:
+  image:
+    registry: docker.io
+    repository: falcosecurity/falcoctl
+    tag: "0.14.3@sha256:2230fb4802aafe09455b58d38f8f1faedd8f09f042e9a18fffd397e63488c023"
+    pullPolicy: IfNotPresent
+
+falcosidekick:
+  enabled: true
+  replicaCount: 1
+  image:
+    registry: docker.io
+    repository: falcosecurity/falcosidekick
+    tag: "2.35.1@sha256:a9bb60d2c7742febd912315ca1155839abc0199bf322c58d3adbb8b0849fadb9"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+  config:
+    alertmanager:
+      hostport: "http://prometheus-stack-kube-prom-alertmanager.monitoring.svc.cluster.local:9093"
+      # Alertmanager v0.27+ removed /api/v1/alerts; kube-prometheus-stack 88.3.0 runs
+      # Alertmanager v0.33.1 which serves /api/v2/alerts.
+      endpoint: "/api/v2/alerts"
+      # Forward Notice and higher (includes "Terminal shell in container" which is Notice).
+      minimumpriority: "notice"
+      extralabels: "source:falco"

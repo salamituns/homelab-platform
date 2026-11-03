@@ -1,0 +1,12 @@
+# Dedicated identity for External Secrets Operator when reading monitoring's
+# Alertmanager SMTP secret from OpenBao (ADR 0015 section D, step 5).
+# No workload Pod runs as this account: ESO's controller in namespace external-secrets
+# requests a short-lived TokenRequest JWT for it when syncing SecretStore/openbao, and
+# OpenBao's auth/kubernetes/role/alertmanager accepts ONLY monitoring/eso-alertmanager.
+# Bound to system:auth-delegator in k8s/platform/cluster-config/eso-tokenreview.yaml.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: eso-alertmanager
+  namespace: monitoring
+automountServiceAccountToken: false

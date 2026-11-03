@@ -1,5 +1,7 @@
 # kube-prometheus-stack values (chart 88.3.0, release prometheus-stack). Taken from the live Helm release 2026-10-27.
 # Grafana's admin login is the Secret monitoring/grafana-admin, created OUTSIDE git (ADR 0008).
+# Alertmanager's config is the Secret monitoring/alertmanager-config-eso synced by ESO from
+# OpenBao `secret/data/monitoring/alertmanager` (ADR 0015 section D, step 5).
 # kube-proxy/etcd/scheduler/controller-manager metrics bind 127.0.0.1 on this
 # cluster (ss on the nodes, 2026-11-03), so the chart's ServiceMonitors scrape
 # dead endpoints and fire etcdInsufficientMembers / TargetDown / *Unreachable
@@ -31,6 +33,7 @@ defaultRules:
     KubeClientCertificateExpiration: true
 alertmanager:
   alertmanagerSpec:
+    configSecret: alertmanager-config-eso
     retention: 120h
     storage:
       volumeClaimTemplate:

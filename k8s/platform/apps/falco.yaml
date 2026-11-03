@@ -1,0 +1,41 @@
+# Falco + falcosidekick (ADR 0015 section D, step 5).
+# - Source 1 renders the upstream falco chart 9.2.2 (appVersion 0.45.2, falcosidekick 2.35.1)
+#   with the modern eBPF probe (`modern_ebpf`, leastPrivileged) and Alertmanager v2 output.
+# - Source 2 carries the `falco` Namespace manifest with Pod Security Admission `privileged`
+#   labels (required for host `/proc` mounts and `BPF`/`PERFMON`/`SYS_RESOURCE`/`SYS_PTRACE`
+#   capabilities).
+# `falco` stays exempt from default-deny NetworkPolicies per ADR 0015; ingress from
+# `falcosidekick` into `monitoring` Alertmanager (:9093) is allowed in
+# `k8s/platform/monitoring/manifests/netpol-allow.yaml`.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: falco
+  namespace: argocd
+spec:
+  project: platform
+  sources:
+    - repoURL: https://falcosecurity.github.io/charts
+      chart: falco
+      targetRevision: 9.2.2
+      helm:
+        releaseName: falco
+        valueFiles:
+          - $values/k8s/platform/falco/values.yaml
+    - repoURL: https://gitea.home.arpa/tunsgit/homelab-platform.git
+      targetRevision: main
+      ref: values
+    - repoURL: https://gitea.home.arpa/tunsgit/homelab-platform.git
+      targetRevision: main
+      path: k8s/platform/falco/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: falco
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - ServerSideDiff=true
