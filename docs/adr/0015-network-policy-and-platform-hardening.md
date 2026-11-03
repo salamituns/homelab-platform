@@ -269,9 +269,11 @@ the recovery paths at every stage.
   owner writing a new value and ESO refreshing — no manual export, and the definition is in git. The connection to
   OpenBao comes from the ESO controller in `external-secrets` (already allowed in the appendix), not from
   Alertmanager itself. Writing the value is an owner step in a separate terminal of their own, never through `!` in
-  an agent session: mint a root token with the documented `bao operator generate-root` flow (openbao.md §6), write
-  with the provided script — it reads the password at a silent prompt and passes it via stdin, never argv — then
-  revoke the root token. The app password is a **new, separate** one: an app password opens the mailbox, so a
+  an agent session: mint a root token through the documented break-glass flow
+  (`scripts/openbao-breakglass.sh`, openbao.md §6 — the direct `bao operator generate-root` CLI flow stopped working
+  on 2.7.2, which gates the legacy endpoints the CLI calls), write with the embedded alertmanager step — it reads the
+  password at a silent prompt and passes it via stdin, never argv — and the script always revokes the root token and
+  verifies the revocation. The app password is a **new, separate** one: an app password opens the mailbox, so a
   dedicated one can be revoked without breaking the hypervisor's own notifications
   (`docs/runbooks/proxmox.md`).
 

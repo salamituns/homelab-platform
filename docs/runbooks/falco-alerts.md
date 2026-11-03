@@ -20,69 +20,47 @@ This runbook covers the owner steps, in order.
 
 ---
 
-## 2. Mint a short-lived OpenBao root token (owner terminal only)
+## 2. One command: the alert setup through the break-glass root path
 
-OpenBao has no standing root token (ADR 0014). Mint one in your own Mac terminal (never via `!` inside an agent session) using 3 of 5 unseal keys (`docs/runbooks/openbao.md`):
+OpenBao has no standing root token (ADR 0014), and the manual `bao operator
+generate-root` flow this section used to document no longer works: OpenBao 2.7.2 gates
+the legacy endpoints the CLI calls (verified 2026-11-03, see `docs/runbooks/openbao.md`
+§6). Use the break-glass script instead - one command that prompts for the unseal
+shares and the SMTP values (hidden where they should be), mints the root token ON
+sectools, runs the setup, and ALWAYS revokes the token at the end (and verifies the
+revocation; the token never reaches the Mac or the terminal output):
 
 ```bash
-export BAO_ADDR="https://bao.home.arpa"
-export BAO_CACERT="$HOME/homelab-platform/ansible/files/ca/sectools-caddy-root.crt"
+# Once, if it has not been run since the flag change (restarts openbao, then unseals):
+scripts/openbao-breakglass.sh apply-config
 
-OTP="$(bao operator generate-root -generate-otp)"
-NONCE="$(bao operator generate-root -init -otp="$OTP" -format=json | jq -r .nonce)"
-
-# Run 3 times, pasting one distinct unseal key at each hidden prompt:
-bao operator generate-root -nonce="$NONCE"
-bao operator generate-root -nonce="$NONCE"
-ENCODED="$(bao operator generate-root -nonce="$NONCE" -format=json | jq -r .encoded_root_token)"
-
-ROOT_TOKEN="$(bao operator generate-root -decode="$ENCODED" -otp="$OTP")"
+# The alert setup (from scripts/openbao-setup-alertmanager.sh, same API calls):
+scripts/openbao-breakglass.sh root-run alertmanager
+# Re-running it later is idempotent: it skips the secret if it already exists
+# (pass --overwrite to replace the SMTP values).
 ```
+
+At the prompts: 3 unseal shares (hidden), then the same SMTP fields the setup script
+asks for - **SMTP username** (your Gmail address), **From**/**To** addresses (Enter
+accepts the username as default), and the **Gmail 16-character App Password** at a
+hidden prompt (spaces stripped, never echoed, sent over ssh stdin).
+
+Verify the output reports: the minted token verified as root, the mounts check, the
+policy `alertmanager-read` and role `alertmanager` written, `secret/monitoring/alertmanager`
+verified with keys `["from","password","to","username"]`, and
+"root-run done: command ran, token revoked and verified revoked".
+
+The scripts/openbao-setup-alertmanager.sh stays as the reference for the same calls with
+a token you already hold (`--dry-run` still previews the payloads); the break-glass
+script embeds identical API calls so the root token never leaves sectools.
+
+The break-glass script arrives with the `week6-bao-breakglass` PR; merge that before (or
+with) this PR. Undo of what the alert setup writes is documented in the script header and
+in `docs/runbooks/openbao.md`.
 
 ---
 
-## 3. Run `scripts/openbao-setup-alertmanager.sh`
-
-Preview the planned API calls first (no network calls or token required):
-
-```bash
-./scripts/openbao-setup-alertmanager.sh --dry-run
-```
-
-Then run the setup script against `https://bao.home.arpa`:
-
-```bash
-BAO_ADDR="https://bao.home.arpa" \
-BAO_CACERT="$HOME/homelab-platform/ansible/files/ca/sectools-caddy-root.crt" \
-BAO_TOKEN="$ROOT_TOKEN" \
-  ./scripts/openbao-setup-alertmanager.sh
-```
-
-At the interactive prompts:
-- **SMTP username**: enter your Gmail address.
-- **Alert From address**: press Enter to accept the default (`username`), or enter your sender address.
-- **Alert To address**: press Enter to accept the default (`username`), or enter your recipient address.
-- **Gmail 16-character App Password**: paste the App Password at the hidden `read -rs` prompt (spaces are stripped automatically; the value is never echoed and is piped via stdin to OpenBao).
-
-Verify the output reports:
-- Policy `alertmanager-read` written (`HTTP 204`)
-- Role `alertmanager` verified (`SA=monitoring/eso-alertmanager, policies=[alertmanager-read], ttl=3600s`)
-- Keys `["from","password","to","username"]` verified at `secret/monitoring/alertmanager`
-
----
-
-## 4. Revoke the root token immediately
-
-Before merging or doing anything else, revoke the temporary root token and clear shell variables:
-
-```bash
-BAO_TOKEN="$ROOT_TOKEN" bao token revoke -self
-unset ROOT_TOKEN OTP NONCE ENCODED
-```
-
----
-
-## 5. Merge the PR and let Argo CD sync
+## 3. Merge the PR and let Argo CD sync
 
 Merge branch `week6-falco` into `main` and push to Gitea (`origin`). Argo CD will:
 1. Update `AppProject/platform` (`sourceRepos` adds `https://falcosecurity.github.io/charts`).
@@ -92,7 +70,7 @@ Merge branch `week6-falco` into `main` and push to Gitea (`origin`). Argo CD wil
 
 ---
 
-## 6. Verify ESO sync, Alertmanager config, and Falco pods
+## 4. Verify ESO sync, Alertmanager config, and Falco pods
 
 Using the developer kubeconfig (`olatunde.kubeconfig`):
 
@@ -112,7 +90,7 @@ kubectl -n falco logs -l app.kubernetes.io/name=falco -c falco | grep -i "modern
 
 ---
 
-## 7. Run `scripts/falco-proof.sh` and verify email delivery
+## 5. Run `scripts/falco-proof.sh` and verify email delivery
 
 Run the end-to-end proof script:
 
@@ -135,7 +113,7 @@ kubectl -n monitoring logs alertmanager-prometheus-stack-kube-prom-alertmanager-
 
 ---
 
-## 8. Undo
+## 6. Undo
 
 To roll back the cluster and OpenBao changes:
 
@@ -145,7 +123,7 @@ To roll back the cluster and OpenBao changes:
    ssh tunsadmin@192.168.1.90 'sudo kubectl --kubeconfig /etc/kubernetes/admin.conf delete namespace falco'
    ssh tunsadmin@192.168.1.90 'sudo kubectl --kubeconfig /etc/kubernetes/admin.conf -n monitoring delete externalsecret alertmanager-config-eso secretstore openbao sa eso-alertmanager secret alertmanager-config-eso netpol monitoring-alertmanager-falco-ingress'
    ```
-2. **Remove the OpenBao secret, role, and policy** (using a short-lived root token minted as in step 2, then revoked):
+2. **Remove the OpenBao secret, role, and policy** (using a short-lived root token via `scripts/openbao-breakglass.sh root-run -- curl ...`, which always revokes):
    ```bash
    curl -q -sS --cacert "$BAO_CACERT" -H "X-Vault-Token: $ROOT_TOKEN" \
      -X DELETE "$BAO_ADDR/v1/secret/metadata/monitoring/alertmanager"
