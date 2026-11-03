@@ -1,5 +1,6 @@
-# Falco chart 9.2.2 (appVersion 0.45.2, falcoctl 0.14.3, falcosidekick 2.35.1) values
-# for homelab-platform (ADR 0015 section D, step 5).
+# Falco chart 9.2.2 (appVersion 0.45.2, falcosidekick 2.35.1) values
+# for homelab-platform (ADR 0015 section D, step 5). No falcoctl containers run
+# (see the falcoctl block below for the 2026-11-03 ghcr.io 429 incident).
 #
 # Kernel verification (all 3 nodes: master, workernode1, workernode2):
 #   - OS / kernel: Ubuntu 24.04.3 LTS, Linux 6.8.0-147-generic
@@ -79,12 +80,28 @@ resources:
     cpu: 1000m
     memory: 512Mi
 
+# No falcoctl containers. WHY: on 2026-11-03 (~21:30 UTC), after PR #41 rolled the
+# DaemonSet, the falcoctl-artifact-install init container crashed every new pod with
+# ghcr.io 429 toomanyrequests - it pulls `falco-rules:5` and
+# `ghcr.io/falcosecurity/plugins/plugin/container:0.7.6` at startup - so falco-cnhcm
+# sat in Init:CrashLoopBackOff and workernode1 had NO runtime detection (a manual curl
+# of the same manifest from the node worked; the failure was intermittent rate
+# limiting, i.e. every rollout is a coin toss per pod). The pinned
+# falcosecurity/falco:0.45.2 image ALREADY ships /etc/falco/falco_rules.yaml
+# (byte-identical to the falcoctl-installed falco-rules:5, verified 2026-11-03) and
+# /usr/share/falco/plugins/libcontainer.so; the chart shadows those paths with
+# emptyDirs ONLY while install or follow is enabled, so with both disabled falco
+# loads the image's own copies. Startup then contacts nothing outside the registry
+# holding the digest-pinned falco image (no ghcr.io, no falcoctl artifact index).
+# Rules now update when the IMAGE version+digest pin below is bumped, which is
+# already how this repo controls every other image. If you ever re-enable artifact
+# install or follow, re-pin the falcoctl image (0.14.3) alongside them.
 falcoctl:
-  image:
-    registry: docker.io
-    repository: falcosecurity/falcoctl
-    tag: "0.14.3@sha256:2230fb4802aafe09455b58d38f8f1faedd8f09f042e9a18fffd397e63488c023"
-    pullPolicy: IfNotPresent
+  artifact:
+    install:
+      enabled: false
+    follow:
+      enabled: false
 
 falcosidekick:
   enabled: true
