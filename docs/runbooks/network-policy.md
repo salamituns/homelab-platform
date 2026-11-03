@@ -168,6 +168,19 @@ route backends (dev 3000/8000, grafana 3000, argocd-server 8080, rollouts dashbo
 plus agent-grpc 8443 to the control plane; control-plane ingress 8443 from the data plane and
 from the master pod subnet (apiserver webhook); DNS and API (.90:6443, endpoints verified)
 for every pod.
+## Round 2: monitoring (second of the four)
+
+Allow set + default-deny in one PR, in `k8s/platform/monitoring/manifests/` (the monitoring
+app's plain-manifest source; no kustomization to register - every YAML file in that path
+syncs with the app).
+
+Flows (live evidence in the file header): DNS + API for every pod; prometheus scrapes to
+10.244.0.0/16 (pod targets) and to the node IPs on the exact ports read from the live
+Endpoints (kubelet 10250/10255/4194, kube-proxy 10249, node-exporter 9100 on all three;
+etcd 2381, controller-manager 10257, scheduler 10259, apiserver 6443 on the master);
+port-limited intra-namespace metrics; alertmanager to smtp.gmail.com:465 (public internet
+minus the private ranges); grafana 3000 from nginx-gateway; prometheus 9090 from
+argo-rollouts (the canary analysis). falcosidekick is not deployed - not allowed yet.
 
 Watch after sync:
 
@@ -182,3 +195,13 @@ packets of node-to-pod HTTPS probes denied while the probes pass) and watch one 
 
 Rollback: revert the PR. Argo CD prunes both files and the namespace returns to no policies
 at all (the pre-agent state; the data-plane 80/443 listener never depended on policy).
+scripts/netpol-proof.sh monitoring    # grafana route, app health, a denied check, verdicts
+```
+
+Then watch **TargetDown** and the kube-* target dashboards in Grafana for an hour: a missing
+scrape flow fails QUIETLY (the scrape just stops), which is exactly what the alert covers.
+The apiserver/etcd/scheduler/controller-manager scrapes are cross-node node traffic from
+the prometheus pod - never exempt.
+
+Rollback: revert the PR; the monitoring app has prune enabled, so both files disappear with
+it and the namespace returns to no policies.
