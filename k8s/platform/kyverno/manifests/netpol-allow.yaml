@@ -28,8 +28,8 @@
 #                             registry IP is the ONLY external fetch kyverno needs.
 #   apiserver               -> kyverno-svc :443 (9443) and kyverno-cleanup-controller
 #                             :443 (9443), from the master masquerade range
-# The background/reports/cleanup controllers have no external fetches: they watch and
-# write through the API only.
+# The reports controller also reaches the registry for background image verification;
+# background and cleanup controllers watch and write through the API only.
 ---
 # DNS for every pod: controllers resolve kubernetes.default (the registry is reached by
 # IP, see the rule below).
@@ -89,9 +89,13 @@ metadata:
   name: kyverno-registry-egress
   namespace: kyverno
 spec:
+  # Admission (at admission) and reports controller (background scans: the IVP leaves
+  # evaluation.background at its default, enabled) both fetch signatures/attestations.
   podSelector:
-    matchLabels:
-      app.kubernetes.io/name: kyverno-admission-controller
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values: [kyverno-admission-controller, kyverno-reports-controller]
   policyTypes: [Egress]
   egress:
     - to:
