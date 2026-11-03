@@ -201,3 +201,25 @@ spec:
               kubernetes.io/metadata.name: argo-rollouts
       ports:
         - { protocol: TCP, port: 9090 }
+---
+# Admission webhook: the apiserver (hostNetwork on master) calls the operator's
+# prometheus-stack-kube-prom-admission webhooks (Service 443 -> pod 10250) cross-node, so the
+# source is master's masquerade address in 10.244.0.0/24, not a pod. failurePolicy is Ignore,
+# so without this every PrometheusRule/Alertmanager write would stall for the webhook timeout
+# instead of failing. Live check 2026-11-02: operator pod on workernode1.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: monitoring-operator-webhook-ingress
+  namespace: monitoring
+spec:
+  podSelector:
+    matchLabels:
+      app: kube-prometheus-stack-operator
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - ipBlock:
+            cidr: 10.244.0.0/24
+      ports:
+        - { protocol: TCP, port: 10250 }
