@@ -1,0 +1,17 @@
+# The nginx-gateway default-deny (ADR 0015 section A, round 2; merged first of the four).
+# One file with the allow set in the same PR: with the agent live, allows are never inert,
+# so they cannot land first "to be safe". Rollback = revert this whole PR (Argo CD prunes
+# both files; the namespace returns to no policies at all).
+#
+# What breaks on purpose: nothing user-visible is expected - the entry point itself is the
+# thing being protected. If a route 502s after this lands, a backend flow is missing from
+# netpol-allow.yaml: read the agent DENY verdicts (docs/runbooks/network-policy.md) to find
+# the exact dst, add the flow, and rerun scripts/netpol-proof.sh nginx-gateway.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nginx-gateway-default-deny
+  namespace: nginx-gateway
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
