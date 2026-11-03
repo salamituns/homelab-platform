@@ -157,6 +157,38 @@ When Mac + Tailscale still work and sectools fails, cancel the timer:
 scripts/pve-firewall-stage.sh --cancel
 ```
 
+## 2a. Lessons from the 2026-11-03 apply
+
+**Away from home, use the host's own Tailscale address.** Through the subnet
+router (`homelab-gateway`) the host sees the gateway's LAN address
+(`192.168.1.96`), which is not in `+management`, so `192.168.1.181` and
+`proxmox.home.arpa` time out off-LAN by design. Use:
+
+- Web UI: `https://100.81.210.111:8006` (Tailscale name `homelab-breakglass`)
+- SSH: `ssh root@100.81.210.111`
+
+**Legacy NAT on the host broke HTTP(S) the moment the firewall turned on.**
+Enabling pve-firewall loads `br_netfilter` with `bridge-nf-call-iptables=1`, so
+bridged traffic now traverses the host `nat` table. Old 10.2.x rules
+(`-i vmbr0 --dport 80/443 -j DNAT --to 10.2.0.2`) then redirected every new
+HTTP(S) connection from VMs without the NIC firewall flag (the k8s nodes) and
+from the physical LAN to a retired address: Argo CD lost Gitea at 11:24, the
+second the ACCEPT stage enabled the firewall. Firewalled VMs (`fwbr*`) were
+unaffected, which is why `sectools`/`gateway` looked fine. Fix:
+
+```sh
+ssh root@100.81.210.111 'bash -s -- --dry-run' < scripts/pve-legacy-nat-cleanup.sh
+ssh root@100.81.210.111 'bash -s'              < scripts/pve-legacy-nat-cleanup.sh
+```
+
+It backs up to `/root/homelab-legacy-nat-backup/`, deletes only the 10.2.x
+rules live, and stops `/etc/iptables.rules` (interfaces `post-up`) and
+`/etc/iptables/rules.v4` (`netfilter-persistent`, which also carried a
+catch-all `POSTROUTING -j MASQUERADE`) from restoring them at boot.
+
+**Verify with a node, not the Mac.** After any host firewall change, check
+`master -> https://gitea.home.arpa` and Argo app sync, not only 22/8006.
+
 ## 3. Rollback
 
 | Layer | Command |
