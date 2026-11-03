@@ -150,8 +150,10 @@ echo "armed $UNIT (15m). Cancel: ssh $PVE_HOST systemctl stop ${UNIT}.timer"
 # Unquoted on purpose: ipmitool's delloem parser matches the mode word by
 # word (argv "shared" "with" "lom1"); one quoted argument prints usage.
 ssh_tuns "ipmitool delloem lan set $IDRAC_NIC_MODE"
-got_mode=$(ssh_tuns "ipmitool delloem lan get" | tr -d '\r' | sed '/^$/d' | tail -1)
-if [ "$(printf %s "$got_mode" | tr 'A-Z' 'a-z')" != "$(printf %s "$IDRAC_NIC_MODE" | tr 'A-Z' 'a-z')" ]; then
+# Dedicated prints one line ("dedicated"); shared prints two
+# ("Shared LOM   :  shared with lom1" / "Failover LOM :  None"), so match any line.
+got_mode=$(ssh_tuns "ipmitool delloem lan get" | tr -d '\r' | sed '/^$/d' | tr '\n' ' ')
+if ! printf %s "$got_mode" | grep -qiF "$IDRAC_NIC_MODE"; then
   echo "error: NIC mode is '$got_mode', expected '$IDRAC_NIC_MODE'; address not changed (timer still reverts in 15m; --cancel to drop it)" >&2
   exit 4
 fi
