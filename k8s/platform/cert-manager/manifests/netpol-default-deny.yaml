@@ -1,0 +1,31 @@
+# The cert-manager default-deny (ADR 0015 section A, last round; merged last of the
+# three - the ADR order rule puts the webhook namespaces before it and the owner
+# checks each). Same PR as netpol-allow.yaml. Wave 1: the deny applies AFTER the
+# allows in the same sync (the argocd sync of 2026-11-03 restarted a control plane
+# when a deny landed first).
+#
+# What must keep working (scripts/netpol-proof.sh cert-manager): the app
+# Synced/Healthy, all three pods Ready, a dummy Certificate create passing through
+# cert-manager-webhook with --dry-run=server, the served wildcard leaf staying valid
+# (any Gateway route proves it), and the webhook port DENIED from a dev pod.
+#
+# The failure mode is the quiet one: nothing user-visible breaks on the day the deny
+# lands - the wildcard leaf (90 days, renewed at 30) keeps serving. The webhook
+# lockup shows up at the NEXT Certificate write or renewal, which is why the
+# dummy-create check matters here more than anywhere.
+#
+# Rollback = revert the PR (the cert-manager app prunes both files; the manifests
+# path source that ships the ClusterIssuer also ships these). If Certificate writes
+# are locked up cluster-wide and waiting is not acceptable:
+#   kubectl -n cert-manager delete networkpolicy cert-manager-default-deny
+# (admin path; the allows are inert without the deny).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  name: cert-manager-default-deny
+  namespace: cert-manager
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]

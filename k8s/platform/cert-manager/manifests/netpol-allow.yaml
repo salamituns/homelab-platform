@@ -1,0 +1,93 @@
+# The cert-manager allow set (ADR 0015 section A, appendix row "cert-manager", with
+# every number re-verified live 2026-11-02). Ships WITH netpol-default-deny.yaml in
+# the same PR: the agent is live, so an allow is never inert. This namespace serves
+# the cert-manager-webhook admission path, failurePolicy Fail (read live): a wrong
+# rule rejects Certificate and CertificateRequest writes in every namespace.
+#
+# Live evidence, 2026-11-02: three pods on workernode2, labels
+# app.kubernetes.io/name={cert-manager,cainjector,webhook} (app.kubernetes.io/
+# instance=cert-manager). Container ports: controller 9402 (http-metrics) + 9403
+# (http-healthz); cainjector 9402; webhook 10250 (https, Service cert-manager-webhook
+# 443 -> 10250, Endpoints 10.244.4.229:10250) + 6080 (healthcheck) + 9402. The three
+# 9402 metrics Services exist but NO ServiceMonitors do (verified via the admin
+# path) - nothing scrapes cert-manager, so there is deliberately no monitoring
+# ingress on 9402.
+#
+# Flows:
+#   controller  -> API (watches Certificates/Requests/Orders, reads the lab-ca
+#                 intermediate Secret), DNS
+#   cainjector  -> API (injects CAs into webhook configs), DNS
+#   webhook     -> API, DNS; serves the apiserver on :443 (post-DNAT 10250)
+#   apiserver   -> webhook :443 (10250) from the master masquerade range
+# No external ACME anywhere: the lab-ca ClusterIssuer signs locally from the
+# intermediate Secret the owner loads (ADR 0015 B), so the controller needs NO
+# egress beyond DNS and the API - that is the appendix row verified.
+---
+# DNS for every pod: components resolve kubernetes.default.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  name: cert-manager-dns-egress
+  namespace: cert-manager
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+---
+# API server egress for all three components (post-DNAT destination = the
+# control-plane node, endpoints "kubernetes" = 192.168.1.90:6443, verified
+# 2026-11-02). Wave -1 per the argocd lesson: the FIRST egress policy that lands
+# isolates every pod, so the API allow must exist before the others, or the
+# controllers cut their own watch loops mid-sync while the webhook serves the
+# cluster admission path.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  name: cert-manager-api-egress
+  namespace: cert-manager
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 192.168.1.90/32
+      ports:
+        - { protocol: TCP, port: 6443 }
+---
+# Webhook ingress: the apiserver calling cert-manager-webhook :443 (post-DNAT
+# container port 10250, NOT 9443 - the live pod and Endpoints say 10250).
+# Cross-node node traffic arrives as the master's masquerade address, so the
+# ipBlock is the master podCIDR, never 192.168.1.90/32 (appendix node-traffic
+# pattern). failurePolicy Fail: without this rule every Certificate write in the
+# cluster is rejected, which quietly kills every future renewal.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cert-manager-webhook-ingress
+  namespace: cert-manager
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: webhook
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - ipBlock:
+            cidr: 10.244.0.0/24   # master podCIDR (apiserver -> webhook, cross-node)
+      ports:
+        - { protocol: TCP, port: 10250 }
