@@ -5,6 +5,12 @@ listener "tcp" {
   address         = "127.0.0.1:{{ openbao_api_port }}"
   cluster_address = "127.0.0.1:{{ openbao_cluster_port }}"
   tls_disable     = true
+  # Break-glass root generation (openbao_disable_generate_root_endpoints, runbook §6):
+  # the root token is revoked, so generate-root is the only admin path left. The flag
+  # only takes effect at startup - NOT on SIGHUP (verified 2026-11-03: a SIGHUP reload
+  # left the endpoints blocked until the server restarted) - so changing it re-seals
+  # the store; scripts/openbao-breakglass.sh apply-config unseals afterwards.
+  disable_unauthed_generate_root_endpoints = {{ openbao_disable_generate_root_endpoints | lower }}
 }
 
 # api_addr is what OpenBao tells clients to use (Caddy on 443). cluster_addr stays on loopback:

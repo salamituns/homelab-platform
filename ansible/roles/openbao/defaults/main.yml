@@ -22,3 +22,15 @@ openbao_node_id: "{{ inventory_hostname }}"
 # could write secrets to the swap file, and PBS copies that disk nightly. Safe here: 3.9 GB RAM,
 # ~0.6 GB used, 524 K of swap ever touched (checked 2026-10-31). Set false to keep swap.
 openbao_disable_swap: true
+
+# Break-glass root generation (docs/runbooks/openbao.md §6). OpenBao >= 2.5.3 defaults
+# disable_unauthed_generate_root_endpoints to TRUE, which blocks the generate-root API
+# on the listener - and the root token was revoked (2026-11-02), so generate-root is the
+# only admin path left (verified live: 405 on /v1/sys/generate-root/attempt, 403 on the
+# legacy /v1/sys/generate-root-token/attempt, on loopback too). False keeps those
+# endpoints open on this listener, which is safe because the listener binds 127.0.0.1
+# only and Caddy 403s the generate-root and rekey paths from the network (host_vars/
+# sectools.yml blocked_paths), so root generation works ONLY from sectools itself.
+# The flag is startup-only (no SIGHUP reload, verified 2026-11-03), so applying a change
+# re-seals the store; openbao-breakglass.sh apply-config unseals with the owner's shares.
+openbao_disable_generate_root_endpoints: false

@@ -8,6 +8,15 @@
 	@blocked not remote_ip {{ site.allowed_clients | map(attribute='ip') | join(' ') }}
 	respond @blocked 403
 {% endif %}
+{% if site.blocked_paths is defined %}
+	# Path block list: these paths answer 403 before the proxy sees them, whatever the
+	# client. Caddy path patterns: * is a fast-suffix match, so /v1/sys/generate-root*
+	# covers /v1/sys/generate-root/attempt and -update alike. Used for the OpenBao
+	# break-glass endpoints that must stay reachable ONLY on the host itself
+	# (127.0.0.1:8200), never through bao.home.arpa (runbook openbao.md §6).
+	@blockedpath path {{ site.blocked_paths | join(' ') }}
+	respond @blockedpath 403
+{% endif %}
 {% if site.routes is defined %}
 {% for route in site.routes %}
 	handle {{ route.path }} {

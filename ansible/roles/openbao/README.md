@@ -6,6 +6,12 @@ OpenBao v2.7.2 on `sectools` as the lab secrets store. ADR 0014, runbook `docs/r
   checked 2026-10-31), unpacked to `/opt/openbao/<version>/bao`, linked from `/usr/local/bin/bao`.
 - Listens on `127.0.0.1:8200` with TLS off. `https://bao.home.arpa` is Caddy on 443 (role: caddy);
   clients trust `ansible/files/ca/sectools-caddy-root.crt`.
+- Break-glass root generation stays possible without a standing root token: the listener keeps
+  `disable_unauthed_generate_root_endpoints = false` (`openbao_disable_generate_root_endpoints`,
+  OpenBao >= 2.5.3 defaults it to true) - safe because the listener is loopback-only and Caddy 403s
+  the generate-root/rekey paths from the network (runbook §6, `scripts/openbao-breakglass.sh`).
+  The flag applies at startup only (no SIGHUP reload, verified 2026-11-03), so changing it
+  restarts openbao and re-seals the store.
 - Raft storage in `/var/lib/openbao` (0700, single node). The audit device is declared in the
   config file (OpenBao 2.7.2 refuses `bao audit enable` over the API, tested 2026-10-31), writes
   `/var/log/openbao/audit.log`, and is rotated weekly by `/etc/logrotate.d/openbao` (move + SIGHUP,

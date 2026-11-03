@@ -107,20 +107,55 @@ it sits inside a multi-line pasted block, `read` consumes the next pasted line a
 breaks apart. Root tokens start with `s.`; a 44-character base64 value is an unseal share or a
 key, not a token.
 
-If root access is needed later, `bao operator generate-root` mints a new root token using unseal
-shares, in your terminal, without a stored root token:
+If root access is needed later, mint a short-lived root token with
+`scripts/openbao-breakglass.sh` - one command, the shares only at hidden prompts, the
+token minted, used and revoked ON sectools (it never reaches the Mac or any terminal
+output). Two subcommands:
 
 ```sh
-bao operator generate-root -init    # prints a Nonce and an OTP; keep both
-bao operator generate-root          # paste an unseal share; repeat until the threshold is met
-bao operator generate-root -decode='<Encoded Token>' -otp='<OTP>'   # prints the new root token
+scripts/openbao-breakglass.sh apply-config    # ONCE per config change; see below
+scripts/openbao-breakglass.sh root-run <cmd>  # mint, run the command, revoke (always)
+scripts/openbao-breakglass.sh root-run alertmanager   # the step-5 alert setup (ADR 0015 D)
+scripts/openbao-breakglass.sh root-run -- bao auth list   # anything else, same pattern
 ```
 
-The `-decode` line carries the encoded token and the OTP in the shell history, so revoke the new
-root token again once whatever needed it is done.
+`root-run` needs `apply-config` to have run once (2026-11-03: OpenBao >= 2.5.3 defaults
+`disable_unauthed_generate_root_endpoints` to true, which blocks generate-root on the
+listener; the role sets it false - `openbao_disable_generate_root_endpoints`, role
+openbao). Two facts decide the shape of this flow, both verified against a real 2.7.2
+server (scripts/openbao-breakglass-test.sh):
 
-Read-only: list existing tokens by accessor, then look one up without ever printing a token
-value:
+- **The bao CLI cannot do it.** Its generate-root subcommands (`-generate-otp`, `-init`,
+  even `-decode`) call the LEGACY `/v1/sys/generate-root-token/*` endpoints, which the
+  2.7.2 server gates unconditionally - 403 even with the listener flag false. The
+  script speaks the NEW API instead (`/v1/sys/generate-root/attempt` + `/update`) and
+  decodes client-side (unpadded-base64 XOR with the OTP). That is also why the old
+  section-6 commands below no longer worked.
+- **The listener flag does not reload on SIGHUP** (only TLS files and audit do), so
+  applying the config change restarts openbao and the store comes back SEALED.
+  `apply-config` handles the whole sequence: it prints and runs the playbook
+  (`--check --diff` first), then unseals by prompting for shares (hidden) and piping
+  them to `PUT /v1/sys/unseal` over ssh stdin - the bao CLI refuses piped unseal input,
+  so the API it is. It stops as soon as the store reports unsealed, whatever the
+  threshold.
+
+The design keeps root generation sectools-only: the flag is false on the 127.0.0.1
+listener, and Caddy answers 403 for `/v1/sys/generate-root*`, `/v1/sys/generate-root-token*`
+and `/v1/sys/rekey*` from the network (host_vars/sectools.yml, `blocked_paths`), so
+`bao.home.arpa` is never a root-generation door. Rekey stays blocked everywhere: its
+listener flag (`disable_unauthed_rekey_endpoints`, default true since 2.5.0) is
+untouched.
+
+The script always revokes the token when the command is done - and verifies the
+revocation; a trap revokes again on any failure. `root-run` cancels any in-flight
+generation before it starts, so a failed run can simply be re-run. If you ever need the
+manual dance instead (the old flow, kept for reference), it is the API the script uses:
+init an attempt with an OTP, submit 3 shares to the update endpoint, decode the encoded
+token with the OTP - but the script does exactly that without putting the token in a
+terminal.
+
+Read-only: list existing tokens by accessor, then look one up without ever printing a
+token value:
 
 ```sh
 bao list auth/token/accessors
