@@ -16,8 +16,8 @@
 # live via the admin path (the limited cert cannot list them).
 #
 # Egress matrix (every pod gets DNS and the API; the rest is per component):
-#   server               -> redis 6379, repo-server 8081, dex 5556/5557, gitea .83:443
-#   repo-server          -> redis 6379, gitea .83:443, the public Helm repos (443, minus private)
+#   server               -> redis 6379, repo-server 8081, dex 5556/5557, gitea .97:443
+#   repo-server          -> redis 6379, gitea .97:443, the public Helm repos (443, minus private)
 #   application-controller -> redis 6379, repo-server 8081
 #   notifications-controller -> repo-server 8081
 #   applicationset-controller -> repo-server 8081
@@ -104,7 +104,7 @@ spec:
         - { protocol: TCP, port: 8081 }
 ---
 # The server reaches dex for the SSO handshake and gitea for repo connection tests
-# (gitea.home.arpa = 192.168.1.83, the appendix number).
+# (gitea.home.arpa = 192.168.1.97: live DNS 2026-11-02; .83 is the retired VM, the ADR appendix had it wrong).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -125,7 +125,7 @@ spec:
         - { protocol: TCP, port: 5557 }
     - to:
         - ipBlock:
-            cidr: 192.168.1.83/32   # gitea.home.arpa
+            cidr: 192.168.1.97/32   # gitea.home.arpa
       ports:
         - { protocol: TCP, port: 443 }
 ---
@@ -146,7 +146,7 @@ spec:
   egress:
     - to:
         - ipBlock:
-            cidr: 192.168.1.83/32   # gitea.home.arpa (git fetches)
+            cidr: 192.168.1.97/32   # gitea.home.arpa (git fetches)
       ports:
         - { protocol: TCP, port: 443 }
     - to:
