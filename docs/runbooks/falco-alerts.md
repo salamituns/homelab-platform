@@ -10,6 +10,34 @@ The cluster side is in git:
 
 This runbook covers the owner steps, in order.
 
+## 0. Startup needs nothing outside the image registry
+
+Every falco pod used to run a `falcoctl-artifact-install` init container that pulled
+`falco-rules:5` and the container plugin from ghcr.io at startup. On 2026-11-03 (~21:30
+UTC) ghcr answered those pulls with intermittent `429 toomanyrequests`, the init container
+crashed, and `falco-cnhcm` sat in `Init:CrashLoopBackOff` - workernode1 had **no runtime
+detection** until the values changed. A manual curl of the same manifest from the node
+worked, so the failure was rate limiting: every DaemonSet rollout was a coin toss per pod.
+
+Fixed by `falcoctl.artifact.install.enabled: false` + `follow.enabled: false` in
+`k8s/platform/falco/values.yaml`: the digest-pinned `falcosecurity/falco:0.45.2` image
+already ships `/etc/falco/falco_rules.yaml` (verified byte-identical to the
+falcoctl-installed `falco-rules:5`, 2026-11-03) and
+`/usr/share/falco/plugins/libcontainer.so` (0.7.6), and the chart only shadows those paths
+with emptyDirs while install or follow is enabled. Verified in docker with the real
+image, the live chart `falco.yaml` and the customRules mounted: the plugin loads from the
+image path and all three rules files (`falco_rules.yaml`, `falco_rules.local.yaml`,
+`rules.d/homelab-exemptions.yaml`) pass schema validation with no rule errors.
+
+Consequence: the ruleset no longer updates on its own schedule (there is no follow
+sidecar); it changes when the IMAGE version+digest pin is bumped, like every other image
+in this repo. Do not re-enable artifact install/follow without re-pinning the falcoctl
+image and accepting that startup depends on ghcr.io again. One trap found while
+validating: the image ALSO ships `/etc/falco/config.d/falco.container_plugin.yaml`, which
+registers the container plugin - the chart mounts an emptyDir over `/etc/falco/config.d`,
+and if that mount ever disappears falco aborts with "found another plugin with name
+container".
+
 ---
 
 ## 1. Create the Gmail App Password (already done)
