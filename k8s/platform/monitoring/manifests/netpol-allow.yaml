@@ -181,6 +181,49 @@ spec:
       ports:
         - { protocol: TCP, port: 3000 }
 ---
+# Prometheus UI ingress: the Gateway data plane only (prometheus.apps.home.arpa, the
+# generatorURL target in alert emails). Grafana-ingress pattern; pairs with the
+# nginx-gateway data-plane egress to monitoring:9090.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: monitoring-prometheus-ui-ingress
+  namespace: monitoring
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: prometheus
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: nginx-gateway
+      ports:
+        - { protocol: TCP, port: 9090 }
+---
+# Alertmanager UI ingress: the Gateway data plane only (alertmanager.apps.home.arpa, the
+# link alert emails carry). Grafana-ingress pattern; pairs with the nginx-gateway
+# data-plane egress to monitoring:9093. The UI is unauthenticated and can create
+# silences - see docs/runbooks/monitoring.md.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: monitoring-alertmanager-ui-ingress
+  namespace: monitoring
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: alertmanager
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: nginx-gateway
+      ports:
+        - { protocol: TCP, port: 9093 }
+---
 # Prometheus ingress from argo-rollouts: the canary AnalysisTemplate queries Prometheus
 # (belleshop-deploy/base/rollout-analysis-template.yaml). Pairs with the argo-rollouts
 # PR's controller egress to monitoring:9090.

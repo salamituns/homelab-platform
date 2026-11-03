@@ -114,6 +114,55 @@ kubectl -n monitoring logs alertmanager-prometheus-stack-kube-prom-alertmanager-
 
 ---
 
+## 5a. Tuning: exempting a known-good actor
+
+The 24 hours after step 5 went live produced about 60 emails: 64 of 65 Falco events were
+the rule `Contact K8S API Server From Container` (Notice) firing for platform
+controllers doing their job - `argocd-application-controller-0` (44), the `argo-rollouts`
+controller (19), one monitoring admission-create Job. The only other event was the
+deliberate shell-in-container proof in `dev`.
+
+What shipped (2026-11-03):
+
+- **Falco side** (`k8s/platform/falco/values.yaml`, `customRules`): the upstream ruleset
+  ships `user_known_contact_k8s_api_server_activities` as a `never_true` placeholder
+  exactly so a deployment can name its known actors. The override replaces the
+  placeholder with `k8s.ns.name in (argocd, argo-rollouts, cert-manager, external-secrets,
+  falco, kube-flannel, kube-network-policies, kube-system, kyverno, local-path-storage,
+  metallb-system, monitoring, nginx-gateway)` - every namespace that runs platform
+  controllers on this cluster, and deliberately **not** `dev` or any app namespace.
+  The shell-in-container rule and every other rule are untouched, and an app namespace
+  that talks to the API server still pages on first contact.
+- **Alertmanager side** (the ESO-templated `alertmanager.yaml`): the `source = "falco"`
+  route now has `group_by: [rule, k8s_ns_name]` (the labels falcosidekick really sends;
+  it sends no kubernetes `namespace` label) and `repeat_interval: 24h`, so one persistent
+  detection is at most one email per rule per namespace per day.
+- Validation is real, not assumed: the override plus the live `falco_rules.yaml`
+  (extracted from the falco pod, 2026-11-03) passes `falco --validate` in the
+  `falcosecurity/falco:0.45.2` image, and a deliberately broken condition in the same
+  setup fails with `LOAD_ERR_COMPILE_CONDITION` - so the pass is not vacuous.
+
+To exempt (or stop exempting) another actor:
+
+1. Edit the namespace list in `k8s/platform/falco/values.yaml` (`customRules ->
+   homelab-exemptions.yaml`). Prefer adding a **namespace** over a container name: pods
+   churn, namespaces are the trust boundary. Never add an app namespace (`dev`) there.
+2. Validate exactly as above: pull the live `/etc/falco/falco_rules.yaml` from a falco
+   pod, render `customRules` to a file in a `rules.d` directory, and run
+   `docker run --rm --entrypoint falco -v ...:/etc/falco/falco_rules.yaml:ro -v ...
+   :/etc/falco/rules.d:ro falcosecurity/falco:0.45.2 -V /etc/falco/falco_rules.yaml
+   -V /etc/falco/rules.d/homelab-exemptions.yaml` - expect both files `Ok`.
+3. Merge; Argo CD syncs the falco app. Re-run `scripts/falco-proof.sh` to confirm the
+   shell rule still alerts, and confirm the controller noise is gone from
+   `kubectl -n falco logs -l app.kubernetes.io/name=falco -c falco`.
+
+Expected effect (replay of the 24h window above against the shipped exemption): all 64
+API-server events come from exempted namespaces, so 0 of them would have reached
+Alertmanager; the one real event (the dev shell proof) still emails. Roughly 60
+emails/day to about 1/day for the same activity.
+
+---
+
 ## 6. Undo
 
 To roll back the cluster and OpenBao changes:

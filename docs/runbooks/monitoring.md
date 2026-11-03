@@ -5,6 +5,32 @@ values in `k8s/platform/monitoring/values.yaml`, extras in
 `k8s/platform/monitoring/manifests/`. Grafana login is the out-of-git Secret
 `monitoring/grafana-admin`.
 
+## Web UIs (Grafana, Prometheus, Alertmanager) and their exposure
+
+Three UIs are published through the shared Gateway with the lab CA (`*.apps.home.arpa`,
+wildcard DNS to `.240` needs no per-host entry):
+
+| UI | URL | Auth |
+|---|---|---|
+| Grafana | https://grafana.apps.home.arpa | Secret `grafana-admin` |
+| Prometheus | https://prometheus.apps.home.arpa | **None** |
+| Alertmanager | https://alertmanager.apps.home.arpa | **None** |
+
+`prometheusSpec.externalUrl` / `alertmanagerSpec.externalUrl` are set to those URLs in
+`values.yaml` so the links in alert emails (generatorURL, Alertmanager UI) open from a
+browser. They are root paths: the chart derives `routePrefix` from the external URL
+path, and `/` keeps the default `/` (verified in the 88.3.0 render - the API and UI
+endpoints do not move).
+
+**The Prometheus and Alertmanager UIs are unauthenticated.** The only things in front
+of them are the Gateway's TLS and the fact that `.240` is reachable from the
+LAN and the tailnet only; anything that can reach `alertmanager.apps.home.arpa` can
+create silences (mute alerts) and see every alert. That is accepted for now and
+tracked as the Week 7/8 carried item: put an SSO in front of all three (oauth2-proxy,
+the OIDC item). Do not expose them beyond the LAN/tailnet before that lands. Anyone
+who silences an alert should expect to explain it in review - silences appear in the
+Alertmanager UI audit of the alert groups.
+
 ## Why kube-proxy / etcd / scheduler / controller-manager monitors are off
 
 On this cluster those four processes bind their metrics ports on **127.0.0.1**
