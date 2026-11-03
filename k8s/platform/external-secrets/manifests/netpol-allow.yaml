@@ -1,0 +1,137 @@
+# The external-secrets allow set (ADR 0015 section A, appendix row "external-secrets",
+# with every number re-verified live 2026-11-02 because two appendix guesses were wrong).
+# Ships WITH netpol-default-deny.yaml in the same PR: the agent is live, so an allow is
+# never inert. This namespace runs admission webhooks with failurePolicy FAIL - a wrong
+# rule blocks ExternalSecret/SecretStore/ClusterSecretStore writes cluster-wide.
+#
+# Live evidence, 2026-11-02 (pods, Services, Endpoints and webhook configs read via the
+# limited cert and the admin path): three pods on workernode2 - controller
+# (app.kubernetes.io/name=external-secrets, metrics 8080), cert-controller
+# (...name=external-secrets-cert-controller, metrics 8080 + ready 8081) and webhook
+# (...name=external-secrets-webhook, metrics 8080, webhook **10250** - NOT the 9443 the
+# appendix guessed; Endpoints 10.244.4.217:10250). Service external-secrets-webhook
+# 443 -> 10250. The validatingwebhookconfigurations externalsecret-validate and
+# secretstore-validate are failurePolicy Fail on that Service.
+#
+# Flows:
+#   controller       -> OpenBao https://bao.home.arpa (the dev/openbao SecretStore,
+#                      resolved live to 192.168.1.95:443, Caddy on sectools), API, DNS
+#   cert-controller  -> API only (it patches the webhook caBundle), DNS
+#   webhook          -> API only (reads objects to validate them), DNS
+#   apiserver        -> webhook :443 (post-DNAT 10250), from the master masquerade range
+#   prometheus       -> all three pods :8080 (three ServiceMonitors live in this
+#                      namespace; the monitoring egress already allows the pod CIDR)
+# The controller's OpenBao egress is the one that goes silent if wrong: the
+# BelleShopDbEsoSyncFailed alert (Week 5) fires, which is exactly the post-merge watch.
+---
+# DNS for every pod: the controller resolves bao.home.arpa and kubernetes.default.
+# Wave -1 with the API rule (see below): this namespace's own components only keep
+# working if their DNS+API egress exists before any other egress policy isolates them.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  name: external-secrets-dns-egress
+  namespace: external-secrets
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+---
+# API server egress: all three components watch objects (the controller SecretStores,
+# ExternalSecrets and Secrets; the cert-controller and webhook their configs).
+# Post-DNAT destination = the control-plane node (endpoints "kubernetes" =
+# 192.168.1.90:6443, verified 2026-11-02). Wave -1 per the argocd lesson: the FIRST
+# egress policy that lands isolates every pod, so the API allow must exist before the
+# others or the controllers cut their own watch loops mid-sync.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  name: external-secrets-api-egress
+  namespace: external-secrets
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 192.168.1.90/32
+      ports:
+        - { protocol: TCP, port: 6443 }
+---
+# The controller -> OpenBao. The dev/openbao SecretStore's server URL is
+# https://bao.home.arpa, resolved live to 192.168.1.95:443 (Caddy on sectools fronts
+# OpenBao 127.0.0.1:8200; ADR 0014). A policy cannot name hosts, so the IP is pinned;
+# if OpenBao ever moves, this rule and the SecretStore URL move together.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: external-secrets-openbao-egress
+  namespace: external-secrets
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: external-secrets
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 192.168.1.95/32   # bao.home.arpa (sectools, Caddy TLS on 443)
+      ports:
+        - { protocol: TCP, port: 443 }
+---
+# Webhook ingress: the apiserver calling external-secrets-webhook :443 (post-DNAT
+# container port 10250, NOT 9443 - the live pod/Endpoints say 10250). Cross-node node
+# traffic arrives as the master's masquerade address, so the ipBlock is the master
+# podCIDR, never 192.168.1.90/32 (appendix node-traffic pattern). failurePolicy Fail:
+# without this rule every ExternalSecret/SecretStore/ClusterSecretStore write in the
+# cluster is rejected.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: external-secrets-webhook-ingress
+  namespace: external-secrets
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: external-secrets-webhook
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - ipBlock:
+            cidr: 10.244.0.0/24   # master podCIDR (apiserver -> webhook, cross-node)
+      ports:
+        - { protocol: TCP, port: 10250 }
+---
+# Prometheus scrapes all three pods on their 8080 metrics ports (three ServiceMonitors
+# live in this namespace, verified via the admin path; the monitoring namespace's
+# scrape egress already allows the whole pod CIDR). Without this rule the Week 5
+# BelleShopDbEsoSyncFailed alert goes silent exactly when it matters.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: external-secrets-metrics-ingress
+  namespace: external-secrets
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - { protocol: TCP, port: 8080 }
