@@ -76,9 +76,13 @@ denverdicts() {   # $1 grep pattern (namespace or object name)
   for p in $(kc get pods -n kube-network-policies -o name 2>/dev/null); do
     while IFS= read -r line; do
       [[ -n "$line" ]] && { echo "  $p $line"; found=1; }
-    done < <(kc logs -n kube-network-policies "$p" --tail=500 2>/dev/null | grep -i deny | grep -i "$1" | tail -3)
+    # grep exits 1 on no match; with pipefail that aborted the whole script after
+    # the last matching agent pod (nginx-gateway/monitoring/argocd modes, 2026-11-03).
+    done < <(kc logs -n kube-network-policies "$p" --tail=500 2>/dev/null | grep -i deny | grep -i "$1" | tail -3 || true)
   done
-  [[ "$found" == "0" ]] && echo "  (no DENY verdict lines matching '$1' in the last 500 per agent pod)"
+  if [[ "$found" == "0" ]]; then
+    echo "  (no DENY verdict lines matching '$1' in the last 500 per agent pod)"
+  fi
 }
 
 # Argo CD application sync+health (readable with the limited cert; a Synced/Healthy app
@@ -166,7 +170,9 @@ if [[ "$NS" == "argocd" ]]; then
       failed "Argo CD app $app sync=$sync health=$health"
       bad=$((bad+1))
     fi
-  done < <(kc -n argocd get applications -o custom-columns=APP:.metadata.name,SYNC:.status.sync.status,HEALTH:.status.health.status --no-headers 2>/dev/null)
+  # jsonpath with tabs: custom-columns pads with spaces, so IFS=tab left
+  # sync/health empty and every Synced/Healthy app was reported FAIL (2026-11-03).
+  done < <(kc -n argocd get applications -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.sync.status}{"\t"}{.status.health.status}{"\n"}{end}' 2>/dev/null)
   if [[ "$bad" == "0" && "$total" -gt 0 ]]; then
     pass "all $total Argo CD applications Synced/Healthy (repo-server fetched gitea, controller watched the API, redis answered)"
   fi
