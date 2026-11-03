@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # Parameterized network-policy proof (ADR 0015 section A, round 2 and later). READ-ONLY:
-# kubectl get/exec/logs plus curl; nothing is created, patched or deleted.
+# kubectl get/exec/logs plus curl and NON-PERSISTING server dry-runs; nothing is created,
+# patched or deleted (create --dry-run=server runs the admission chain but stores nothing).
 #
-# Usage: scripts/netpol-proof.sh <dev|nginx-gateway|monitoring|argo-rollouts|argocd>
-# Run AFTER that namespace's allow+deny PR syncs (docs/runbooks/network-policy.md).
-# This file is deliberately identical on every round-2 branch so the sequential merges
+# Usage: scripts/netpol-proof.sh
+#   <dev|nginx-gateway|monitoring|argo-rollouts|argocd|external-secrets|kyverno|cert-manager>
+# Run AFTER that namespace's allow+deny PR syncs (docs/runbooks/network-policy*.md).
+# This file is deliberately identical on every netpol branch so the sequential merges
 # never conflict; a case simply checks whatever is live when it is invoked.
 #
 # Why the denied checks run FROM a dev pod: the limited kubeconfig can exec only in dev
@@ -32,8 +34,8 @@ failed() { echo "FAIL: $*" >&2; FAIL=$((FAIL+1)); }
 [[ -f "$KUBECFG" ]] || { echo "error: kubeconfig not found: $KUBECFG" >&2; exit 2; }
 [[ -f "$CA" ]] || { echo "error: lab root CA not found: $CA" >&2; exit 2; }
 case "$NS" in
-  dev|nginx-gateway|monitoring|argo-rollouts|argocd) ;;
-  *) echo "usage: $0 <dev|nginx-gateway|monitoring|argo-rollouts|argocd>" >&2; exit 2 ;;
+  dev|nginx-gateway|monitoring|argo-rollouts|argocd|external-secrets|kyverno|cert-manager) ;;
+  *) echo "usage: $0 <dev|nginx-gateway|monitoring|argo-rollouts|argocd|external-secrets|kyverno|cert-manager>" >&2; exit 2 ;;
 esac
 
 # ---- shared checks -----------------------------------------------------------
@@ -91,6 +93,32 @@ app_state() {   # $1 app name  $2 label
     pass "$label: Argo CD app $app Synced/Healthy"
   else
     failed "$label: Argo CD app $app sync=$sync health=$health (controller/repo-server/redis or git fetch is broken)"
+  fi
+}
+
+# Dummy-create webhook probe (webhook namespaces, ADR 0015 A last round): `create
+# --dry-run=server` sends the object through the LIVE admission chain (webhooks with
+# failurePolicy Fail run too) and persists NOTHING. "created" and "webhook denied the
+# request" both prove the apiserver->webhook network path; that is all this checks,
+# not the validation verdict. "failed calling webhook ... refused/timed out" is the
+# write-lockup signal (FAIL). The limited cert cannot create anything anywhere
+# (verified live 2026-11-02: no create on pods/externalsecrets/certificates, not even
+# in dev), so for olatunde this prints the owner command; it really runs when
+# KUBECONFIG points at a kubeconfig that may create in dev.
+webhook_probe() {   # $1 label; the manifest arrives on stdin
+  local label="$1" out rc
+  if out=$(kc -n dev create --dry-run=server -f - 2>&1); then rc=0; else rc=$?; fi
+  if [[ "$rc" == 0 ]]; then
+    pass "$label: server dry-run passed admission (the webhook answered)"
+  elif grep -q "Error from server (Forbidden)" <<<"$out"; then
+    echo "WARN: $label: this kubeconfig cannot create in dev (RBAC) - webhook path UNVERIFIED"
+    echo "      owner run: kubectl -n dev create --dry-run=server -f <the $label manifest in scripts/netpol-proof.sh>"
+  elif grep -q "failed calling webhook" <<<"$out"; then
+    failed "$label: admission webhook unreachable: $out"
+  elif grep -qE "denied the request|admission webhook" <<<"$out"; then
+    pass "$label: the webhook answered and denied the dummy (the network path works)"
+  else
+    failed "$label: unexpected dry-run error: $out"
   fi
 }
 
@@ -160,13 +188,17 @@ if [[ "$NS" == "argocd" ]]; then
 
   echo "== argocd: every app Synced/Healthy (controller + repo-server + redis + gitea fetch) =="
   total=0; bad=0
-  while IFS=$'\t' read -r app sync health; do
+  # jsonpath + plain-word read: custom-columns goes through kubectl's tabwriter, which
+  # pads with SPACES, so a tab-split read silently gets empty fields (found live
+  # 2026-11-02 when this loop failed every app with sync= health= empty).
+  while read -r app sync health; do
+    [[ -z "$app" ]] && continue
     total=$((total+1))
     if [[ "$sync" != "Synced" || "$health" != "Healthy" ]]; then
       failed "Argo CD app $app sync=$sync health=$health"
       bad=$((bad+1))
     fi
-  done < <(kc -n argocd get applications -o custom-columns=APP:.metadata.name,SYNC:.status.sync.status,HEALTH:.status.health.status --no-headers 2>/dev/null)
+  done < <(kc -n argocd get applications -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.sync.status}{" "}{.status.health.status}{"\n"}{end}' 2>/dev/null)
   if [[ "$bad" == "0" && "$total" -gt 0 ]]; then
     pass "all $total Argo CD applications Synced/Healthy (repo-server fetched gitea, controller watched the API, redis answered)"
   fi
@@ -178,6 +210,108 @@ if [[ "$NS" == "argocd" ]]; then
 
   echo "== agent DENY verdicts mentioning argocd =="
   denverdicts argocd
+fi
+
+if [[ "$NS" == "external-secrets" ]]; then
+  echo "== external-secrets: the app is healthy and the operator still syncs from OpenBao =="
+  app_state external-secrets "external-secrets app"
+  ready=$(kc -n dev get externalsecret belleshop-db-eso -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)
+  if [[ "$ready" == "True" ]]; then pass "dev/belleshop-db-eso ExternalSecret Ready (controller -> bao.home.arpa -> API works)"
+  else failed "dev/belleshop-db-eso ExternalSecret not Ready (controller cut off from OpenBao or the API?)"; fi
+
+  echo "== dummy create through externalsecret-validate/secretstore-validate (failurePolicy Fail) =="
+  webhook_probe "externalsecret-validate webhook" <<'YAML'
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  generateName: netpol-proof-dummy-
+  namespace: dev
+spec:
+  secretStoreRef:
+    name: openbao
+    kind: SecretStore
+  target:
+    name: netpol-proof-dummy-never-created
+  data: []
+YAML
+
+  echo "== denied: controller metrics from a dev pod (only monitoring may scrape) =="
+  dev_probe deny external-secrets-metrics.external-secrets.svc.cluster.local 8080
+
+  echo "== agent DENY verdicts mentioning external-secrets =="
+  denverdicts external-secrets
+fi
+
+if [[ "$NS" == "kyverno" ]]; then
+  echo "== kyverno: the app is healthy and every controller is Ready =="
+  app_state kyverno "kyverno app"
+  total=0; rdy=0
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    total=$((total+1))
+    if [[ "${line##* }" == "True" ]]; then rdy=$((rdy+1)); fi
+  done < <(kc -n kyverno get pods -l app.kubernetes.io/part-of=kyverno --field-selector=status.phase=Running -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' 2>/dev/null)
+  if [[ "$rdy" == "$total" && "$total" -ge 4 ]]; then pass "all $total kyverno controller pods Ready"
+  else failed "kyverno pods Ready: $rdy/$total"; fi
+
+  echo "== dummy pod create exercises the full admission chain incl. verify-belleshop-images =="
+  webhook_probe "kyverno admission chain (image verification pulls registry signatures)" <<'YAML'
+apiVersion: v1
+kind: Pod
+metadata:
+  generateName: netpol-proof-dummy-
+  namespace: dev
+  labels:
+    app.kubernetes.io/name: belleshop-backend
+spec:
+  containers:
+    - name: dummy
+      image: registry.home.arpa/belleshop/backend:netpol-proof-dummy
+YAML
+
+  echo "== denied: kyverno-svc from a dev pod (only the apiserver may call the webhooks) =="
+  dev_probe deny kyverno-svc.kyverno.svc.cluster.local 9443
+
+  echo "== agent DENY verdicts mentioning kyverno =="
+  denverdicts kyverno
+fi
+
+if [[ "$NS" == "cert-manager" ]]; then
+  echo "== cert-manager: the app is healthy (controller, webhook, cainjector all Ready) =="
+  app_state cert-manager "cert-manager app"
+  total=0; rdy=0
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    total=$((total+1))
+    if [[ "${line##* }" == "True" ]]; then rdy=$((rdy+1)); fi
+  done < <(kc -n cert-manager get pods --field-selector=status.phase=Running -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' 2>/dev/null)
+  if [[ "$rdy" == "$total" && "$total" -ge 3 ]]; then pass "all $total cert-manager pods Ready"
+  else failed "cert-manager pods Ready: $rdy/$total"; fi
+
+  echo "== dummy create through cert-manager-webhook (failurePolicy Fail) =="
+  webhook_probe "cert-manager-webhook" <<'YAML'
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  generateName: netpol-proof-dummy-
+  namespace: dev
+spec:
+  secretName: netpol-proof-dummy-never-created
+  dnsNames:
+    - netpol-proof-dummy.apps.home.arpa
+  issuerRef:
+    name: lab-ca
+    kind: ClusterIssuer
+YAML
+
+  echo "== the served wildcard leaf is still valid: any Gateway route proves it =="
+  allowed_route "gateway route (serves the lab-ca wildcard leaf)" belleshop.apps.home.arpa /api/healthz
+
+  echo "== denied: webhook from a dev pod (only the apiserver may call it) =="
+  dev_probe deny cert-manager-webhook.cert-manager.svc.cluster.local 443
+
+  echo "== agent DENY verdicts mentioning cert-manager =="
+  denverdicts cert-manager
 fi
 
 echo ""

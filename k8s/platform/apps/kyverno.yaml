@@ -22,6 +22,9 @@ spec:
     - repoURL: https://gitea.home.arpa/tunsgit/homelab-platform.git
       targetRevision: main
       ref: values
+    - repoURL: https://gitea.home.arpa/tunsgit/homelab-platform.git
+      targetRevision: main
+      path: k8s/platform/kyverno/manifests   # NetworkPolicies (ADR 0015 A)
   destination:
     server: https://kubernetes.default.svc
     namespace: kyverno

@@ -1,0 +1,144 @@
+# The kyverno allow set (ADR 0015 section A, appendix row "kyverno", with every number
+# re-verified live 2026-11-02). Ships WITH netpol-default-deny.yaml in the same PR: the
+# agent is live, so an allow is never inert. This namespace runs the cluster admission
+# chain - ELEVEN webhooks (read live), failurePolicy Fail on every one except
+# kyverno-ttl-validating (Ignore) and kyverno-verify-mutating (Ignore). A wrong rule
+# here blocks pod, policy and exception writes cluster-wide.
+#
+# Live evidence, 2026-11-02: four controller pods on workernode2, labels
+# app.kubernetes.io/name=kyverno-{admission-controller,background-controller,
+# cleanup-controller,reports-controller} (+ part-of=kyverno). Container ports:
+# admission-controller 9443 (webhooks, Service kyverno-svc 443 -> 9443, Endpoints
+# 10.244.4.170:9443) and 8000 (metrics); cleanup-controller 9443 (Service
+# kyverno-cleanup-controller 443 -> 9443, Endpoints 10.244.4.168:9443) and 8000;
+# background and reports controllers 9443 + 8000. The 8000 metrics Services exist but
+# NO ServiceMonitors do (verified via the admin path) - nothing scrapes kyverno, so
+# there is deliberately no monitoring ingress on 8000.
+#
+# Flows:
+#   every controller        -> API (watching policies, generating resources, reports), DNS
+#   admission-controller    -> registry.home.arpa 192.168.1.87:443 (verified live by
+#                             probe): verify-belleshop-images (the live
+#                             ImageValidatingPolicy, failurePolicy Fail) fetches Cosign
+#                             signatures and SPDX attestations from the image registry at
+#                             admission, with nexus-pull credentials. restrict-registries
+#                             forces every enforced-namespace image to start with
+#                             registry.home.arpa/, and insecureIgnoreTlog/insecureIgnoreSCT
+#                             disable the internet transparency-log lookups - so the
+#                             registry IP is the ONLY external fetch kyverno needs.
+#   apiserver               -> kyverno-svc :443 (9443) and kyverno-cleanup-controller
+#                             :443 (9443), from the master masquerade range
+# The background/reports/cleanup controllers have no external fetches: they watch and
+# write through the API only.
+---
+# DNS for every pod: controllers resolve kubernetes.default (the registry is reached by
+# IP, see the rule below).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  name: kyverno-dns-egress
+  namespace: kyverno
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+---
+# API server egress for every controller (post-DNAT destination = the control-plane
+# node, endpoints "kubernetes" = 192.168.1.90:6443, verified 2026-11-02). Wave -1 per
+# the argocd lesson: the FIRST egress policy that lands isolates every pod, so the API
+# allow must exist before the others or the controllers cut their own watch loops
+# mid-sync - and this namespace serves the cluster admission chain.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  name: kyverno-api-egress
+  namespace: kyverno
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 192.168.1.90/32
+      ports:
+        - { protocol: TCP, port: 6443 }
+---
+# Signature and attestation fetches during image verification (ADR 0012). The
+# admission controller reaches the registry at admission time; without this rule every
+# CREATE/UPDATE of a pod in an enforced namespace is rejected by verify-belleshop-images,
+# i.e. BelleShop deploys stop at admission. Verified live: registry.home.arpa resolves
+# to 192.168.1.87:443 (Nexus, Caddy TLS). A policy cannot name hosts, so the IP is
+# pinned; if the registry moves, this rule and the kyverno-policies globs move together.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kyverno-registry-egress
+  namespace: kyverno
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: kyverno-admission-controller
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 192.168.1.87/32   # registry.home.arpa (Nexus host, Caddy TLS on 443)
+      ports:
+        - { protocol: TCP, port: 443 }
+---
+# Webhook ingress: the apiserver calling kyverno-svc :443 (post-DNAT container port
+# 9443). Cross-node node traffic arrives as the master's masquerade address, so the
+# ipBlock is the master podCIDR, never 192.168.1.90/32 (appendix node-traffic pattern).
+# This serves the nine Fail webhooks on kyverno-svc (resource validate/mutate, policy
+# validate/mutate, exceptions, global context, CEL policies).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kyverno-admission-webhook-ingress
+  namespace: kyverno
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: kyverno-admission-controller
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - ipBlock:
+            cidr: 10.244.0.0/24   # master podCIDR (apiserver -> webhook, cross-node)
+      ports:
+        - { protocol: TCP, port: 9443 }
+---
+# Cleanup-controller webhook ingress: the apiserver calling
+# kyverno-cleanup-controller :443 (post-DNAT 9443, Endpoints 10.244.4.168:9443). Its
+# policy-exception webhook is failurePolicy Fail too (the ttl webhook is Ignore, but
+# it is the same pod and port, so the rule covers both).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kyverno-cleanup-webhook-ingress
+  namespace: kyverno
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: kyverno-cleanup-controller
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - ipBlock:
+            cidr: 10.244.0.0/24   # master podCIDR (apiserver -> webhook, cross-node)
+      ports:
+        - { protocol: TCP, port: 9443 }

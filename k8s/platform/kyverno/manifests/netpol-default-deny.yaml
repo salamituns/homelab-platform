@@ -1,0 +1,25 @@
+# The kyverno default-deny (ADR 0015 section A, last round; webhook namespace).
+# Same PR as netpol-allow.yaml. Wave 1: the deny applies AFTER the allows in the same
+# sync (the argocd sync of 2026-11-03 restarted a control plane when a deny landed
+# first).
+#
+# What must keep working (scripts/netpol-proof.sh kyverno): all four controllers Ready,
+# the app Synced/Healthy, a dummy pod create passing through the full admission chain
+# (verify-belleshop-images pulls the registry), and the webhook ports DENIED from a
+# dev pod (only the apiserver may call them).
+#
+# Rollback = revert the PR (the kyverno app prunes both files). If admission is locked
+# up cluster-wide (failurePolicy Fail on nine webhooks), recover without waiting:
+#   kubectl -n kyverno delete networkpolicy kyverno-default-deny
+# (admin path; the allows are inert without the deny). If a webhook is still
+# unreachable after that, delete the two webhook-ingress policies the same way.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  name: kyverno-default-deny
+  namespace: kyverno
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
