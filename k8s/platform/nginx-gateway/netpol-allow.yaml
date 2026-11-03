@@ -1,0 +1,156 @@
+# The nginx-gateway allow set (ADR 0015 section A, appendix row "nginx-gateway"). Ships WITH
+# netpol-default-deny.yaml in the same PR: the agent is live, so an allow policy is never
+# inert - selecting pods for Egress already isolates their egress.
+#
+# Live evidence, 2026-11-02: data plane = Deployment homelab-gateway-nginx, label
+# app.kubernetes.io/name=homelab-gateway-nginx, containerPorts 80 443 9113 (9113 metrics,
+# no ServiceMonitor - nothing scrapes it). Control plane = Deployment nginx-gateway, label
+# app.kubernetes.io/name=nginx-gateway, containerPorts 8443 (agent-grpc: the data plane
+# agent connects here; also the admission webhook behind Service nginx-gateway 443->8443),
+# 9113 (metrics) and 8081 (health, kubelet same-node probe - always accepted by the agent).
+# Service homelab-gateway-nginx: LoadBalancer 80/443 with externalTrafficPolicy: Local
+# (verified live, resolves an ADR unverified item), so LAN clients reach the data plane
+# pods with their REAL source IP; the 10.244.0.0/16 alternative below covers the Cluster
+# case (kube-proxy masquerade) and in-cluster clients.
+#
+# No blanket intra-namespace allow (the round 1 lesson): control plane <-> data plane is
+# only the agent-grpc direction the ports above show.
+---
+# DNS for every pod in the namespace: the control plane resolves the API server name, and
+# the data plane agent resolves nothing today but gains nothing by being unable to.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nginx-gateway-dns-egress
+  namespace: nginx-gateway
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+---
+# API server egress (control plane watches Gateway API objects; the cert-generator Job
+# writes its Secret). Post-DNAT the destination is the control-plane node, never the
+# ClusterIP: endpoints "kubernetes" = 192.168.1.90:6443 (verified 2026-11-02).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nginx-gateway-api-egress
+  namespace: nginx-gateway
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 192.168.1.90/32   # master, endpoints kubernetes (admin-path read 2026-11-02)
+      ports:
+        - { protocol: TCP, port: 6443 }
+---
+# Data-plane egress to the route backends. Ports are POD ports (post-DNAT): dev
+# frontend 3000 / backend 8000; grafana 3000 (its Service maps 80 -> 3000);
+# argocd-server 8080 (Service 80/443 -> 8080); rollouts dashboard 3100. The dev side of
+# these pairs is already live (dev-*-gateway-ingress); the monitoring, argocd and
+# argo-rollouts ingress sides land with those namespaces' own PRs.
+# Plus the agent-grpc connection to the control plane (intra-namespace, port 8443).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nginx-gateway-data-plane-egress
+  namespace: nginx-gateway
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: homelab-gateway-nginx
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: dev
+      ports:
+        - { protocol: TCP, port: 3000 }   # belleshop frontend
+        - { protocol: TCP, port: 8000 }   # belleshop backend / canary
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - { protocol: TCP, port: 3000 }   # grafana (Service port 80 -> pod 3000)
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: argocd
+      ports:
+        - { protocol: TCP, port: 8080 }   # argocd-server (Service 80/443 -> 8080)
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: argo-rollouts
+      ports:
+        - { protocol: TCP, port: 3100 }   # rollouts dashboard
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: nginx-gateway
+      ports:
+        - { protocol: TCP, port: 8443 }   # agent-grpc: data plane -> control plane
+---
+# Data-plane ingress: the Gateway listener ports on the pod (80/443). externalTrafficPolicy
+# is Local (verified), so the source is the LAN client itself - 192.168.1.0/24. The
+# 10.244.0.0/16 entry covers the Cluster case (node masquerade) and in-cluster clients;
+# both were in the ADR appendix and neither widens anything a pod could not reach before.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nginx-gateway-data-plane-ingress
+  namespace: nginx-gateway
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: homelab-gateway-nginx
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - ipBlock:
+            cidr: 192.168.1.0/24   # LAN clients (ETP Local: real source IP)
+        - ipBlock:
+            cidr: 10.244.0.0/16    # in-cluster clients / masqueraded node traffic (ETP Cluster case)
+      ports:
+        - { protocol: TCP, port: 80 }
+        - { protocol: TCP, port: 443 }
+---
+# Control-plane ingress: agent-grpc/webhook 8443 from the data plane pods (intra-ns) and
+# from the master pod subnet 10.244.0.0/24 - the cross-node apiserver-to-webhook pattern
+# from the ADR appendix (the apiserver on .90 appears as its pod-CIDR masquerade address,
+# NOT 192.168.1.90/32; the appendix records this as a draft error caught in review).
+# Metrics 9113 has no ServiceMonitor and health 8081 is a same-node kubelet probe: neither
+# needs a rule.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nginx-gateway-control-plane-ingress
+  namespace: nginx-gateway
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: nginx-gateway
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: homelab-gateway-nginx
+        - ipBlock:
+            cidr: 10.244.0.0/24   # master podCIDR: the apiserver calling the webhook
+      ports:
+        - { protocol: TCP, port: 8443 }
