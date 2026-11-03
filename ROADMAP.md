@@ -81,7 +81,8 @@ See [postmortem](docs/postmortems/2026-10-25-gitea-rce-cve-2026-60004.md).
   done 2026-11-01: 457/457 DB-backed logins during rotation, 0 restarts, no git change
 
 Carried over (kept at the level described in [ADR 0014](docs/adr/0014-secrets-and-identity.md) and its runbooks):
-- [ ] Alert notifications: Alertmanager routes to null, nothing is delivered yet
+- [x] Alert notifications: Alertmanager routes to null, nothing is delivered yet —
+      done 2026-11-03, email receiver via ESO from OpenBao (ADR 0015 step 5)
 - [ ] The hand-made `belleshop-secrets` still holds the MySQL root password, user, database name and `SECRET_KEY`;
       only the application database password moved (the shadow `belleshop-secrets-eso` is read by no workload)
 - [ ] The unread dead value in `secret/belleshop/app` and the shadow `belleshop-secrets-eso`
@@ -89,15 +90,50 @@ Carried over (kept at the level described in [ADR 0014](docs/adr/0014-secrets-an
       rotate stay valid in them
 - [ ] MySQL datadir recreation does not recreate the rotation accounts
 - [ ] etcd restore is not drilled yet
-- [ ] NetworkPolicy and NodePorts (Week 6)
+- [x] NetworkPolicy and NodePorts (Week 6) — done 2026-11-02/03; NodePorts 30080/30081 removed
+      (belleshop-deploy #25)
 - [ ] Confirm Jenkins holds no copied `admin.conf`
 
 ## Week 6: TLS, network and runtime security
-- [ ] cert-manager with an internal CA, TLS on every `HTTPRoute` (and on the Proxmox UI); move `*.local` hosts to `*.apps.home.arpa`
-- [ ] NetworkPolicies: default-deny per namespace
-- [ ] Proxmox firewall: `tuns` 22/8006 only from the Mac and `tailscale0`, not from every VM (ADR 0003 gap)
-- [ ] Falco for runtime detection, alerts to Alertmanager
-- **Proof:** `kubectl exec` into a pod and spawn a shell, then show the Falco alert
+- [x] cert-manager with an internal CA, TLS on every `HTTPRoute` (and on the Proxmox UI); move `*.local` hosts to `*.apps.home.arpa`
+      (done 2026-11-02; PRs #14-#21, belleshop-deploy #21, BelleShop #16)
+- [x] NetworkPolicies: default-deny per namespace (done 2026-11-02/03: kube-network-policies v1.1.2 +
+      agent-down alert, default-deny in `dev` and in gateway/monitoring/rollouts/argocd, webhook namespaces
+      last; PRs #22-#32, belleshop-deploy #22-#24)
+- [x] Proxmox firewall: `tuns` 22/8006 only from the Mac and `tailscale0`, not from every VM (ADR 0003 gap)
+      (done 2026-11-03, input DROP; PRs #35, #37-#39; iDRAC recovery path live on shared LOM1
+      at 192.168.1.182; negative proof from sectools re-run 2026-11-03)
+- [x] Falco for runtime detection, alerts to Alertmanager (done 2026-11-03; PRs #33, #34, #36;
+      email receiver via ESO from OpenBao, break-glass root generation restored)
+- **Proof:** `kubectl exec` into a pod and spawn a shell, then show the Falco alert —
+      `scripts/falco-proof.sh` (ADR 0015 step 5). Cluster side verified live 2026-11-03: 3 Falco
+      agents and falcosidekick Running, the rendered Alertmanager config and its falco route
+      validated with `amtool` against the live Alertmanager v0.33.1; end to end demoed 2026-11-03:
+      the owner ran `scripts/falco-proof.sh` and the Falco alert email arrived
+      (`docs/runbooks/falco-alerts.md` §5).
+      Netpol proof: `scripts/netpol-proof.sh` (real denied connection, PR #29 hardened it).
+      Firewall proof: from sectools, `curl -qk -m 5 https://192.168.1.181:8006/` -> `000` and
+      `ssh root@192.168.1.181` times out, while the Mac and Tailscale paths still work.
+      Full record with PR numbers and evidence: [ADR 0015 section G](docs/adr/0015-network-policy-and-platform-hardening.md).
+
+Incident during the week: enabling pve-firewall reactivated legacy 10.2.x NAT rules and cut
+HTTP(S) to lab services for about 40 minutes
+([postmortem](docs/postmortems/2026-11-03-pve-firewall-legacy-nat-outage.md), fixed by PR #39).
+
+Carried over from Week 6 (kept at the level described in [ADR 0015](docs/adr/0015-network-policy-and-platform-hardening.md) section G and its runbooks):
+- [ ] OIDC/SSO for the admin UIs (Argo CD, Grafana): local accounts today; schedule it in Week 7/8
+- [ ] Remove the stale dnsmasq on `tuns` (legacy `homelab.local` config listening on 10.2.6.181,
+      superseded by ADR 0004, now also cut off by the host firewall): `scripts/pve-dnsmasq-retire.sh`,
+      owner-run with `--dry-run`
+- [ ] Renew the Proxmox UI certificate by **2028-11-02** (825-day leaf; `docs/runbooks/proxmox-ui-cert.md`)
+- [ ] iDRAC, without racadm: set the IP range filter to the Mac (`192.168.1.121/32`) in the web UI,
+      and check the licence level (Virtual Console needs Enterprise; Serial over LAN is already enabled)
+- [ ] Consider `firewall=1` plus explicit guest rules for the Kubernetes node VMs (their NICs are
+      unfiltered today; the datacenter firewall governs host rules only)
+- [ ] MySQL TLS for the `mysql-bao` path (ADR 0014 step 6 follow-up; out of ADR 0015 scope because
+      it needs MySQL configuration and a restart)
+- [ ] Watch for the kube-network-policies release carrying PR #420 (denied-probe-tail noise,
+      ADR 0015 section A)
 
 ## Week 7: Observability + SLOs
 - [ ] Loki for logs, Grafana dashboards as code

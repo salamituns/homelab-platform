@@ -40,7 +40,8 @@ scripts/openbao-breakglass.sh root-run alertmanager
 # (pass --overwrite to replace the SMTP values).
 ```
 
-At the prompts: 3 unseal shares (hidden), then the same SMTP fields the setup script
+At the prompts: 2 unseal shares (hidden; the store holds 3 shares with a
+threshold of 2, verified live 2026-11-03), then the same SMTP fields the setup script
 asks for - **SMTP username** (your Gmail address), **From**/**To** addresses (Enter
 accepts the username as default), and the **Gmail 16-character App Password** at a
 hidden prompt (spaces stripped, never echoed, sent over ssh stdin).

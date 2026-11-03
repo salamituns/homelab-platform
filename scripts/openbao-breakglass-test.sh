@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Real-run test harness for scripts/openbao-breakglass.sh (pve-ui-cert-test.sh pattern):
 # starts a THROWAWAY non-dev OpenBao server on this Mac (Raft storage in a temp dir,
-# init 5 shares / 3 threshold - the same shape as sectools, ADR 0014), then proves:
+# init 3 shares / 2 threshold - the same shape as sectools, ADR 0014; verified live
+# 2026-11-03: seal-status n=3, t=2), then proves:
 #
 #   1. flag true blocks generate-root (the production state before the fix);
 #   2. SIGHUP does NOT reload the listener flag (why apply-config restarts);
@@ -63,13 +64,13 @@ start_server() {
   bad "server did not come up"; tail -5 "$TD/server.log"; exit 1
 }
 
-unseal_all() {   # 3 of the 5 shares, via the same API the apply-config unseal loop uses
+unseal_all() {   # 2 of the 3 shares, via the same API the apply-config unseal loop uses
   local i r=""
-  for i in 0 1 2; do
+  for i in 0 1; do
     r=$(jq -r --argjson i "$i" '.unseal_keys_b64[$i]' "$TD/init.json" \
       | jq -Rs '{key: (rtrimstr("\n"))}' | curl -q -s -X PUT --data-binary @- "$ADDR/v1/sys/unseal")
   done
-  check "$(jq -r .sealed <<<"$r")" false "unsealed with 3 of 5 shares"
+  check "$(jq -r .sealed <<<"$r")" false "unsealed with 2 of 3 shares"
 }
 
 probe() {   # poll the attempt endpoint past the sealed/post-unseal races: $1 = wanted code
@@ -97,22 +98,22 @@ run_flow() {   # $1 = output file; remaining args: the subcommand and its args; 
   BREAKGLASS_SSH="bash -c" BREAKGLASS_BAO_ADDR="$ADDR" "$SCRIPT" "$@" >"$out" 2>&1
 }
 
-feed_alert() {   # writes the 3 hidden shares + the 4 alertmanager prompts to a file, echoes the path
+feed_alert() {   # writes the 2 hidden shares + the 4 alertmanager prompts to a file, echoes the path
   local f; f=$(mktemp "$TD/answers.XXXXXX")
-  jq -r '.unseal_keys_b64[0,1,2]' "$TD/init.json" >"$f"
+  jq -r '.unseal_keys_b64[0,1]' "$TD/init.json" >"$f"
   printf '%s\n' 'alertuser' 'alerts@home.arpa' 'alerts@home.arpa' 'testapppassword1234' >>"$f"
   echo "$f"
 }
 
-feed_shares() {   # writes just the 3 hidden shares
+feed_shares() {   # writes just the 2 hidden shares
   local f; f=$(mktemp "$TD/answers.XXXXXX")
-  jq -r '.unseal_keys_b64[0,1,2]' "$TD/init.json" >"$f"
+  jq -r '.unseal_keys_b64[0,1]' "$TD/init.json" >"$f"
   echo "$f"
 }
 
 echo "== 1. flag TRUE (the production state before this change) blocks generate-root"
 start_server true
-bao operator init -key-shares=5 -key-threshold=3 -format=json >"$TD/init.json" 2>/dev/null
+bao operator init -key-shares=3 -key-threshold=2 -format=json >"$TD/init.json" 2>/dev/null
 unseal_all
 BLOCKED="$(probe_blocked)"
 if [[ "$BLOCKED" == 405 || "$BLOCKED" == 500 ]]; then

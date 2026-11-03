@@ -8,7 +8,7 @@
 #   1. Generate a one-time pad and start root token generation:
 #        OTP=$(bao operator generate-root -generate-otp)
 #        NONCE=$(bao operator generate-root -init -otp="$OTP" -format=json | jq -r .nonce)
-#   2. Supply 3 of 5 unseal keys (`bao operator generate-root -nonce="$NONCE"`), then decode:
+#   2. Supply 2 of 3 unseal keys (`bao operator generate-root -nonce="$NONCE"`), then decode:
 #        ROOT_TOKEN=$(bao operator generate-root -decode="$ENCODED" -otp="$OTP")
 #   3. Run this script:
 #        BAO_ADDR=https://bao.home.arpa \

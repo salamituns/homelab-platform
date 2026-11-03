@@ -2,6 +2,17 @@
 
 Host: `tuns` (`192.168.1.181`, `https://proxmox.home.arpa:8006/`, Proxmox VE 9.1 on Debian 13).
 
+The host firewall is enabled with input DROP: 22 and 8006 from the Mac and `tailscale0` only
+([ADR 0015](../adr/0015-network-policy-and-platform-hardening.md) section C; staging, timers,
+rollback and the iDRAC recovery path: [idrac-and-firewall.md](idrac-and-firewall.md)). Two
+lessons from the 2026-11-03 apply live there. Away from home, use the host's own Tailscale
+address `100.81.210.111` (`homelab-breakglass`): through the subnet router the host sees the
+gateway's LAN address, which is not in its `management` ipset, so the LAN name times out
+off-LAN by design. And after any host firewall change, verify from a node (master to
+`https://gitea.home.arpa` and Argo app health), not only 22/8006 from the Mac - that node check
+is what caught the
+[legacy-NAT outage](../postmortems/2026-11-03-pve-firewall-legacy-nat-outage.md).
+
 ## 1. SSH access
 
 `ansible/playbooks/proxmox-ssh.yml` hardens SSH on `tuns` to key-only authentication by writing `/etc/ssh/sshd_config.d/10-homelab.conf`:

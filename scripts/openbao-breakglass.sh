@@ -58,7 +58,8 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DRY_RUN=false
 OVERWRITE=false
-SHARES_REQUIRED=3   # the store was inited 5 shares / 3 threshold (ADR 0014, runbook §2)
+SHARES_REQUIRED=2   # the store was inited 3 shares / 2 threshold (ADR 0014, runbook §2;
+                    # verified live 2026-11-03: seal-status reports n=3, t=2)
 
 # The ssh runner as an array: default "ssh tunsadmin@192.168.1.95"; tests override with e.g. "bash -c"
 # (argv word splitting is safe here; the override never contains secrets).
@@ -241,9 +242,9 @@ while IFS= read -r share; do
   RESP=$(jq -n --arg k "$share" --arg nonce "$NONCE" '{key: $k, nonce: $nonce}' \
     | curl -q -s -X PUT --data-binary @- "$ADDR/v1/sys/generate-root/update")
   echo "    [remote] share $n accepted: $(jq -c '{complete, progress, errors}' <<<"$RESP")"
-  # Break the moment the threshold is met: the store's init shape is documented two
-  # ways (ADR 0014: 3 shares/2 threshold; the week-6 docs: 5 shares/3), and submitting
-  # past "complete" would error. Three prompts always satisfy either.
+  # Break the moment the threshold is met: the store holds 3 shares with a
+  # threshold of 2 (verified live 2026-11-03: seal-status n=3, t=2), and
+  # submitting past "complete" would error. Two prompts satisfy it.
   [[ "$(jq -r .complete <<<"$RESP")" == "true" ]] && break
 done < <(jq -r '.shares[]' <<<"$P")
 [[ "$(jq -r .complete <<<"$RESP")" == "true" ]] \
