@@ -1,6 +1,6 @@
 # ADR 0015: NetworkPolicy enforcement and platform hardening
 
-- Status: Proposed (owner decision pending).
+- Status: Accepted (owner, 2026-11-02); rollout complete 2026-11-03.
 - Date: 2026-11-01, corrected on this branch after review of the first draft
 
 ## Context
@@ -307,6 +307,82 @@ cluster-scoped objects, cannot get Services in most namespaces, and cannot list 
 Order and why: B first (pure additions; unlocks TLS everywhere), A second (the core gap; the controller alone
 changes nothing, so the risk is staged inside it), D third (independent once the receiver exists), C last
 (owner-only, highest lockout risk; do it when nothing else is mid-flight and iDRAC has been tested).
+
+## G. Rollout results (Week 6 closeout, 2026-11-03)
+
+All steps shipped. PR numbers are homelab-platform unless the repo is named. Live states below were
+re-read read-only on 2026-11-03 from the host, the sectools SSH path and the `olatunde` kubeconfig.
+
+1. **Step 0, done 2026-11-02:** the AppProject destinations grew with each step rather than in one
+   PR - cert-manager with #14, kube-network-policies with #22, falco with #33.
+2. **Step 1 (TLS), done 2026-11-02:** internal CA and cert-manager (PRs #14, #15, #16, #17), HTTPS
+   listener on :443 with a wildcard `*.apps.home.arpa` Certificate, HTTP to HTTPS redirects, and the
+   five route renames. belleshop-deploy #21 moved the app to `https://` and the new names; BelleShop
+   #16 updated its scripts. Evidence: `scripts/route-smoke.sh` passes over HTTPS, and
+   `curl -I http://belleshop.apps.home.arpa` answers with the redirect (owner-run).
+3. **Step 2 (Proxmox UI cert), done 2026-11-02:** CSR generated on `tuns`, key never leaving it,
+   owner-signed via the lab **intermediate** (PRs #18, #19, #20, #21; #19/#20 were fixes found while
+   applying: the chain must be passed as a file path, and the leaf is the 825-day macOS maximum).
+   The leaf expires **2028-11-02** (renew by then; the runbook records the date). Evidence:
+   `docs/runbooks/proxmox-ui-cert.md` and the browser chain to `lab-root`.
+4. **Step 3 (NetworkPolicy), done 2026-11-02/03:** kube-network-policies v1.1.2 vendored and deployed
+   with the agent-down PrometheusRule (#22); allow policies and default-deny in `dev`
+   (belleshop-deploy #22, #23, #24); default-deny `nginx-gateway` (#26), `monitoring` (#23),
+   `argo-rollouts` (#24 + #27 plugin-download fix), `argocd` (#25 + #28 ordering fix),
+   then the webhook namespaces last: `external-secrets` (#30), `kyverno` (#31), `cert-manager` (#32).
+   #29 was the mid-round cleanup (proof-script fixes, real smoke paths, NGF telemetry off). Evidence:
+   `scripts/netpol-proof.sh` (real denied connection plus each allow flow, per namespace) and the
+   owner dummy creates in the webhook namespaces. Webhook ports came from the live Services
+   (10250 for ESO and cert-manager, not the documented 9443 - a live correction to the appendix).
+5. **Step 4 (NodePorts), done 2026-11-03:** belleshop-deploy #25 removed NodePorts 30080/30081;
+   nothing in either repo references them now.
+6. **Step 5 (Falco), done 2026-11-03:** Falco chart 9.2.2 (modern_eBPF, digest-pinned) with
+   falcosidekick to Alertmanager, and the Alertmanager config itself templated by ESO from OpenBao
+   (#33). Email alerts are live: Alertmanager no longer routes everything to `null`, which also
+   closes the Week 5 carry-over. #34 disabled the noisy `KubeClientCertificateExpiration` alert
+   before real email delivery started; #36 restored the root-generation path (sectools-only
+   break-glass script, `scripts/openbao-breakglass.sh`; tested against a throwaway 2.7.2 server,
+   23/23) that the alert setup needs. Live read 2026-11-03: 3 falco agents (one per node) and the
+   falcosidekick pod Running. Evidence: `scripts/falco-proof.sh` (exec a shell in `dev`, Falco
+   event, sidekick forward, Alertmanager route, email) - the owner verification step in
+   `docs/runbooks/falco-alerts.md` §5; the rendered Alertmanager config was validated against the
+   live Alertmanager v0.33.1 with `amtool` before the merge.
+7. **Step 6 (iDRAC + Proxmox firewall), done 2026-11-03:** iDRAC moved to shared LOM1 with a new
+   LAN address under a timed revert, then the firewall staged ACCEPT, then input DROP (PRs #35,
+   #37, #38, #39). Live read 2026-11-03: `ipmitool delloem lan get` shows `shared with lom1` at
+   192.168.1.182 (gateway .254); `pve-firewall status` is **enabled/running** with `policy_in: DROP`
+   and the `management` ipset holding only the Mac and `100.64.0.0/10`. Evidence (re-run
+   2026-11-03, both fail as required): from sectools,
+   `curl -qk -m 5 https://192.168.1.181:8006/` returns code `000` and
+   `ssh root@192.168.1.181` times out, while Mac and Tailscale paths still work.
+8. **OpenBao shares, verified live 2026-11-03:** `GET /v1/sys/seal-status` on sectools reports
+   `n=3, t=2` - three shares, threshold two, matching ADR 0014 and `docs/runbooks/openbao.md` §2.
+   Week 6 documents that said "3 of 5" were corrected in this PR (script comments, the break-glass
+   prompt count, the test fixture's init shape).
+
+### Incidents / lessons
+
+- **2026-11-03 11:24-~12:05 CST, input-ACCEPT stage of step 6:** enabling pve-firewall loaded
+  `br_netfilter` (`bridge-nf-call-iptables=1`), which pushed bridged traffic through the host nat
+  table, where legacy `-i vmbr0 --dport 80/443 DNAT 10.2.0.2` rules were still loaded and
+  boot-restored. Non-firewalled VMs (the k8s nodes, `firewall=0`) and the LAN lost HTTP(S) to lab
+  services; Argo CD lost Gitea at 11:24 and ESO lost OpenBao. Fixed by
+  `scripts/pve-legacy-nat-cleanup.sh` (PR #39), which also disabled both boot-restore paths.
+  Full write-up: [postmortem](../postmortems/2026-11-03-pve-firewall-legacy-nat-outage.md). Lesson:
+  enabling enforcement activates old invisible state; verify with a node-to-service flow, not
+  only host ports.
+- **iDRAC script bugs (#37, #38), fixed 2026-11-03:** `ipmitool delloem lan set shared with lom1`
+  quoted as one argument only prints usage (#37), and shared-mode status prints across two lines so
+  the single-line check missed it (#38). #37 also moved the revert timer to arm **before** the NIC
+  change instead of after. Lesson: arm the revert first; check the parser's real output shape.
+- **Argo CD self-lock (#28), fixed 2026-11-02:** the `argocd` netpol PR applied the DNS egress allow
+  and the default-deny in one sync; the deny landed first and cut the controller off from the API
+  server mid-sync, so Argo CD could not apply its own fix. #28 recreated the API egress allow with
+  `argocd.argoproj.io/sync-wave: "-1"` so it lands before the deny. Lesson: inside one sync that
+  adds enforcement to a control-plane namespace, order the allows ahead of the deny.
+- **Alert noise before a real receiver (#34):** the `KubeClientCertificateExpiration` alert (built-in,
+  fires a month out on every kubelet cert) was disabled before email delivery started, or every
+  renewal window would page the owner. Lesson: tune the noisy rules before the receiver becomes real.
 
 ## Decisions for the owner
 

@@ -39,6 +39,7 @@ This prints three **unseal shares**, the threshold, and the **initial root token
 somewhere that is neither the Proxmox disk array (PBS copies it nightly, and a backup is useless
 without the shares anyway) nor this repo. A password manager or paper in a safe works. Two shares
 unseal the store; losing two shares loses everything in it, snapshots included.
+Verified live 2026-11-03: `GET /v1/sys/seal-status` on sectools reports `"n": 3, "t": 2`.
 
 ## 3. Tell if it is sealed (and unseal after a reboot)
 
@@ -150,9 +151,10 @@ The script always revokes the token when the command is done - and verifies the
 revocation; a trap revokes again on any failure. `root-run` cancels any in-flight
 generation before it starts, so a failed run can simply be re-run. If you ever need the
 manual dance instead (the old flow, kept for reference), it is the API the script uses:
-init an attempt with an OTP, submit 3 shares to the update endpoint, decode the encoded
-token with the OTP - but the script does exactly that without putting the token in a
-terminal.
+init an attempt with an OTP, submit 2 shares (the threshold; the store holds 3
+shares with a threshold of 2, verified live 2026-11-03) to the update endpoint, decode
+the encoded token with the OTP - but the script does exactly that without putting the
+token in a terminal.
 
 Read-only: list existing tokens by accessor, then look one up without ever printing a
 token value:
