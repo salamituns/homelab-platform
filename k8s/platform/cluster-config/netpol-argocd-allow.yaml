@@ -49,6 +49,12 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
+  annotations:
+    # Wave -1: the application-controller applies these policies itself. The first
+    # egress policy isolates every argocd pod, so the API allow must exist BEFORE it,
+    # or the controller cuts its own API access mid-sync (happened 2026-11-03 04:07Z;
+    # recovered by applying this file over the admin path).
+    argocd.argoproj.io/sync-wave: "-1"
   name: argocd-api-egress
   namespace: argocd
 spec:
