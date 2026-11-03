@@ -17,8 +17,8 @@
 # intra-namespace monitors (grafana, alertmanager, prometheus self, operator, ksm).
 #
 # No blanket intra-namespace allow (round 1 lesson): the intra rule below is port-limited
-# to the metric ports the monitors actually use. falcosidekick (alertmanager 9093 in the
-# appendix) is not deployed - deliberately not allowed yet.
+# to the metric ports the monitors actually use. falcosidekick in `falco` is allowed into
+# alertmanager :9093 (`monitoring-alertmanager-falco-ingress`, ADR 0015 D step 5).
 ---
 # DNS for every pod: prometheus resolves every target name, grafana its datasources,
 # reloader sidecars and the operator the objects they watch.
@@ -223,3 +223,29 @@ spec:
             cidr: 10.244.0.0/24
       ports:
         - { protocol: TCP, port: 10250 }
+---
+# Alertmanager ingress from falcosidekick (ADR 0015 section D, step 5): falcosidekick in
+# `falco` POSTs runtime alerts to `http://prometheus-stack-kube-prom-alertmanager.monitoring.svc.cluster.local:9093/api/v2/alerts`.
+# `falco` stays exempt from default-deny per ADR 0015, so only the `monitoring` ingress side
+# is needed. Pod labels come from the rendered falco 9.2.2 / falcosidekick 0.14.1 chart.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: monitoring-alertmanager-falco-ingress
+  namespace: monitoring
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: alertmanager
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: falco
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: falcosidekick
+              app.kubernetes.io/instance: falco
+      ports:
+        - { protocol: TCP, port: 9093 }
