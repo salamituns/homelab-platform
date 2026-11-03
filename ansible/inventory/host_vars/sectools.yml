@@ -17,4 +17,16 @@ firewall_service_rules:
 
 caddy_sites:
   - { names: [s3.home.arpa], upstream: "127.0.0.1:8333", allowed_clients: "{{ lab_admin_clients }}" }
-  - { names: [bao.home.arpa], upstream: "127.0.0.1:8200" }
+  # blocked_paths (role: caddy): the OpenBao break-glass endpoints answer 403 from the
+  # network, whatever the client. The listener on 127.0.0.1:8200 keeps them open for
+  # generate-root (openbao_disable_generate_root_endpoints, runbook openbao.md §6), so
+  # this is the half of the design that keeps root generation sectools-only. The rekey
+  # paths are blocked outright: rekey is a planned, offline-ish operation, not break-glass,
+  # and OpenBao's listener flag for them (disable_unauthed_rekey_endpoints, default true
+  # since 2.5.0) stays untouched - the endpoints stay unusable everywhere.
+  - names: [bao.home.arpa]
+    upstream: "127.0.0.1:8200"
+    blocked_paths:
+      - /v1/sys/generate-root*        # the new-style API the break-glass script uses
+      - /v1/sys/generate-root-token*  # the legacy API (blocked here AND gated by the listener)
+      - /v1/sys/rekey*                # rekey is never break-glass
