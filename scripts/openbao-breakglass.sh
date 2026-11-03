@@ -60,9 +60,9 @@ DRY_RUN=false
 OVERWRITE=false
 SHARES_REQUIRED=3   # the store was inited 5 shares / 3 threshold (ADR 0014, runbook §2)
 
-# The ssh runner as an array: default "ssh sectools"; tests override with e.g. "bash -c"
+# The ssh runner as an array: default "ssh tunsadmin@192.168.1.95"; tests override with e.g. "bash -c"
 # (argv word splitting is safe here; the override never contains secrets).
-read -r -a SSH_RUNNER <<<"${BREAKGLASS_SSH:-ssh sectools}"
+read -r -a SSH_RUNNER <<<"${BREAKGLASS_SSH:-ssh -o BatchMode=yes tunsadmin@192.168.1.95}"
 REMOTE_ADDR="${BREAKGLASS_BAO_ADDR:-http://127.0.0.1:8200}"
 PLAYBOOK_DIR="${BREAKGLASS_PLAYBOOK_DIR:-$REPO_ROOT/ansible}"
 
