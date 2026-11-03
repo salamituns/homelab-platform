@@ -44,7 +44,7 @@ That apply:
 1. Sets user 2's password.
 2. `ipmitool lan set 1 access on` (channel 1 Access Mode is **disabled** today;
    a new IP alone would still not accept sessions).
-3. `ipmitool delloem lan set "shared with lom1"` (13G / iDRAC8; LOM1 = nic0,
+3. `ipmitool delloem lan set shared with lom1` (separate words: quoted as one argument, ipmitool only prints usage) (13G / iDRAC8; LOM1 = nic0,
    the only cabled NIC; failover none vs `shared with failover lom2`).
 4. Static `192.168.1.182`.
 5. Arms `homelab-idrac-revert.timer` which restores **dedicated + 10.2.6.180**.
