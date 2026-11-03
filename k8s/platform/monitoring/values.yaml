@@ -2,6 +2,28 @@
 # Grafana's admin login is the Secret monitoring/grafana-admin, created OUTSIDE git (ADR 0008).
 # Alertmanager's config is the Secret monitoring/alertmanager-config-eso synced by ESO from
 # OpenBao `secret/data/monitoring/alertmanager` (ADR 0015 section D, step 5).
+# kube-proxy/etcd/scheduler/controller-manager metrics bind 127.0.0.1 on this
+# cluster (ss on the nodes, 2026-11-03), so the chart's ServiceMonitors scrape
+# dead endpoints and fire etcdInsufficientMembers / TargetDown / *Unreachable
+# forever. Disable the four scrapes and their default rules. The alternative
+# (rebind those ports via kubeadm ExtraArgs, owner host change) is in
+# docs/runbooks/monitoring.md.
+kubeProxy:
+  enabled: false
+kubeEtcd:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeControllerManager:
+  enabled: false
+defaultRules:
+  create: true
+  rules:
+    etcd: false
+    kubeControllerManager: false
+    kubeProxy: false
+    kubeSchedulerAlerting: false
+    kubeSchedulerRecording: false
 alertmanager:
   alertmanagerSpec:
     configSecret: alertmanager-config-eso
@@ -16,8 +38,6 @@ alertmanager:
               storage: 2Gi
           storageClassName: local-path
   enabled: true
-defaultRules:
-  create: true
 global:
   rbac:
     create: true
