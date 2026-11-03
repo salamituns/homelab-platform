@@ -78,9 +78,12 @@ denverdicts() {   # $1 grep pattern (namespace or object name)
   for p in $(kc get pods -n kube-network-policies -o name 2>/dev/null); do
     while IFS= read -r line; do
       [[ -n "$line" ]] && { echo "  $p $line"; found=1; }
-    done < <(kc logs -n kube-network-policies "$p" --tail=500 2>/dev/null | grep -i deny | grep -i "$1" | tail -3)
+    # grep exits 1 on no match; with pipefail that aborted the whole script (fix from #29).
+    done < <(kc logs -n kube-network-policies "$p" --tail=500 2>/dev/null | grep -i deny | grep -i "$1" | tail -3 || true)
   done
-  [[ "$found" == "0" ]] && echo "  (no DENY verdict lines matching '$1' in the last 500 per agent pod)"
+  if [[ "$found" == "0" ]]; then
+    echo "  (no DENY verdict lines matching '$1' in the last 500 per agent pod)"
+  fi
 }
 
 # Argo CD application sync+health (readable with the limited cert; a Synced/Healthy app

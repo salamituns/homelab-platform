@@ -38,3 +38,13 @@ patches:
         value:
           requests: { cpu: 50m, memory: 64Mi }
           limits: { memory: 256Mi }
+  # Product telemetry POSTs to nginx.com; netpol egress deny makes it fail every interval
+  # (telemetryJob "Failed to export telemetry data", live 2026-11-03). Manifests install
+  # uses --product-telemetry-disable (Helm: nginxGateway.productTelemetry.enable=false).
+  - target:
+      kind: Deployment
+      name: nginx-gateway
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/args/-
+        value: --product-telemetry-disable
