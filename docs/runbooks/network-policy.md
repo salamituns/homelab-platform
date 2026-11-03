@@ -181,6 +181,15 @@ etcd 2381, controller-manager 10257, scheduler 10259, apiserver 6443 on the mast
 port-limited intra-namespace metrics; alertmanager to smtp.gmail.com:465 (public internet
 minus the private ranges); grafana 3000 from nginx-gateway; prometheus 9090 from
 argo-rollouts (the canary analysis). falcosidekick is not deployed - not allowed yet.
+## Round 2: argo-rollouts (third of the four)
+
+Allow set + default-deny in one PR, registered in the argo-rollouts kustomization (the
+lesson from the brief: a file that exists but is not listed never deploys).
+
+Flows (live evidence in the file header): DNS + API for the controller and dashboard;
+dashboard 3100 from the Gateway; controller -> Prometheus 9090 for canary analysis. The
+controller's 8090 metrics port has no ServiceMonitor, so nothing scrapes it and no ingress
+rule exists for it.
 
 Watch after sync:
 
@@ -205,3 +214,11 @@ the prometheus pod - never exempt.
 
 Rollback: revert the PR; the monitoring app has prune enabled, so both files disappear with
 it and the namespace returns to no policies.
+scripts/netpol-proof.sh argo-rollouts   # dashboard route, app health, a denied check, verdicts
+```
+
+Then run a REAL canary (promote or a BelleShop image bump): the analysis query to
+Prometheus only proves itself under a rollout. If the analysis fails, read the DENY
+verdicts for the controller pod.
+
+Rollback: revert the PR; the argo-rollouts app prunes both files.
