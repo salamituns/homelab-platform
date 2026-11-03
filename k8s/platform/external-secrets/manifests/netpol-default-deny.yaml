@@ -1,0 +1,26 @@
+# The external-secrets default-deny (ADR 0015 section A, last round; webhook namespace).
+# Same PR as netpol-allow.yaml. Wave 1: the deny applies AFTER the allows in the same
+# sync - without the wave it can land first and cut the running controllers' API
+# connections (the argocd sync of 2026-11-03 restarted a control plane that way).
+#
+# What must keep working (scripts/netpol-proof.sh external-secrets): the controller
+# syncing secrets from OpenBao (both dev ExternalSecrets were Ready/True live), the
+# admission webhooks answering the apiserver (dummy-create check), Prometheus scraping
+# all three pods, and the ESO app itself staying Synced/Healthy.
+#
+# Rollback = revert the PR. The external-secrets app has prune enabled, so Argo CD
+# removes both files and the namespace returns to no policies. If a bad rule already
+# locked up WRITES cluster-wide (failurePolicy Fail webhooks), recover without waiting
+# for the revert:
+#   kubectl -n external-secrets delete networkpolicy external-secrets-default-deny
+# (admin path; that one policy is the whole deny, the allows are inert without it).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  name: external-secrets-default-deny
+  namespace: external-secrets
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
