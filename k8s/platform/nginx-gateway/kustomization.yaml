@@ -6,6 +6,8 @@ resources:
   - vendor/ngf-crds-v2.8.0.yaml
   - vendor/ngf-deploy-v2.8.0.yaml
   - gateway.yaml
+  - netpol-allow.yaml   # allow flows (ADR 0015 A appendix, round 2); never inert with the agent live
+  - netpol-default-deny.yaml   # default-deny ingress+egress (ADR 0015 A, round 2)
 # Control plane and cert-generator Job by digest (ghcr.io, checked 2026-10-31).
 images:
   - name: ghcr.io/nginx/nginx-gateway-fabric

@@ -156,6 +156,18 @@ logs. Not verifiable with the limited cert and left to the owner at apply time: 
 server-side dry-run of NetworkPolicies (the Role is read-only for them) and the actual
 post-sync behavior, which the proof script covers.
 
+## Round 2: nginx-gateway (first of the four; the others follow one at a time)
+
+Allow set + default-deny in the SAME PR (`k8s/platform/nginx-gateway/netpol-allow.yaml` and
+`netpol-default-deny.yaml`): with the agent live an allow is never inert, so shipping allows
+first "to be safe" would already isolate the namespace.
+
+Flows (all verified live 2026-11-02, details in the file header): data-plane ingress 80/443
+from the LAN (ETP Local, real client IP) and from the pod CIDR; data-plane egress to the four
+route backends (dev 3000/8000, grafana 3000, argocd-server 8080, rollouts dashboard 3100)
+plus agent-grpc 8443 to the control plane; control-plane ingress 8443 from the data plane and
+from the master pod subnet (apiserver webhook); DNS and API (.90:6443, endpoints verified)
+for every pod.
 ## Round 2: monitoring (second of the four)
 
 Allow set + default-deny in one PR, in `k8s/platform/monitoring/manifests/` (the monitoring
@@ -173,6 +185,16 @@ argo-rollouts (the canary analysis). falcosidekick is not deployed - not allowed
 Watch after sync:
 
 ```sh
+scripts/netpol-proof.sh nginx-gateway   # 4 routes + control plane + a denied check + verdicts
+scripts/route-smoke.sh 192.168.1.240    # the full 20-check sweep, unchanged behavior expected
+```
+
+Then read the agent DENY verdicts for an hour (the #417 probe-tail noise is expected: tail
+packets of node-to-pod HTTPS probes denied while the probes pass) and watch one Argo CD sync
+- the webhook path (apiserver -> 8443) only proves itself on a real sync.
+
+Rollback: revert the PR. Argo CD prunes both files and the namespace returns to no policies
+at all (the pre-agent state; the data-plane 80/443 listener never depended on policy).
 scripts/netpol-proof.sh monitoring    # grafana route, app health, a denied check, verdicts
 ```
 
