@@ -64,3 +64,7 @@ extraArgs:
   real-client-ip-header: X-Forwarded-For
   trusted-proxy-ip: 10.244.0.0/16
   skip-provider-button: "true"
+  # Keep only identity + groups in the cookie, not Gitea's access/id/refresh tokens: the full session
+  # cookie was too big for the NGINX Gateway ("upstream sent too big header" -> 502, live 2026-11-04).
+  # Valid because nothing passes tokens upstream and cookie_refresh is off (validation/sessions.go v7.15.5).
+  session-cookie-minimal: "true"
