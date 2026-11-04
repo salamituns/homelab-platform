@@ -1,6 +1,6 @@
 # ADR 0017: Loki logs, dashboards as code, and BelleShop SLOs
 
-- Status: Proposed (owner, 2026-11-04). Design only; no cluster apply on this branch.
+- Status: Accepted (owner, 2026-11-04, PR #56), with the owner decisions below.
 - Date: 2026-11-04
 - Owner: owner
 - Last reviewed: 4 Nov 2026
@@ -233,6 +233,15 @@ cap. After the Loki PVC binds, `kubectl get pvc,pv` plus `df` on the chosen work
    3. blackbox-exporter chart + lab-CA volume + two Probe CRs + blackbox egress netpol to `.240:443`.
    4. PrometheusRules + Alertmanager child route.
    5. Owner-run proof (decision 4); tick the ROADMAP proof line.
+
+
+## Owner decisions (2026-11-04, on acceptance)
+
+1. **Latency alerts start as `severity: warning`** (no email page) and are promoted after 24 h of real
+   `probe_duration_seconds` data justify the 500 ms / 300 ms thresholds. Availability burn-rate alerts page from day one.
+2. **Alloy collects every namespace except `kube-system`** (noise vs the 10Gi / 7d Loki volume).
+3. **Disk check after the Loki PVC binds:** host `df` on the node that holds it, recorded in the runbook.
+4. **`api-belleshop.apps.home.arpa` gets a debug-only probe** (no SLO): users enter through `belleshop.apps.home.arpa`.
 
 ## Consequences
 
