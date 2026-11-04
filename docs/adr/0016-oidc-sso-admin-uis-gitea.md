@@ -1,0 +1,285 @@
+# ADR 0016: OIDC single sign-on for the admin UIs, with Gitea as the provider
+
+- Status: Proposed (owner decision recorded 2026-11-03; design only — nothing in this ADR is applied to the lab yet).
+- Date: 2026-11-03
+
+## Context
+
+The Week 6 carry-over list says the admin UIs still authenticate with local accounts: Grafana uses the hand-made
+`monitoring/grafana-admin` Secret, Argo CD uses its built-in admin, and the Prometheus and Alertmanager UIs have no
+login at all. One identity already exists for every person in the lab: the Gitea account on `192.168.1.97`
+(`gitea.home.arpa`, rebuilt per [ADR 0005](0005-gitea-rebuild.md)). The owner decided on 2026-11-03 that **Gitea is
+the OIDC provider** — no Dex, Keycloak or Authentik — so the question this ADR answers is how to wire the existing
+cluster consumers to it.
+
+This ADR is design only. The rollout belongs to Week 7 and a separate runbook.
+
+Verified on 2026-11-03 (read-only: admin SSH for `kubectl`, curl/openssl from the Mac — the 8h operator certificate
+expired, so no pod exec/list with it):
+
+| Area | Current state | Why it matters |
+|---|---|---|
+| Provider | Gitea 1.27.3 (`sudo gitea --version` over SSH to the Gitea VM). `[oauth2]` in `app.ini` has no `ENABLED` key (default on); JWT keys come from a secret file | Gitea ships a standards-track OIDC provider; nothing to install |
+| Discovery | `https://gitea.home.arpa/.well-known/openid-configuration` (fetched with `--cacert`): issuer `https://gitea.home.arpa`; authorize `/login/oauth/authorize`, token `/login/oauth/access_token`, JWKS `/login/oauth/keys`, userinfo `/login/oauth/userinfo`; RS256; PKCE S256 supported; grants `authorization_code` + `refresh_token` | Endpoints and crypto the consumers must be configured with |
+| Groups | The discovery doc advertises a `groups` scope and claim. Upstream PR [#17367](https://github.com/go-gitea/gitea/pull/17367): the claim is a list of `"org"` and `"org:team"` strings, **team names lowercased** (`org.Name + ":" + team.LowerName`), in both the ID token (when the `groups` scope is granted) and the userinfo response | Authorization can map Gitea org/team membership to UI roles — no groups means per-user config in every UI |
+| TLS | `gitea.home.arpa` is signed by the **Gitea Caddy root** (`ansible/files/ca/gitea-caddy-root.crt`), not the lab root: `openssl verify -CAfile gitea-caddy-root.crt` OK, lab-root fails error 20. Chain: leaf ← "Caddy Local Authority - ECC Intermediate" ← "Caddy Local Authority - 2026 ECC Root" | Every in-cluster consumer must pin the Gitea root. ADR 0015 decision 5 already deferred re-rooting the five Caddy VM roots |
+| In-cluster DNS | CoreDNS Corefile forwards `home.arpa:53` to `192.168.1.96` (the gateway) | Pods can resolve `gitea.home.arpa`. **In-cluster HTTPS reachability from a pod was NOT tested** (no exec path today); rollout step 0 proves it |
+| Argo CD | `argocd-cm` has no `oidc.config` (only resource customizations/exclusions). **`argocd-rbac-cm` is empty**. With no `policy.default` and no matching rule, an SSO user gets no permissions at all (only the built-in local `admin` account carries `role:admin`), so SSO without an RBAC policy fails closed: people can log in but see nothing. The `dex-server` pod runs but is unused. Argo CD's own manifests are out of git ([ADR 0008](0008-argocd-app-of-apps-platform.md)): only Application objects live here | OIDC is a config patch, owner-applied. The RBAC policy must ship in the same change, or SSO logins succeed but are useless |
+| Argo CD network | The `argocd-server` egress netpol already allows 443 to `192.168.1.97/32` (plus 5556/5557 to dex); 16 netpols exist in `argocd` | No netpol change needed for Argo CD's OIDC flow (code exchange + JWKS from `argocd-server`) |
+| Grafana | kube-prometheus-stack chart 88.3.0 (release `prometheus-stack`), values in `k8s/platform/monitoring/values.yaml`; admin login from the out-of-git `grafana-admin` Secret; served at `grafana.apps.home.arpa` through the shared Gateway (`grafana-httproute.yaml`) | Grafana's `generic_oauth` needs chart values, a CA mount and an egress rule |
+| Prometheus / Alertmanager UIs | `prometheus.apps.home.arpa` and `alertmanager.apps.home.arpa` HTTPRoutes point straight at the web ports; ingress is limited to the Gateway data plane (`netpol-allow.yaml`); the Alertmanager UI is unauthenticated and can create silences (`docs/runbooks/monitoring.md`) | Prometheus/Alertmanager have no OIDC support; they need a proxy that does the OIDC dance for them |
+| Secret delivery | ESO + OpenBao per [ADR 0014](0014-secrets-and-identity.md); `monitoring` has a namespace-scoped `SecretStore` backed by the sectools Caddy root | Client and cookie secrets follow the proven path, never git |
+| Proxy | oauth2-proxy **v7.15.5** (released 2026-10-01; chart 10.7.1, verified on Artifact Hub), image `quay.io/oauth2-proxy/oauth2-proxy:v7.15.5`. v7.15.5 fixes three security advisories, including the credential disclosure in callback error logging and two authentication-bypass issues that require `--trusted-proxy-ip` when running behind a reverse proxy | The only new moving part; pinned like every image in this repo (digest at implementation) |
+| Gitea 2FA | Community Gitea can enforce 2FA **instance-wide only**, since 1.24 ([issue #880](https://github.com/go-gitea/gitea/issues/880), closed for 1.24.0): `[security] TWO_FACTOR_AUTH=enforced` in `app.ini`, with a per-auth-source "skip two-factor" option. There is **no per-org or per-team enforcement** (the Enterprise offering advertises that separately), and the upstream author notes the feature has no doc yet | The admin org's 2FA posture is policy + audit, or a global switch with an unverified interaction with token-based CI accounts |
+
+## Scope
+
+In scope: browser single sign-on for **Argo CD, Grafana, the Prometheus UI and the Alertmanager UI**, with Gitea as the
+OIDC provider, role mapping from the `groups` claim, secrets via OpenBao/ESO, and the netpol and Gateway changes those
+need.
+
+Out of scope (and where it lives instead):
+
+- `kubectl` / API-server OIDC — short-lived client certificates remain ([ADR 0014](0014-secrets-and-identity.md),
+  its "Not now" section).
+- Gitea, Proxmox, iDRAC and OpenBao logins — each keeps its own auth (their TLS and break-glass are covered by
+  [ADR 0015](0015-network-policy-and-platform-hardening.md) and [ADR 0003](0003-break-glass-access.md)).
+- Dex, Keycloak, Authentik — rejected below, not revisited.
+- Re-rooting the five Caddy VM roots under the lab CA — deferred by ADR 0015 decision 5.
+- Prometheus/Alertmanager API access from scripts and in-cluster callers — the netpols for scrape, falcosidekick and
+  Argo Rollouts analysis are untouched; only the browser path through the Gateway moves behind oauth2-proxy.
+
+## Options considered
+
+### Identity provider
+
+| Option | For | Against |
+|---|---|---|
+| **Gitea native OIDC** (chosen) | The identity already exists; one less VM and one less admin UI to run and back up; groups claim available; RS256; PKCE | Smaller feature set than a dedicated IdP (limited claims customisation, no per-org 2FA enforcement); if Gitea is down, every UI login is down (see "Gitea-down behaviour") |
+| Dex | Federates many upstream providers; Argo CD integrates with it natively | A second identity component to run for exactly one upstream (Gitea); the running `dex-server` pod is already unused |
+| Keycloak / Authentik | Full-featured IdPs | A new VM or namespace, admin UI, backup and certificate each — for a lab with one human and one CI account. The owner's decision of 2026-11-03 rules them out |
+
+### Auth for the Prometheus and Alertmanager UIs
+
+| Option | For | Against |
+|---|---|---|
+| **oauth2-proxy in front of each host** (chosen) | Neither UI speaks OIDC; oauth2-proxy is a single small deployment per host, understands the OIDC flow including PKCE and the `groups` claim, and keeps the UIs untouched | One more component; cookies; the UIs stay unauthenticated inside the cluster (unchanged from today) |
+| Basic-auth at the Gateway (e.g. `SecurityPolicy`) | No new component | A second, parallel credential system; no Gitea group mapping; NGF's BasicAuth support was not verified for this ADR |
+| Leave them unauthenticated, rely on netpols | Nothing to do | The Alertmanager UI can silence alerts; the Week 6 carry-over explicitly says to fix it |
+
+## Decisions
+
+1. **Gitea is the single OIDC provider**, and every consumer gets **its own OAuth2 application** in Gitea — four apps
+   for three consumers (one per oauth2-proxy host). One app per consumer keeps client secrets and revocation
+   independent: a leaked Argo CD secret is revoked without touching Grafana. Redirect URIs, exact because Gitea
+   matches them literally:
+
+   | Consumer | Redirect URI |
+   |---|---|
+   | Argo CD | `https://argocd.apps.home.arpa/auth/callback` |
+   | Grafana | `https://grafana.apps.home.arpa/login/generic_oauth` |
+   | oauth2-proxy (prometheus) | `https://prometheus.apps.home.arpa/oauth2/callback` |
+   | oauth2-proxy (alertmanager) | `https://alertmanager.apps.home.arpa/oauth2/callback` |
+
+2. **Trust the Gitea Caddy root, explicitly, in every consumer**: `ansible/files/ca/gitea-caddy-root.crt` as
+   `oidc.config.rootCA` (Argo CD), `tls_client_ca` (Grafana, from a ConfigMap mount) and `--provider-ca-file`
+   (oauth2-proxy). ADR 0015 already showed that assuming the lab root covers `gitea.home.arpa` is wrong — the curl
+   that worked on the Mac was succeeding through system trust, not the supplied CA. The file is a public
+   certificate, so it is shipped as a ConfigMap (`gitea-caddy-root`), not a Secret.
+
+3. **Argo CD: native OIDC, no Dex.** Patch `argocd-cm` `data.oidc.config` (name, issuer, client ID,
+   `rootCA` inline, `requestedScopes: ["openid", "profile", "email", "groups"]` and
+   `requestedIDTokenClaims: {"groups": {"essential": true}}`) with the client secret referenced, never inlined:
+   `$oidc.gitea.clientSecret` resolves against a key in `argocd-secret` (Argo CD docs, "Secrets in oidc.config";
+   verify the key form on the installed Argo CD version at rollout). Delete the unused `dex-server` deployment
+   afterwards (one less pod with one less egress rule), as an owner step.
+
+4. **Argo CD RBAC is group-based and deny-by-default.**
+   `argocd-rbac-cm` today is empty, which Argo CD treats as "no permissions" for any user other than the
+   built-in `admin` (fail-closed). The rollout keeps `policy.default: ""` explicit (deny), so a later edit cannot
+   silently widen it, plus:
+
+   ```text
+   g, homelab:platform-admins, role:admin
+   g, homelab, role:readonly
+   ```
+
+   Members of the org get read-only; the admin team gets admin; anyone else authenticates and can do nothing.
+
+5. **Grafana: `generic_oauth` in the kube-prometheus-stack values**, with the client secret delivered by ESO.
+   `grafana.ini.auth.generic_oauth` gets `client_id`, auth/token/userinfo URLs, `scopes`, `tls_client_ca` (the
+   ConfigMap mount from decision 2), `groups_claim_path: groups`, `allowed_groups: ["homelab", "homelab:platform-admins"]`
+   (no org membership, no login) and `role_attribute_path`:
+
+   ```text
+   contains(groups[*], 'homelab:platform-admins') && 'Admin' || 'Viewer'
+   ```
+
+   Recommendation on the open question: org members who are not admins get **Viewer**, not "no access". The lab has
+   one human today, so Viewer costs nothing now and avoids a config change when a second member joins. The client
+   secret arrives as `GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET` via `envFromSecret` from an ESO-synced Secret — all
+   `grafana.ini` keys have environment equivalents, so the values file stays secret-free. The local admin login
+   stays visible as break-glass (Grafana shows both login options with SSO enabled).
+
+6. **Prometheus and Alertmanager: one oauth2-proxy instance per host, both in the `monitoring` namespace** (not a
+   new namespace, not one shared instance). Per host: cookies are host-scoped anyway, each instance has its own
+   cookie secret and its own Gitea app, and taking one down cannot log out users of the other. In `monitoring`
+   because both instances only serve monitoring UIs, the existing `SecretStore` (ADR 0014 path pattern) delivers
+   their secrets, and the existing intra-namespace netpol already permits egress from any monitoring pod to
+   `:9090`/`:9093`. Pin chart 10.7.1 / image `v7.15.5` with its digest at implementation, and set
+   `--trusted-proxy-ip` to the pod CIDR `10.244.0.0/16` (the v7.15.5 advisories require it; the Gateway data plane
+   is the proxy, and pod-to-pod traffic is not SNATed by this CNI, so its pod IPs are the real source). Config per
+   instance: `provider: oidc`, `oidc-issuer-url: https://gitea.home.arpa`, scope `openid profile email groups`,
+   `code-challenge-method: S256`, `cookie_secure`, and `--allowed-group homelab` — org membership gates both UIs,
+   matching Grafana's floor.
+
+7. **Authorization mapping, one table for every consumer** (the `groups` claim values are fixed by Gitea:
+   org names as-is, team names lowercased — so the configs above must use `homelab:platform-admins`, never
+   `Platform-Admins`):
+
+   | Gitea membership | `groups` claim | Argo CD | Grafana | Prometheus/Alertmanager UIs |
+   |---|---|---|---|---|
+   | org `homelab`, team `platform-admins` | `["homelab", "homelab:platform-admins"]` | `role:admin` | Admin | allowed |
+   | org `homelab` only | `["homelab"]` | `role:readonly` | Viewer | allowed |
+   | no org membership | absent / empty | denied (`policy.default: ""`) | denied (`allowed_groups`) | denied (`--allowed-group`) |
+
+8. **Secrets live only in OpenBao**, under the ADR 0014 path pattern: `secret/data/oidc/{argocd,grafana,oauth2-proxy-prometheus,oauth2-proxy-alertmanager}` (client secrets, plus a 32-byte cookie secret per oauth2-proxy instance). In-git consumers (Grafana, the two oauth2-proxy instances) fetch through the existing `monitoring` SecretStore with new ExternalSecrets. Argo CD is out-of-git (ADR 0008), so its client secret is written by the owner into the `argocd-secret` key `oidc.gitea.clientSecret` from the OpenBao value over the admin SSH path (value from stdin, never argv). The owner creates the four OAuth2 apps in the Gitea UI and copies each secret into OpenBao with the CLI on `sectools`.
+
+9. **Break-glass does not change.** The Argo CD built-in admin stays enabled (its password lives in
+   `argocd-initial-admin-secret`; disable it only after SSO has proven itself, and re-enabling is one ConfigMap
+   edit). The Grafana local admin (`grafana-admin`) stays. The oauth2-proxy hosts have no local accounts by
+   design; their break-glass is the admin SSH port-forward (read-only path, [ADR 0003](0003-break-glass-access.md)),
+   which reaches the web ports without the Gateway and without oauth2-proxy. The in-cluster netpols are the control
+   there, and they are unchanged.
+
+10. **2FA: policy and audit now, one global switch later.** Gitea 1.27.3 can enforce 2FA instance-wide only
+    (`[security] TWO_FACTOR_AUTH=enforced`, community since 1.24). Because every account on this instance is
+    owner-created (registration is disabled), a global switch is the honest recommendation — **after** checking that
+    token-based CI access (the Gitea token used by Jenkins and the Argo CD repo credential) is unaffected; the
+    upstream feature ships without documentation of its auth-source interactions, so that check is a rollout step,
+    not an assumption. Until then: 2FA for members of `platform-admins` is an owner-audited rule (admin panel shows
+    per-user 2FA state).
+
+11. **Network changes, each paired** (the fail-open lesson from ADR 0015 section A: an allow is never inert):
+
+    | Change | Namespace | Pairs with |
+    |---|---|---|
+    | New egress: grafana pods → `192.168.1.97/32:443` (token exchange) | `monitoring` | Existing Argo CD-style rule; Gitea is already reachable from `argocd-server` |
+    | New ingress: oauth2-proxy pods `:4180` from the Gateway data plane | `monitoring` | New Gateway data-plane egress `:4180` (replaces its `:9090`/`:9093`) |
+    | New egress: oauth2-proxy pods → `192.168.1.97/32:443` (code exchange + userinfo) | `monitoring` | Same shape as the grafana rule |
+    | Switch: prometheus/alertmanager UI ingress source from "Gateway data plane" to "oauth2-proxy pods in this namespace" | `monitoring` | Same-namespace flows already pass `monitoring-intra-metrics` on `:9090`/`:9093`; the egress side needs no change |
+    | Grafana UI ingress from the Gateway stays as-is (`:3000`) | `monitoring` | Grafana keeps its own OIDC login, no proxy |
+    | Argo CD egress to Gitea | `argocd` | Already present; no change |
+
+    The falcosidekick → alertmanager ingress and the Argo Rollouts → prometheus ingress rules are untouched:
+    they name in-cluster callers, not the browser path.
+
+12. **Rollout order: Grafana first, Argo CD second, oauth2-proxy last.** Grafana is in-git and reversible by one
+    Argo sync; Argo CD is owner-applied but self-contained; the oauth2-proxy step repoints live HTTPRoutes, so it
+    goes last when the OIDC flow is proven twice.
+
+## Gitea-down behaviour
+
+Stated precisely, because it is the main argument against a Gitea-only IdP:
+
+- UI logins fail everywhere (the OIDC redirect cannot start). Grafana and Argo CD still admit their local admin
+  accounts (decision 9). The Prometheus and Alertmanager UIs become reachable only through the admin SSH
+  port-forward.
+- Argo CD **keeps running the cluster** — existing Applications stay deployed, but syncs fail while the repo is
+  unreachable; nothing restarts, no workload is touched. (GitOps pulls; it does not need logins.)
+- Alerting is unaffected: Prometheus scrapes, alert evaluation, falco events and alertmanager e-mail do not pass
+  through Gitea.
+- Recovery is automatic once Gitea is back; no consumer needs a restart because each holds its own OIDC state.
+
+## Rollout plan (design; each step reversible)
+
+**Step 0 — shared prep (owner, no cluster change).**
+
+- Create org `homelab` and team `platform-admins` (lowercase, per decision 7), put the owner's account in the team.
+- Create the four OAuth2 applications (decision 1) in the Gitea admin UI; copy the four client secrets into
+  OpenBao paths (decision 8) via the `sectools` CLI over SSH, values from stdin.
+- Prove in-cluster reachability, still missing from the context table: with the read-only admin path, resolve and
+  TLS-verify `https://gitea.home.arpa` **from an existing pod** (the operator certificate no longer allows pod exec
+  from the Mac) — a `kubectl exec` TLS check from a monitoring pod using the mounted Gitea root. If this fails, the
+  rest does not roll out; fix DNS or the CoreDNS forward first.
+- Check the 2FA state of every account in the Gitea admin panel (decision 10); record the result in the runbook.
+
+**Step 1 — Grafana (in-git, Argo-synced).** Values change in `k8s/platform/monitoring/values.yaml` (decision 5) plus
+the `gitea-caddy-root` ConfigMap, the ESO Secret for the client secret, and the grafana egress netpol (decision 11).
+*Proof:* unauthenticated `curl -I https://grafana.apps.home.arpa/login/generic_oauth` answers 302 to Gitea's
+authorize endpoint; a browser login via Gitea lands in Grafana with the Admin org role (owner is in
+`platform-admins`); the Grafana log shows a token exchange against `192.168.1.97`; the local admin login still
+appears on the login page (break-glass). *Rollback:* revert the commit; Argo syncs the old values, the ConfigMap and
+the netpol back — the OIDC login button disappears, the local admin never changed.
+
+**Step 2 — Argo CD (owner-applied, out-of-git per ADR 0008).** Back up the live `argocd-cm`, `argocd-rbac-cm` and
+`argocd-secret` (`kubectl get -o yaml` to `private/` on the Mac) — the rollback depends on these files. Apply the
+OIDC patch (decision 3), the RBAC policy (decision 4), and write the client secret into `argocd-secret` from the
+OpenBao value over stdin. *Proof:* browser login via Gitea reaches the Applications list; the owner (admin team)
+can sync an app; Argo CD logs show the JWKS fetch against `192.168.1.97`; for the deny path, create a throwaway
+second Gitea account with no org membership, confirm it authenticates but sees nothing (`policy.default` is empty),
+then delete the account — with one real user this negative test needs a second account, and that limitation is
+stated here rather than skipped. *Rollback:* re-apply the three backed-up objects; Argo CD hot-reloads both
+ConfigMaps, so if any setting misbehaves the fallback is restarting `argocd-server` (owner decision, one command).
+
+**Step 3 — oauth2-proxy for the two UIs (in-git, Argo-synced, last).** New Argo app for the two oauth2-proxy
+deployments (chart 10.7.1, values per decision 6, ExternalSecrets for client + cookie secrets), repoint the
+`prometheus`/`alertmanager` HTTPRoute backendRefs to the oauth2-proxy services, and apply the netpol pairs
+(decision 11). *Proof:* `curl -I https://prometheus.apps.home.arpa/` answers 302/403 to the sign-in path, not the
+Prometheus UI; after a Gitea login the targets page loads, and the same flow on
+`alertmanager.apps.home.arpa/` reaches the UI; a falco test alert still arrives by e-mail (the falcosidekick
+ingress rule was untouched — that is the pairing check); alert e-mail links work after login.
+*Rollback:* revert the commit; Argo syncs the HTTPRoutes back to the direct services and the netpols back to
+Gateway-only ingress; the oauth2-proxy deployments can be deleted with the app.
+
+## Consequences
+
+- UI access gains a dependency chain: Gitea, its Caddy TLS, the CoreDNS `home.arpa` forward, and (for
+  Prometheus/Alertmanager) oauth2-proxy. Serving the lab does not — GitOps, scraping and alerting never pass
+  through Gitea (see "Gitea-down behaviour").
+- `argocd-rbac-cm` gains an explicit policy. Today it is empty (fail-closed for any non-`admin` user); the rollout
+  writes `policy.default: ""` explicitly and the group mappings, so the intent is recorded rather than implied.
+- The `monitoring` namespace gains two small deployments. No netpol widens beyond what decisions 6 and 11 name:
+  oauth2-proxy reaches the UIs on ports the intra-metrics rule already allows, and the UI ingress rules get
+  *narrower* (oauth2-proxy pods instead of the whole Gateway data plane namespace).
+- Argo CD remains out-of-git (ADR 0008), so its OIDC config will be owner-applied and can drift from this document;
+  the rollout runbook must paste the applied `argocd-cm`/`argocd-rbac-cm` state after step 2 so the drift is at
+  least recorded.
+- Team names arrive lowercased in the `groups` claim. Every mapping in this ADR uses `homelab:platform-admins`;
+  renaming the Gitea team later silently breaks authorization (users fall back to readonly/Viewer), which is
+  exactly the failure mode the single mapping table is meant to make obvious.
+- Consumer TLS trust pins the Gitea Caddy root. When ADR 0015 decision 5 is done (re-rooting the VM CAs under the
+  lab root), the three consumer configs move with it — they are listed there as follow-ups.
+- The Prometheus and Alertmanager UIs remain unauthenticated **inside** the cluster; their protection stays the
+  netpol (Gateway data plane / oauth2-proxy pods / falcosidekick only) plus the admin SSH path. oauth2-proxy guards
+  the browser path, not the services.
+- With only the instance-wide 2FA switch available, `platform-admins` 2FA is an audit rule until the CI-token
+  check passes. The check result belongs in the rollout runbook.
+
+## Not now
+
+- **API-server OIDC** (kubectl): short-lived certificates ([ADR 0014](0014-secrets-and-identity.md)) remain the
+  teaching tool; the operator certificate renewal path is separate.
+- **SSO for Gitea itself, Proxmox, iDRAC, OpenBao**: each keeps local auth; several are UI-only systems with their
+  own break-glass (ADR 0003).
+- **Instance-wide 2FA enforcement**: pending the CI-token interaction check (decision 10).
+- **Bringing Argo CD's own manifests into git**: out-of-git by ADR 0008; revisiting that is its own decision, not a
+  side effect of this one.
+- **Deleting the `dex-server` deployment**: decided here (decision 3), executed with the rollout, listed so it is
+  not forgotten or mistaken for a live change made by this ADR.
+
+## References
+
+- Gitea OAuth2 provider: <https://docs.gitea.com/development/oauth2-provider>; groups claim format from upstream
+  PR [#17367](https://github.com/go-gitea/gitea/pull/17367); 2FA enforcement history in issue
+  [#880](https://github.com/go-gitea/gitea/issues/880) (closed for 1.24.0).
+- Argo CD SSO: <https://argo-cd.readthedocs.io/en/stable/operator-manual/sso/> (`oidc.config`, "Secrets in
+  oidc.config") and RBAC: <https://argo-cd.readthedocs.io/en/stable/operator-manual/rbac/>.
+- Grafana `generic_oauth`: <https://grafana.com/docs/grafana/latest/setup/configure-security/configure-authentication/generic-oauth/>
+  (`allowed_groups`, `role_attribute_path`, `tls_client_ca`).
+- oauth2-proxy: <https://oauth2-proxy.github.io/oauth2-proxy/> (OIDC provider, PKCE, `--trusted-proxy-ip`) and
+  chart 10.7.1 / app 7.15.5 on Artifact Hub, <https://artifacthub.io/packages/helm/oauth2-proxy/oauth2-proxy>.
+- This repo: [ADR 0014](0014-secrets-and-identity.md) (ESO/OpenBao delivery, path pattern),
+  [ADR 0015](0015-network-policy-and-platform-hardening.md) (netpol pairing discipline, decision 5 CA deferral),
+  [ADR 0008](0008-argocd-app-of-apps-platform.md) (Argo CD out-of-git), [ADR 0013](0013-gateway-api.md) (shared
+  Gateway and HTTPRoutes).
