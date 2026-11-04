@@ -108,7 +108,7 @@ Out of scope (and where it lives instead):
 
 5. **Grafana: `generic_oauth` in the kube-prometheus-stack values**, with the client secret delivered by ESO.
    `grafana.ini.auth.generic_oauth` gets `client_id`, auth/token/userinfo URLs, `scopes`, `tls_client_ca` (the
-   ConfigMap mount from decision 2), `groups_claim_path: groups`, `allowed_groups: ["homelab", "homelab:platform-admins"]`
+   ConfigMap mount from decision 2), `groups_attribute_path: groups`, `allowed_groups: ["homelab", "homelab:platform-admins"]`
    (no org membership, no login) and `role_attribute_path`:
 
    ```text
