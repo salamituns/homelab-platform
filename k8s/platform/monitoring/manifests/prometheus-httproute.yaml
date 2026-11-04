@@ -1,9 +1,8 @@
-# https://prometheus.apps.home.arpa through the shared Gateway (grafana route pattern, ADR 0015 B).
-# WHY: alert emails link to Prometheus (generatorURL) and to the Alertmanager UI, and both
-# previously pointed at in-cluster service URLs no browser can reach. The wildcard DNS record
-# apps.home.arpa -> 192.168.1.240 already covers these hostnames (dns.yml internal_dns_wildcards),
-# so no DNS change is needed. Pairs with the nginx-gateway data-plane egress to monitoring:9090
-# and `monitoring-prometheus-ui-ingress` in netpol-allow.yaml.
+# https://prometheus.apps.home.arpa through the shared Gateway.
+# Backend is oauth2-proxy (ADR 0016 step 3), not prometheus-operated: the Gateway must not
+# reach :9090 directly (netpol pair: nginx-gateway :4180 + monitoring-prometheus-ui-ingress
+# from oauth2-proxy pods). Redirect route stays. Merge only after OpenBao
+# `oidc/oauth2-proxy-prometheus` exists (runbook step 3).
 # Managed by Argo CD (app monitoring, k8s/platform/apps/monitoring.yaml): change it in git.
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -12,7 +11,7 @@ metadata:
   namespace: monitoring
 spec:
   parentRefs:
-    - name: homelab-gateway   # accepts routes only from labelled namespaces (gateway.yaml)
+    - name: homelab-gateway
       namespace: nginx-gateway
       sectionName: https
   hostnames:
@@ -23,5 +22,5 @@ spec:
             type: PathPrefix
             value: /
       backendRefs:
-        - name: prometheus-stack-kube-prom-prometheus
-          port: 9090
+        - name: oauth2-proxy-prometheus
+          port: 80

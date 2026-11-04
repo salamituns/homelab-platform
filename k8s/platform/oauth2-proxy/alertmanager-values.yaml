@@ -1,0 +1,58 @@
+# oauth2-proxy 10.7.1 in front of Alertmanager (ADR 0016 step 3).
+# Alertmanager UI can create silences, so only homelab:platform-admins (not the whole org).
+fullnameOverride: oauth2-proxy-alertmanager
+replicaCount: 1
+
+image:
+  repository: oauth2-proxy/oauth2-proxy
+  tag: "v7.15.5@sha256:8498b0d0ef0a7b29686414000a08aee467f02d0299c9ed1e006a8f33fc017916"
+  pullPolicy: IfNotPresent
+
+config:
+  existingSecret: oauth2-proxy-alertmanager
+  cookieName: _oauth2_proxy_alertmanager
+  requiredSecretKeys:
+    - client-id
+    - client-secret
+    - cookie-secret
+  emailDomains: ["*"]
+  upstreams:
+    - http://prometheus-stack-kube-prom-alertmanager.monitoring.svc.cluster.local:9093
+
+alphaConfig:
+  enabled: false
+
+metrics:
+  enabled: false
+
+serviceAccount:
+  automountServiceAccountToken: false
+
+resources:
+  requests: { cpu: 10m, memory: 32Mi }
+  limits: { memory: 64Mi }
+
+extraVolumes:
+  - name: gitea-caddy-root
+    configMap:
+      name: gitea-caddy-root
+extraVolumeMounts:
+  - name: gitea-caddy-root
+    mountPath: /etc/oauth2-proxy/ca
+    readOnly: true
+
+extraArgs:
+  provider: oidc
+  provider-display-name: Gitea
+  oidc-issuer-url: https://gitea.home.arpa
+  oidc-groups-claim: groups
+  code-challenge-method: S256
+  scope: "openid profile email groups"
+  provider-ca-file: /etc/oauth2-proxy/ca/gitea-caddy-root.crt
+  allowed-group: homelab:platform-admins
+  redirect-url: https://alertmanager.apps.home.arpa/oauth2/callback
+  cookie-secure: "true"
+  reverse-proxy: "true"
+  real-client-ip-header: X-Forwarded-For
+  trusted-proxy-ip: 10.244.0.0/16
+  skip-provider-button: "true"

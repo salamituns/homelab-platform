@@ -15,6 +15,7 @@ spec:
     - https://charts.external-secrets.io
     - https://charts.jetstack.io   # cert-manager (ADR 0015 B)
     - https://falcosecurity.github.io/charts   # falco + falcosidekick (ADR 0015 D)
+    - https://oauth2-proxy.github.io/manifests   # oauth2-proxy (ADR 0016 step 3)
   destinations:
     - { server: https://kubernetes.default.svc, namespace: argocd }
     - { server: https://kubernetes.default.svc, namespace: kube-system }

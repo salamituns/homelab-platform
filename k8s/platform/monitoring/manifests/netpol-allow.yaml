@@ -205,9 +205,9 @@ spec:
       ports:
         - { protocol: TCP, port: 3000 }
 ---
-# Prometheus UI ingress: the Gateway data plane only (prometheus.apps.home.arpa, the
-# generatorURL target in alert emails). Grafana-ingress pattern; pairs with the
-# nginx-gateway data-plane egress to monitoring:9090.
+# Prometheus UI: oauth2-proxy only (ADR 0016 step 3). Gateway used to speak :9090
+# directly; that pair is gone so the proxy cannot be bypassed. Helm instance label
+# is the release name. intra-metrics still covers prometheus scraping itself.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -220,16 +220,15 @@ spec:
   policyTypes: [Ingress]
   ingress:
     - from:
-        - namespaceSelector:
+        - podSelector:
             matchLabels:
-              kubernetes.io/metadata.name: nginx-gateway
+              app.kubernetes.io/name: oauth2-proxy
+              app.kubernetes.io/instance: oauth2-proxy-prometheus
       ports:
         - { protocol: TCP, port: 9090 }
 ---
-# Alertmanager UI ingress: the Gateway data plane only (alertmanager.apps.home.arpa, the
-# link alert emails carry). Grafana-ingress pattern; pairs with the nginx-gateway
-# data-plane egress to monitoring:9093. The UI is unauthenticated and can create
-# silences - see docs/runbooks/monitoring.md.
+# Alertmanager UI: oauth2-proxy only (ADR 0016 step 3). falcosidekick keeps its own
+# ingress rule on :9093. Gateway must not reach :9093.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -242,9 +241,89 @@ spec:
   policyTypes: [Ingress]
   ingress:
     - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: oauth2-proxy
+              app.kubernetes.io/instance: oauth2-proxy-alertmanager
+      ports:
+        - { protocol: TCP, port: 9093 }
+---
+# oauth2-proxy ingress from the Gateway data plane (HTTPRoute backend port 80 -> pod 4180).
+# Pairs with nginx-gateway-data-plane-egress :4180.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: monitoring-oauth2-proxy-ingress
+  namespace: monitoring
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: oauth2-proxy
+  policyTypes: [Ingress]
+  ingress:
+    - from:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: nginx-gateway
+      ports:
+        - { protocol: TCP, port: 4180 }
+---
+# oauth2-proxy -> Gitea (code exchange, JWKS, userinfo). DNS is monitoring-dns-egress.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: monitoring-oauth2-proxy-gitea-egress
+  namespace: monitoring
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: oauth2-proxy
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 192.168.1.97/32
+      ports:
+        - { protocol: TCP, port: 443 }
+---
+# oauth2-proxy -> Prometheus upstream. intra-metrics also allows this; named here so the
+# pair with monitoring-prometheus-ui-ingress is obvious.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: monitoring-oauth2-proxy-prometheus-egress
+  namespace: monitoring
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: oauth2-proxy
+      app.kubernetes.io/instance: oauth2-proxy-prometheus
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - { protocol: TCP, port: 9090 }
+---
+# oauth2-proxy -> Alertmanager upstream.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: monitoring-oauth2-proxy-alertmanager-egress
+  namespace: monitoring
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: oauth2-proxy
+      app.kubernetes.io/instance: oauth2-proxy-alertmanager
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: alertmanager
       ports:
         - { protocol: TCP, port: 9093 }
 ---
