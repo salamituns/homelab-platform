@@ -93,8 +93,12 @@ If a worker crosses 75%, move Loki (delete pod so `WaitForFirstConsumer` can reb
 
 | Check | Result | When |
 |---|---|---|
-| Loki node | | |
-| `df -hT /` on that node | | |
-| `{namespace="dev"}` streams | | |
-| `{namespace="kube-system"}` empty | | |
-| Node memory requests | | |
+| Loki node | `loki-0` on workernode1, PVC `storage-loki-0` 10Gi `local-path` Bound | 2026-11-04 |
+| `df -h /` on that node | `/dev/sda2` 79G, 28G used, **48G free (37%)**. local-path does not enforce the 10Gi; the 7d retention is what bounds it | 2026-11-04 |
+| `{namespace="dev"}` streams | 4 pods (2 backend, 2 frontend) from workernode1 + workernode2, after the label fix in #60 | 2026-11-04 |
+| `{namespace="kube-system"}` empty | yes (13 namespaces ingested, none kube-system) | 2026-11-04 |
+| Duplicates | 0 pods seen from more than one `node` label (per-node discovery, #60) | 2026-11-04 |
+| Node memory requests | master 15%, workernode1 53%, workernode2 38% (limits 22% / 95% / 93%: watch worker limits) | 2026-11-04 |
+
+After #60 Alloy logged `entry too far behind` / `dropping data` for a while: the relabel created new streams and
+Alloy re-sent each pod's old history, which Loki rejects. Harmless and one-off; only old history is lost.
