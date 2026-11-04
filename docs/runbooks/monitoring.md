@@ -79,3 +79,26 @@ ssh Master 'sudo kubeadm certs check-expiration'
 
 kubeadm renews the control-plane certificates on each `kubeadm upgrade`; renew by hand with
 `sudo kubeadm certs renew all` on master (owner step, then restart the static pods).
+
+## Dashboards as code (ADR 0017 PR 2)
+
+Grafana 13.1.3 loads dashboards from ConfigMaps labelled `grafana_dashboard=1` via the
+kiwigrid sidecar (`METHOD=WATCH`, `NAMESPACE=ALL`, `FOLDER_ANNOTATION=grafana_folder`).
+JSON in git is the source of truth. Admin UI edits are overwritten on the next ConfigMap
+WATCH event; Viewers can only look.
+
+**Add or change a dashboard**
+
+1. Put a Grafana JSON file in `k8s/platform/monitoring/dashboards/` with a stable `uid`
+   (do not reuse `belleshop-golden-signals`; that ConfigMap lives in belleshop-deploy).
+   Datasource UIDs on this cluster: Prometheus `prometheus`, Loki `loki`.
+2. List it under `configMapGenerator` in `k8s/platform/monitoring/dashboards/kustomization.yaml`.
+   Keep `disableNameSuffixHash: true` and `grafana_folder: Homelab`.
+3. Prove every PromQL/LogQL against live Prometheus/Loki (Grafana pod `wget`, as in this
+   PR's report) so a panel is not empty after sync.
+4. Merge. The monitoring Argo app source `k8s/platform/monitoring/dashboards` (not
+   `manifests/`) is what includes the ConfigMaps. After sync, Grafana folder **Homelab**
+   shows the dashboard. Sidecar log: `kubectl -n monitoring logs deploy/prometheus-stack-grafana -c grafana-sc-dashboard`.
+
+The first dashboard in this repo is **BelleShop overview** (`uid: belleshop-overview`).
+The SLO dashboard (`belleshop-slo.json`) is a later PR. Do not duplicate golden-signals here.

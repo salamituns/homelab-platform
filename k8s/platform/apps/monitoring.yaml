@@ -25,6 +25,9 @@ spec:
     - repoURL: https://gitea.home.arpa/tunsgit/homelab-platform.git
       targetRevision: main
       path: k8s/platform/monitoring/manifests   # extras next to the chart (Grafana ingress)
+    - repoURL: https://gitea.home.arpa/tunsgit/homelab-platform.git
+      targetRevision: main
+      path: k8s/platform/monitoring/dashboards  # ConfigMaps grafana_dashboard=1 (ADR 0017 PR 2)
   destination:
     server: https://kubernetes.default.svc
     namespace: monitoring

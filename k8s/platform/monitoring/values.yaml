@@ -123,6 +123,8 @@ grafana:
       label: grafana_dashboard
       labelValue: "1"
       searchNamespace: ALL
+      # kiwigrid default if unset; set explicitly so ConfigMap annotation grafana_folder=Homelab is honoured.
+      folderAnnotation: grafana_folder
     datasources:
       defaultDatasourceEnabled: true
       enabled: true

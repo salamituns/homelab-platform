@@ -1,0 +1,19 @@
+# Dashboard JSON as ConfigMaps for the Grafana kiwigrid sidecar (ADR 0017 PR 2).
+# Included by the monitoring Argo Application (path k8s/platform/monitoring/dashboards).
+# Do not add a kustomization.yaml under manifests/: that directory is a raw YAML
+# folder today, and a kustomize root there would drop every existing extra.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: monitoring
+generatorOptions:
+  disableNameSuffixHash: true
+  labels:
+    grafana_dashboard: "1"
+  annotations:
+    # kiwigrid/k8s-sidecar 2.10.1 default FOLDER_ANNOTATION is grafana_folder
+    # (not set in the live container env; image default still applies).
+    grafana_folder: Homelab
+configMapGenerator:
+  - name: grafana-dashboard-belleshop-overview
+    files:
+      - belleshop-overview.json
