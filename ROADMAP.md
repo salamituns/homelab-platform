@@ -121,7 +121,7 @@ HTTP(S) to lab services for about 40 minutes
 ([postmortem](docs/postmortems/2026-11-03-pve-firewall-legacy-nat-outage.md), fixed by PR #39).
 
 Carried over from Week 6 (kept at the level described in [ADR 0015](docs/adr/0015-network-policy-and-platform-hardening.md) section G and its runbooks):
-- [ ] OIDC/SSO for the admin UIs (Argo CD, Grafana): local accounts today; schedule it in Week 7/8
+- [x] OIDC/SSO for the admin UIs moved into Week 7 as the designed first item ([ADR 0016](docs/adr/0016-oidc-sso-admin-uis-gitea.md); design only, rollout pending)
 - [ ] Remove the stale dnsmasq on `tuns` (legacy `homelab.local` config listening on 10.2.6.181,
       superseded by ADR 0004, now also cut off by the host firewall): `scripts/pve-dnsmasq-retire.sh`,
       owner-run with `--dry-run`
@@ -136,6 +136,9 @@ Carried over from Week 6 (kept at the level described in [ADR 0015](docs/adr/001
       ADR 0015 section A)
 
 ## Week 7: Observability + SLOs
+- [ ] OIDC SSO for the admin UIs with Gitea as the provider ([ADR 0016](docs/adr/0016-oidc-sso-admin-uis-gitea.md)):
+      Grafana `generic_oauth`, Argo CD native OIDC + RBAC groups, oauth2-proxy in front of the Prometheus and
+      Alertmanager UIs; rollout order Grafana -> Argo CD -> oauth2-proxy, each step reversible
 - [ ] Loki for logs, Grafana dashboards as code
 - [ ] SLOs for BelleShop (availability, p95 latency) and alerts on burn rate
 - **Proof:** a dashboard plus an alert that fired for a real reason
