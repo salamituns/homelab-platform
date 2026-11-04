@@ -5,10 +5,10 @@
 #
 # Why stdin + merge-patch: the client secret must not appear on argv (ps);
 # kubectl replace of argocd-cm would drop live resource.exclusions.
-# Why no kubectl rollout: v3.5.1 watchSettings logs "oidc config modified.
-# restarting" / "url modified. restarting" and sends GracefulRestartSignal
-# (in-process). RBAC reloads via the informer (policy.default / policy.csv /
-# scopes). Dex is left running; OIDCConfigRAW skips the Dex rewrite path.
+# Why a rollout restart: v3.5.1 watchSettings restarts the API server in-process on
+# oidc/url changes, but the session manager's HTTP client is built at pod start, so
+# without a pod restart it never trusts rootCA (live 2026-11-04: session checks failed
+# with x509 unknown authority, login bounced to /login). RBAC reloads via the informer. Dex is left running; OIDCConfigRAW skips the Dex rewrite path.
 #
 # Usage:
 #   scripts/argocd-oidc-apply.sh --dry-run
@@ -213,7 +213,7 @@ echo "  url=https://argocd.apps.home.arpa  redirect=/auth/callback"
 echo "  secret keys: oidc.gitea.clientID oidc.gitea.clientSecret"
 echo "  Gitea Caddy root SHA256 fingerprint: $ca_fp"
 echo "  dex-server: left running (OIDCConfigRAW skips Dex rewrite)"
-echo "  no kubectl rollout (watchSettings GracefulRestartSignal)"
+echo "  then: kubectl rollout restart deploy/argocd-server (session manager picks up rootCA)"
 
 if [[ "$MODE" == dry-run ]]; then
   echo
@@ -286,8 +286,9 @@ unset secret_json
 cm_patch_json | remote_stdin "patch cm argocd-cm -n $NS --type merge --patch-file=/dev/stdin"
 rbac_patch_json | remote_stdin "patch cm argocd-rbac-cm -n $NS --type merge --patch-file=/dev/stdin"
 
-echo "patched. waiting for argocd-server Ready (in-process restart, no rollout)..."
-remote "-n $NS wait --for=condition=Ready pod -l app.kubernetes.io/name=argocd-server --timeout=120s" || true
+echo "patched. restarting argocd-server so the session manager trusts the Gitea root..."
+remote "-n $NS rollout restart deploy/argocd-server"
+remote "-n $NS rollout status deploy/argocd-server --timeout=180s" || true
 
 echo
 echo "verify redirect (expect 302/303 to gitea authorize + redirect_uri=.../auth/callback):"

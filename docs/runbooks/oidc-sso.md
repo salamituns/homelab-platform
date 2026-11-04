@@ -161,9 +161,9 @@ patch the Secret **before** the `oidc.config` that references it (the script doe
 4. `scripts/argocd-oidc-apply.sh` — confirm OpenBao, paste id+secret (hidden). Wait for Ready.
 5. Proofs below. If wrong: `scripts/argocd-oidc-apply.sh --rollback`.
 
-v3.5.1 `watchSettings` logs `oidc config modified. restarting` or `url modified. restarting` and
-sends `GracefulRestartSignal`. That is an in-process restart, not a Deployment rollout. Do not
-`kubectl rollout restart` on top of it.
+v3.5.1 restarts the API server in-process on oidc/url changes, but that is NOT enough: Live 2026-11-04: the in-process restart rebuilds the login handler (it trusted the Gitea root and redirected fine) but NOT the session manager's HTTP client, built at pod start without rootCA, so every session check failed with `x509: certificate signed by unknown authority` and the browser bounced back to /login. A `kubectl rollout restart deploy/argocd-server` fixed it.
+The apply script now does the rollout restart itself (only the UI/API pod; syncing runs in the
+application controller and is not affected).
 
 ### Proofs (ADR 0016 step 2)
 
