@@ -1,0 +1,24 @@
+# Grafana Loki datasource for the kiwigrid sidecar (ADR 0017 decision 1).
+# Live sidecar (2026-11-04): LABEL=grafana_datasource LABEL_VALUE=1 METHOD=WATCH,
+# no NAMESPACE=ALL, so this ConfigMap must live in `monitoring`.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasource-loki
+  namespace: monitoring
+  labels:
+    grafana_datasource: "1"
+data:
+  loki.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Loki
+        type: loki
+        uid: loki
+        access: proxy
+        url: http://loki.monitoring:3100/
+        isDefault: false
+        editable: false
+        jsonData:
+          maxLines: 1000
+          timeout: 60
