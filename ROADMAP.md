@@ -136,14 +136,15 @@ Carried over from Week 6 (kept at the level described in [ADR 0015](docs/adr/001
       ADR 0015 section A)
 
 ## Week 7: Observability + SLOs
-- [ ] OIDC SSO for the admin UIs with Gitea as the provider ([ADR 0016](docs/adr/0016-oidc-sso-admin-uis-gitea.md)):
+- [x] OIDC SSO for the admin UIs with Gitea as the provider ([ADR 0016](docs/adr/0016-oidc-sso-admin-uis-gitea.md)):
       Grafana `generic_oauth`, Argo CD native OIDC + RBAC groups, oauth2-proxy in front of the Prometheus and
       Alertmanager UIs; rollout order Grafana -> Argo CD -> oauth2-proxy, each step reversible
       - [x] Grafana via Gitea, Admin from `homelab:platform-admins` (2026-11-04, PRs #45-#48: live login found
             root_url, CA subPath mount and `groups_attribute_path` bugs)
       - [x] Argo CD via Gitea, owner-applied `scripts/argocd-oidc-apply.sh` (2026-11-04, PR #49; needed a
             `rollout restart` so the session manager trusts the Gitea root, now in the script)
-      - [ ] oauth2-proxy for the Prometheus and Alertmanager UIs
+      - [x] oauth2-proxy for the Prometheus and Alertmanager UIs (2026-11-04, PRs #51-#53; Alertmanager admin-team only,
+            gateway can no longer reach :9090/:9093 directly)
       - [ ] Separate bot account for agent pushes (today the push token belongs to the owner's `tunsgit`)
 - [ ] Loki for logs, Grafana dashboards as code
 - [ ] SLOs for BelleShop (availability, p95 latency) and alerts on burn rate
