@@ -1,7 +1,7 @@
 # ADR 0016: OIDC single sign-on for the admin UIs, with Gitea as the provider
 
-- Status: Accepted (owner, 2026-11-03, PR #44). Steps 1–2 in git. Step 3 (oauth2-proxy) prepared against
-  chart 10.7.1 / image v7.15.5; owner merges only after the two OpenBao records exist.
+- Status: Accepted (owner, 2026-11-03, PR #44). **Rollout complete 2026-11-04**: Grafana (#45-#48), Argo CD (#49-#50),
+  oauth2-proxy for Prometheus/Alertmanager (#51-#53). Results and lessons: "Rollout results" below.
 - Date: 2026-11-03 (corrections 2026-11-04: Argo CD v3.5.1; oauth2-proxy groups split — Alertmanager
   `homelab:platform-admins` only)
 
@@ -285,6 +285,25 @@ the same for `platform-admins` and 403 for org-only; Gateway to prometheus `:909
 - **Deleting the `dex-server` deployment**: still intended after SSO is proven (decision 3 originally named it
   as an owner step). It is **not** part of the v3.5.1 OIDC patch: native OIDC already skips Dex when
   `OIDCConfigRAW` is set. Deleting it in the same change as the first login would mix two failure modes.
+
+## Rollout results (2026-11-04)
+
+Every step was proven by a real browser login by the owner, including a second request on the session.
+Eight bugs reached the live rollout; none was visible in a render or a pod health check:
+
+| Step | Bug | Fix |
+|---|---|---|
+| Grafana | redirect_uri was `http://localhost:3000` (no `server.root_url`) | #46 |
+| Grafana | first pod started ~2 s before ESO created the Secret (env read only at start) | restart via #46 |
+| Grafana | CA ConfigMap mounted with `subPath`, so the FILE sat at the directory path | #47 |
+| Grafana | `groups_claim_path` is not a Grafana key (ignored); real key `groups_attribute_path` | #48 |
+| Argo CD | in-process settings restart left the session manager without `rootCA` (x509 on every session check) | `rollout restart`, #50 |
+| oauth2-proxy | cookie secret stored as standard base64; v7.15.5 decodes only URL-safe (44 raw bytes, crashloop) | #52 |
+| oauth2-proxy | full session cookie too big for the NGINX Gateway (`upstream sent too big header`, 502) | `session-cookie-minimal`, #53 |
+| Argo CD script | `--rollback` would have replaced with a stale `resourceVersion` (conflict) | fixed before merge, #49 |
+
+Lesson for any future OIDC consumer: prove the full round trip (login, callback, then a second request with
+the cookie) behind the real gateway before calling it done; a redirect to the provider proves very little.
 
 ## References
 

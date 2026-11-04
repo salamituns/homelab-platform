@@ -263,6 +263,15 @@ Every proof below includes a **follow-up request with the session cookie**.
 5. **Falco still pages:** a falcosidekick test alert still arrives by e-mail
    (`monitoring-alertmanager-falco-ingress` was not changed).
 
+### Known failure signatures (seen live 2026-11-04)
+
+- Gate pods crashloop with `cookie_secret must be 16, 24, or 32 bytes ... but is 44 bytes`: the secret is
+  standard base64. The ExternalSecret template converts it to URL-safe; `root-run oidc` now writes URL-safe.
+- 502 on `/oauth2/callback` and the gateway logs `upstream sent too big header`: session cookie too large.
+  `session-cookie-minimal: "true"` must stay set.
+- 500 "unauthorized_client" right after a 502: the browser re-sent an already-used code. Start again from the
+  page URL, not by refreshing the callback.
+
 ### Rollback
 
 `git revert` the step 3 commit (HTTPRoutes return to prometheus/alertmanager Services, gateway
