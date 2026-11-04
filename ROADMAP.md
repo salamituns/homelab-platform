@@ -57,7 +57,7 @@ See [postmortem](docs/postmortems/2026-10-25-gitea-rce-cve-2026-60004.md).
 - **Proof:** delete the `monitoring` namespace and watch ArgoCD restore it (done 2026-10-27: objects back in ~60 s; Grafana waited for its hand-restored Secret; metrics history lost)
 
 ## Week 3: Secure CI pipeline (about two weeks, ADR 0011)
-- [x] Rebuild Nexus (+ registry), SonarQube, Jenkins controller + agent with Terraform/Ansible; retire VMs 104-106 (shut down; delete after 2026-11-28)
+- [x] Rebuild Nexus (+ registry), SonarQube, Jenkins controller + agent with Terraform/Ansible; retire VMs 104-106 (shut down 2026-10-29; **deleted 2026-11-04** after a PBS backup, owner decision)
 - [x] Security gates written once in `ci/` scripts; pipelines only call them
 - [x] Jenkinsfile for BelleShop: build, test, SonarQube gate, Trivy fs + image scan, SBOM (Syft)
 - [x] Push to Nexus only if gates pass; sign images with Cosign (+ SBOM attestation; verified with the public key)

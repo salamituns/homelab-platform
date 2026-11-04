@@ -53,5 +53,5 @@ Review when anything network-facing changes. Last reviewed: 2026-11-03.
 - [x] SonarQube, Jenkins, Nexus: service ports to named clients only, legacy `10.2.0.0/21` rule removed (2026-10-26). Docker-published ports are filtered in `DOCKER-USER`, not ufw
 - [x] Router: DHCP pool moved to `.100-.180`; IPv6 inbound blocked by Reflexive ACL
 - [x] VM 100: shut down 2026-10-25
-- [ ] VM 100: `qm destroy 100 --purge` after 2026-11-01
+- [x] VM 100: `qm destroy 100 --purge` (2026-11-04; 8 PBS backups kept)
 - [ ] Optional: router "Drop incoming ICMP Echo requests to LAN" is Off (internet can ping LAN hosts over IPv6). Turning it On hides hosts from ping sweeps
