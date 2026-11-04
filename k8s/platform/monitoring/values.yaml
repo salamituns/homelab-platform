@@ -89,6 +89,11 @@ grafana:
       subPath: gitea-caddy-root.crt
       readOnly: true
   grafana.ini:
+    # Grafana builds its OAuth redirect_uri (and every absolute link) from root_url. Without it
+    # the default is http://localhost:3000/, so Gitea rejects the login with a redirect
+    # mismatch (seen live 2026-11-04 after PR #45). Must match the Gitea app's redirect URI.
+    server:
+      root_url: https://grafana.apps.home.arpa/
     auth.generic_oauth:
       name: Gitea
       enabled: true
