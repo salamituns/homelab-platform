@@ -1,0 +1,43 @@
+# oauth2-proxy in front of the Prometheus and Alertmanager UIs (ADR 0016 step 3).
+# Two chart releases in `monitoring` (one cookie/secret/Gitea app per host). Included by
+# platform-root (`k8s/platform/apps`). Chart 10.7.1 / image v7.15.5 by digest.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: oauth2-proxy
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/compare-options: ServerSideDiff=true
+spec:
+  project: platform
+  sources:
+    - repoURL: https://oauth2-proxy.github.io/manifests
+      chart: oauth2-proxy
+      targetRevision: 10.7.1
+      helm:
+        releaseName: oauth2-proxy-prometheus
+        valueFiles:
+          - $values/k8s/platform/oauth2-proxy/prometheus-values.yaml
+    - repoURL: https://oauth2-proxy.github.io/manifests
+      chart: oauth2-proxy
+      targetRevision: 10.7.1
+      helm:
+        releaseName: oauth2-proxy-alertmanager
+        valueFiles:
+          - $values/k8s/platform/oauth2-proxy/alertmanager-values.yaml
+    - repoURL: https://gitea.home.arpa/tunsgit/homelab-platform.git
+      targetRevision: main
+      ref: values
+    - repoURL: https://gitea.home.arpa/tunsgit/homelab-platform.git
+      targetRevision: main
+      path: k8s/platform/oauth2-proxy/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false
+      - ServerSideApply=true

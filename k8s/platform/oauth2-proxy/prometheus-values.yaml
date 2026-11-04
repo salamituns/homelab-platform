@@ -1,0 +1,66 @@
+# oauth2-proxy 10.7.1 in front of Prometheus (ADR 0016 step 3).
+# Flags are v7.15.5 names from pkg/apis/options (legacy_options.go / options.go).
+# forceLegacyConfig false + no configFile: flags only, so the chart cannot inject
+# unknown cfg keys (Grafana groups_claim_path lesson).
+fullnameOverride: oauth2-proxy-prometheus
+replicaCount: 1
+
+image:
+  repository: oauth2-proxy/oauth2-proxy
+  # quay.io/oauth2-proxy/oauth2-proxy:v7.15.5 index digest (quay API + docker-content-digest, 2026-11-04)
+  tag: "v7.15.5@sha256:8498b0d0ef0a7b29686414000a08aee467f02d0299c9ed1e006a8f33fc017916"
+  pullPolicy: IfNotPresent
+
+config:
+  existingSecret: oauth2-proxy-prometheus
+  cookieName: _oauth2_proxy_prometheus
+  # Required (not optional): kubelet holds the pod until ESO creates this Secret.
+  requiredSecretKeys:
+    - client-id
+    - client-secret
+    - cookie-secret
+  # Chart 10.7.1 always renders a cfg from these when alphaConfig is off; the default
+  # upstream is file:///dev/null which would swallow the UI. Keep only keys that exist
+  # on v7.15.5 (email_domains, upstreams).
+  emailDomains: ["*"]
+  upstreams:
+    - http://prometheus-stack-kube-prom-prometheus.monitoring.svc.cluster.local:9090
+
+alphaConfig:
+  enabled: false
+
+metrics:
+  enabled: false
+
+serviceAccount:
+  automountServiceAccountToken: false
+
+resources:
+  requests: { cpu: 10m, memory: 32Mi }
+  limits: { memory: 64Mi }
+
+# Directory mount, no subPath (Grafana mounted the file AS the dir).
+extraVolumes:
+  - name: gitea-caddy-root
+    configMap:
+      name: gitea-caddy-root
+extraVolumeMounts:
+  - name: gitea-caddy-root
+    mountPath: /etc/oauth2-proxy/ca
+    readOnly: true
+
+extraArgs:
+  provider: oidc
+  provider-display-name: Gitea
+  oidc-issuer-url: https://gitea.home.arpa
+  oidc-groups-claim: groups
+  code-challenge-method: S256
+  scope: "openid profile email groups"
+  provider-ca-file: /etc/oauth2-proxy/ca/gitea-caddy-root.crt
+  allowed-group: homelab
+  redirect-url: https://prometheus.apps.home.arpa/oauth2/callback
+  cookie-secure: "true"
+  reverse-proxy: "true"
+  real-client-ip-header: X-Forwarded-For
+  trusted-proxy-ip: 10.244.0.0/16
+  skip-provider-button: "true"

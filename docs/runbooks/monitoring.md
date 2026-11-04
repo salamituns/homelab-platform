@@ -22,14 +22,13 @@ browser. They are root paths: the chart derives `routePrefix` from the external 
 path, and `/` keeps the default `/` (verified in the 88.3.0 render - the API and UI
 endpoints do not move).
 
-**The Prometheus and Alertmanager UIs are unauthenticated.** The only things in front
-of them are the Gateway's TLS and the fact that `.240` is reachable from the
-LAN and the tailnet only; anything that can reach `alertmanager.apps.home.arpa` can
-create silences (mute alerts) and see every alert. That is accepted for now and
-tracked as the Week 7/8 carried item: put an SSO in front of all three (oauth2-proxy,
-the OIDC item). Do not expose them beyond the LAN/tailnet before that lands. Anyone
-who silences an alert should expect to explain it in review - silences appear in the
-Alertmanager UI audit of the alert groups.
+**The Prometheus and Alertmanager UIs sit behind oauth2-proxy** (ADR 0016 step 3; runbook
+`docs/runbooks/oidc-sso.md`). Prometheus allows Gitea org `homelab`; Alertmanager allows
+only `homelab:platform-admins` (the UI can create silences). Inside the cluster the
+services stay unauthenticated; netpols now admit oauth2-proxy (and falcosidekick /
+argo-rollouts) rather than the Gateway data plane. Break-glass is the admin SSH
+port-forward (ADR 0003). Anyone who silences an alert should expect to explain it
+in review — silences appear in the Alertmanager UI audit of the alert groups.
 
 ## Why kube-proxy / etcd / scheduler / controller-manager monitors are off
 

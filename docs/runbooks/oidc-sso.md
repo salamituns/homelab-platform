@@ -1,9 +1,8 @@
 # Runbook: OIDC SSO for the admin UIs (ADR 0016)
 
 Owner-only. This runbook executes [ADR 0016](../adr/0016-oidc-sso-admin-uis-gitea.md): shared prep (step 0),
-Grafana (step 1), and Argo CD (step 2, owner-applied against live **v3.5.1**). oauth2-proxy for the
-Prometheus/Alertmanager UIs (step 3) is added here when it is implemented. Nothing in this runbook is
-agent-applied to the cluster; step 2's apply script is yours.
+Grafana (step 1), Argo CD (step 2), and oauth2-proxy for the Prometheus/Alertmanager UIs (step 3).
+Nothing in this runbook is agent-applied to the cluster.
 
 ## What already exists (verified 2026-11-03)
 
@@ -194,14 +193,90 @@ scripts/argocd-oidc-apply.sh --rollback
 `kubectl replace` of the three backed-up objects. Dex is untouched. Optionally remove the OpenBao
 side with the `root-run oidc` undo block in `scripts/openbao-breakglass.sh`.
 
+## Step 3 — oauth2-proxy (Prometheus + Alertmanager UIs)
+
+Do **not** merge this until both OpenBao records exist. The HTTPRoutes move off prometheus/alertmanager
+onto a proxy whose Secret is required (not optional): merge-first would 502 both UIs.
+
+**Owner sequence, one command each, in order:**
+
+1. Gitea OAuth2 apps (confidential), exact redirect URIs:
+
+   | Consumer | Redirect URI |
+   |---|---|
+   | `oauth2-proxy-prometheus` | `https://prometheus.apps.home.arpa/oauth2/callback` |
+   | `oauth2-proxy-alertmanager` | `https://alertmanager.apps.home.arpa/oauth2/callback` |
+
+2. Store them (cookie secret is generated on sectools, never on the Mac):
+
+   ```bash
+   scripts/openbao-breakglass.sh root-run oidc oauth2-proxy-prometheus
+   scripts/openbao-breakglass.sh root-run oidc oauth2-proxy-alertmanager
+   ```
+
+   Keys written: `client_id`, `client_secret`, `cookie_secret`. `oidc-read` already lists both paths.
+
+3. Merge the PR. Argo apps that move: `oauth2-proxy` (new, via `platform-root` + `k8s/platform/apps/oauth2-proxy.yaml`),
+   `monitoring` (HTTPRoutes + netpols), `nginx-gateway` (data-plane egress `:4180` instead of `:9090`/`:9093`).
+4. Proofs below.
+
+v7.15.5 keys used (from `pkg/apis/options`, tag v7.15.5 — no invented names): `provider`,
+`oidc-issuer-url`, `oidc-groups-claim`, `code-challenge-method`, `scope`, `provider-ca-file`,
+`allowed-group`, `email-domain`, `redirect-url`, `cookie-secure`, `cookie-name`,
+`reverse-proxy`, `real-client-ip-header`, `trusted-proxy-ip`, `upstream`. CA is a ConfigMap
+**directory** mount (`/etc/oauth2-proxy/ca/gitea-caddy-root.crt`). Prometheus allows `homelab`;
+Alertmanager allows only `homelab:platform-admins`.
+
+### Proofs (ADR 0016 step 3)
+
+A redirect is not a login (Argo CD step 2: `/auth/login` redirected, then the session check failed).
+Every proof below includes a **follow-up request with the session cookie**.
+
+1. **Unauthenticated redirect** (`curl -q`):
+
+   ```bash
+   curl -q -sSI https://prometheus.apps.home.arpa/
+   curl -q -sSI https://alertmanager.apps.home.arpa/
+   ```
+
+   Expect 302/303 to `https://gitea.home.arpa/login/oauth/authorize` with
+   `redirect_uri=https://prometheus.apps.home.arpa/oauth2/callback` (and the alertmanager host
+   on the other). Localhost in `redirect_uri` means `redirect-url` did not take — rollback.
+
+2. **Browser, org admin:** Gitea login as a `homelab:platform-admins` member → Prometheus targets
+   page loads on a second request; Alertmanager UI loads on a second request.
+
+3. **Browser, org only:** Prometheus allowed; Alertmanager 403.
+
+4. **Direct :9090 from the Gateway is refused** (the bypass check). From a grafana pod (already
+   in `monitoring`, so intra-metrics is not this test) this is the wrong source. From the
+   **nginx-gateway data-plane pod**:
+
+   ```bash
+   ssh Master 'sudo -n kubectl --kubeconfig /etc/kubernetes/admin.conf -n nginx-gateway exec deploy/homelab-gateway-nginx -- \
+     wget -qSO- --timeout=5 http://prometheus-stack-kube-prom-prometheus.monitoring.svc.cluster.local:9090/ 2>&1 | head'
+   ```
+
+   Expect hang/timeout or connection refused by policy, **not** HTTP 200 of the Prometheus UI.
+   The browser path through `prometheus.apps.home.arpa` must still work after login.
+
+5. **Falco still pages:** a falcosidekick test alert still arrives by e-mail
+   (`monitoring-alertmanager-falco-ingress` was not changed).
+
+### Rollback
+
+`git revert` the step 3 commit (HTTPRoutes return to prometheus/alertmanager Services, gateway
+egress returns to `:9090`/`:9093`, oauth2-proxy Application can be deleted). OpenBao undo is the
+`root-run oidc` block in `scripts/openbao-breakglass.sh`.
+
 ## Break-glass (ADR 0016 decision 9)
 
 - Grafana local admin: unchanged by this rollout; password in the `grafana-admin` Secret (out of git, ADR 0008).
 - Argo CD local admin: stays enabled (`admin.enabled: "true"`); password hash is `argocd-secret` key
   `admin.password` (not `argocd-initial-admin-secret` on this cluster).
-- If Gitea is down: SSO logins fail everywhere, the local admins still log in, and the Prometheus/Alertmanager UIs
-  (no login) are reachable only through the admin SSH port-forward (ADR 0003). Argo CD keeps running the cluster;
-  syncs retry.
+- If Gitea is down: SSO logins fail everywhere, the Grafana/Argo CD local admins still log in, and the
+  Prometheus/Alertmanager UIs are reachable only through the admin SSH port-forward (ADR 0003) onto
+  `:9090`/`:9093` inside the cluster. Argo CD keeps running the cluster; syncs retry.
 
 ## 2FA audit (ADR 0016 decision 10)
 

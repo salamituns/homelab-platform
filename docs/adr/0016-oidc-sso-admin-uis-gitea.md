@@ -1,10 +1,9 @@
 # ADR 0016: OIDC single sign-on for the admin UIs, with Gitea as the provider
 
-- Status: Accepted (owner, 2026-11-03, PR #44). Step 1 (Grafana) is in git and live. Step 2 (Argo CD)
-  is prepared against **v3.5.1** (live image `quay.io/argoproj/argocd:v3.5.1`, in-pod `argocd-server: v3.5.1`,
-  2026-11-04); owner-applied, not yet live.
-- Date: 2026-11-03 (corrections 2026-11-04: live version, `url`, `$oidc.gitea.clientID`, PKCE,
-  `admin.password` in `argocd-secret`, settings restart vs hot-reload)
+- Status: Accepted (owner, 2026-11-03, PR #44). Steps 1–2 in git. Step 3 (oauth2-proxy) prepared against
+  chart 10.7.1 / image v7.15.5; owner merges only after the two OpenBao records exist.
+- Date: 2026-11-03 (corrections 2026-11-04: Argo CD v3.5.1; oauth2-proxy groups split — Alertmanager
+  `homelab:platform-admins` only)
 
 ## Context
 
@@ -135,22 +134,25 @@ Out of scope (and where it lives instead):
    cookie secret and its own Gitea app, and taking one down cannot log out users of the other. In `monitoring`
    because both instances only serve monitoring UIs, the existing `SecretStore` (ADR 0014 path pattern) delivers
    their secrets, and the existing intra-namespace netpol already permits egress from any monitoring pod to
-   `:9090`/`:9093`. Pin chart 10.7.1 / image `v7.15.5` with its digest at implementation, and set
-   `--trusted-proxy-ip` to the pod CIDR `10.244.0.0/16` (the v7.15.5 advisories require it; the Gateway data plane
-   is the proxy, and pod-to-pod traffic is not SNATed by this CNI, so its pod IPs are the real source). Config per
-   instance: `provider: oidc`, `oidc-issuer-url: https://gitea.home.arpa`, scope `openid profile email groups`,
-   `code-challenge-method: S256`, `cookie_secure`, and `--allowed-group homelab` — org membership gates both UIs,
-   matching Grafana's floor.
+   `:9090`/`:9093`. Pin chart **10.7.1** / image **`v7.15.5`** digest
+   `sha256:8498b0d0ef0a7b29686414000a08aee467f02d0299c9ed1e006a8f33fc017916` (quay index, 2026-11-04).
+   Behind NGF: `--reverse-proxy`, `--real-client-ip-header=X-Forwarded-For`, `--trusted-proxy-ip=10.244.0.0/16`
+   (v7.15.5 `Options.TrustedProxyIPs`; pod-to-pod is not SNATed). Config per instance (v7.15.5 flags only):
+   `provider: oidc`, `oidc-issuer-url: https://gitea.home.arpa`, `oidc-groups-claim: groups` (default; there is
+   no `groups_claim_path`), `scope: openid profile email groups`, `code-challenge-method: S256`,
+   `cookie-secure`, `provider-ca-file` (PEM from ConfigMap **directory** mount of `gitea-caddy-root`),
+   exact `redirect-url` `https://<host>/oauth2/callback`. **Groups (2026-11-04 change):** Prometheus
+   `--allowed-group homelab`; Alertmanager `--allowed-group homelab:platform-admins` (the UI can create silences).
 
 7. **Authorization mapping, one table for every consumer** (the `groups` claim values are fixed by Gitea:
    org names as-is, team names lowercased — so the configs above must use `homelab:platform-admins`, never
    `Platform-Admins`):
 
-   | Gitea membership | `groups` claim | Argo CD | Grafana | Prometheus/Alertmanager UIs |
-   |---|---|---|---|---|
-   | org `homelab`, team `platform-admins` | `["homelab", "homelab:platform-admins"]` | `role:admin` | Admin | allowed |
-   | org `homelab` only | `["homelab"]` | `role:readonly` | Viewer | allowed |
-   | no org membership | absent / empty | denied (`policy.default: ""`) | denied (`allowed_groups`) | denied (`--allowed-group`) |
+   | Gitea membership | `groups` claim | Argo CD | Grafana | Prometheus UI | Alertmanager UI |
+   |---|---|---|---|---|---|
+   | org `homelab`, team `platform-admins` | `["homelab", "homelab:platform-admins"]` | `role:admin` | Admin | allowed | allowed |
+   | org `homelab` only | `["homelab"]` | `role:readonly` | Viewer | allowed | denied (`--allowed-group`) |
+   | no org membership | absent / empty | denied (`policy.default: ""`) | denied (`allowed_groups`) | denied | denied |
 
 8. **Secrets live only in OpenBao**, under the ADR 0014 path pattern: `secret/data/oidc/{argocd,grafana,oauth2-proxy-prometheus,oauth2-proxy-alertmanager}` (client secrets, plus a 32-byte cookie secret per oauth2-proxy instance). In-git consumers (Grafana, the two oauth2-proxy instances) fetch through the existing `monitoring` SecretStore with new ExternalSecrets. Argo CD is out-of-git (ADR 0008), so its client id and secret are written by the owner into the `argocd-secret` keys `oidc.gitea.clientID` and `oidc.gitea.clientSecret` from the OpenBao value over the admin SSH path (value from stdin, never argv). The owner creates the four OAuth2 apps in the Gitea UI and stores each secret in OpenBao with
 `scripts/openbao-breakglass.sh root-run oidc <consumer>` — one command; the short-lived root token is minted, used
@@ -179,9 +181,9 @@ the generate-root paths from the network, both verified 2026-11-03).
     | Change | Namespace | Pairs with |
     |---|---|---|
     | New egress: grafana pods → `192.168.1.97/32:443` (token exchange) | `monitoring` | Existing Argo CD-style rule; Gitea is already reachable from `argocd-server` |
-    | New ingress: oauth2-proxy pods `:4180` from the Gateway data plane | `monitoring` | New Gateway data-plane egress `:4180` (replaces its `:9090`/`:9093`) |
+    | New ingress: oauth2-proxy pods `:4180` from the Gateway data plane | `monitoring` | Gateway data-plane egress `:4180` **replaces** `:9090`/`:9093` so the UIs cannot be reached without the proxy |
     | New egress: oauth2-proxy pods → `192.168.1.97/32:443` (code exchange + userinfo) | `monitoring` | Same shape as the grafana rule |
-    | Switch: prometheus/alertmanager UI ingress source from "Gateway data plane" to "oauth2-proxy pods in this namespace" | `monitoring` | Same-namespace flows already pass `monitoring-intra-metrics` on `:9090`/`:9093`; the egress side needs no change |
+    | Switch: prometheus/alertmanager UI ingress source from "Gateway data plane" to the matching oauth2-proxy instance | `monitoring` | Named oauth2-proxy→upstream egress plus existing `monitoring-intra-metrics` |
     | Grafana UI ingress from the Gateway stays as-is (`:3000`) | `monitoring` | Grafana keeps its own OIDC login, no proxy |
     | Argo CD egress to Gitea | `argocd` | Already present; no change |
 
@@ -237,15 +239,15 @@ the owner (admin team) can sync an app; logs show JWKS against `192.168.1.97`; l
 deny path, a throwaway Gitea account with no org membership authenticates and sees nothing, then is deleted.
 *Rollback:* `scripts/argocd-oidc-apply.sh --rollback`.
 
-**Step 3 — oauth2-proxy for the two UIs (in-git, Argo-synced, last).** New Argo app for the two oauth2-proxy
-deployments (chart 10.7.1, values per decision 6, ExternalSecrets for client + cookie secrets), repoint the
-`prometheus`/`alertmanager` HTTPRoute backendRefs to the oauth2-proxy services, and apply the netpol pairs
-(decision 11). *Proof:* `curl -I https://prometheus.apps.home.arpa/` answers 302/403 to the sign-in path, not the
-Prometheus UI; after a Gitea login the targets page loads, and the same flow on
-`alertmanager.apps.home.arpa/` reaches the UI; a falco test alert still arrives by e-mail (the falcosidekick
-ingress rule was untouched — that is the pairing check); alert e-mail links work after login.
-*Rollback:* revert the commit; Argo syncs the HTTPRoutes back to the direct services and the netpols back to
-Gateway-only ingress; the oauth2-proxy deployments can be deleted with the app.
+**Step 3 — oauth2-proxy for the two UIs (in-git, Argo-synced, last).** Owner creates the two Gitea apps and
+`root-run oidc oauth2-proxy-prometheus` / `oauth2-proxy-alertmanager` **before** merge (required Secret; the
+HTTPRoute moves in the same commit). New Argo app `oauth2-proxy` (chart 10.7.1, two releases, ExternalSecrets
+via `openbao-oidc`), HTTPRoutes to those Services, netpol pairs (decision 11) including **removing** Gateway
+→ `:9090`/`:9093`. *Proof:* unauthenticated `curl -q -sSI https://prometheus.apps.home.arpa/` is 302 to Gitea
+with `redirect_uri=https://prometheus.apps.home.arpa/oauth2/callback`; after login a **second** request with
+the session cookie returns the Prometheus UI (a redirect alone is not a login — Argo CD step 2); Alertmanager
+the same for `platform-admins` and 403 for org-only; Gateway to prometheus `:9090` is refused; falcosidekick
+→ Alertmanager `:9093` still delivers (rule untouched). *Rollback:* revert the commit.
 
 ## Consequences
 
