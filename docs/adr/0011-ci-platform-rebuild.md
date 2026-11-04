@@ -61,7 +61,7 @@ large companies. Gitea Actions runs GitHub Actions workflow syntax, so the lab c
 
 | Step | Status |
 |---|---|
-| Shut down 104-106, `onboot 0` | Done 2026-10-29; delete after 2026-11-28 |
+| Shut down 104-106, `onboot 0` | Done 2026-10-29; **deleted 2026-11-04** (`qm destroy --purge`), earlier than the 30-day hold because a PBS backup of each exists (owner decision) |
 | `nexus` + registry, nodes pull a test image | Done: owner accepted the CE EULA (2026-10-29, `nexus_accept_ce_eula`); tags immutable; `k8s-pull` cannot push (403); nodes pull via the CRI resolver (`use_local_image_pull = true`) |
 | `sonarqube` | Done: project `belleshop`, user `jenkins` (browse + scan on that project only), token copied to Jenkins |
 | `jenkins` + `ci-agent` | Done: JCasC, 0 executors, agent online over WebSocket, gates in `/opt/ci-gates`, all lab CAs trusted (`lab_ca_trust`) |
