@@ -12,14 +12,16 @@
 # and decodes client-side (unpadded-base64 XOR with the OTP, the same math the CLI does).
 #
 # The mint runs ON sectools; the root token never reaches the Mac or any terminal output.
-# Unseal shares and the SMTP app password are read with `read -rs` locally and travel to
-# sectools over ssh stdin (never argv, never echoed).
+# Unseal shares, the SMTP app password and the OIDC client credentials are read with
+# `read -rs` locally and travel to sectools over ssh stdin (never argv, never echoed).
 #
 # Usage (owner, from the Mac):
 #   scripts/openbao-breakglass.sh apply-config            # once: playbook + unseal
 #   scripts/openbao-breakglass.sh root-run alertmanager   # the alert setup (§D step 5)
+#   scripts/openbao-breakglass.sh root-run oidc <consumer> # OIDC client secrets (ADR 0016):
+#       #      consumer = grafana | argocd | oauth2-proxy-prometheus | oauth2-proxy-alertmanager
 #   scripts/openbao-breakglass.sh root-run -- <cmd...>    # anything else with the token
-#   everything also accepts --dry-run
+#   everything also accepts --dry-run (and root-run alertmanager/oidc: --overwrite)
 #
 # `apply-config` runs (and prints) exactly:
 #   cd ansible && ansible-playbook playbooks/openbao.yml --limit sectools --check --diff
@@ -29,22 +31,31 @@
 # by piping one share at a time to PUT /v1/sys/unseal (the bao CLI refuses piped stdin
 # for unseal - also verified - so the API it is), prompting hidden until it is unsealed.
 #
-# `root-run` (one ssh session): generate OTP, init, submit the 3 shares, decode into a
-# remote variable, run the command with BAO_TOKEN set, then ALWAYS revoke the token -
-# explicit revoke + verification, with a trap as the backstop on any failure.
+# `root-run` (one ssh session): generate OTP, init, submit the 2 shares (the store's
+# threshold: 3 shares / t=2, verified live 2026-11-03), decode into a remote variable,
+# run the command with BAO_TOKEN set, then ALWAYS revoke the token - explicit revoke +
+# verification, with a trap as the backstop on any failure.
 #
-# Why `root-run alertmanager` embeds the setup instead of running
-# scripts/openbao-setup-alertmanager.sh through an `ssh -L` tunnel (the brief asked to
-# pick): the tunnel would need BAO_TOKEN in a LOCAL environment variable, i.e. the root
-# token would reach the Mac - exactly what this script exists to prevent. Embedding the
-# same idempotent API calls (policy, kubernetes role, kv secret) keeps the token on
-# sectools; the payloads are copied from openbao-setup-alertmanager.sh (falco PR #33),
-# which stays the reference for a flow where you already hold a short-lived token.
+# Why `root-run alertmanager`/`oidc` embed the setup instead of running a setup script
+# through an `ssh -L` tunnel (ADR 0016 fix round): the tunnel would need BAO_TOKEN in a
+# LOCAL environment variable, i.e. the root token would reach the Mac - exactly what this
+# script exists to prevent. It would not even work: https://bao.home.arpa is reachable
+# from the Mac (health 200, verified 2026-11-03) but Caddy 403s /v1/sys/generate-root*
+# from the network (verified: 403), and OpenBao's listener binds 127.0.0.1 only, so root
+# minting is sectools-only by design. The alertmanager payloads are copied from
+# openbao-setup-alertmanager.sh (falco PR #33), which stays the reference for a flow where
+# you already hold a short-lived token; the oidc payloads follow ADR 0016 decision 8.
 #
 # Undo of what `root-run alertmanager` writes (same as the falco PR #33 script):
 #   curl -qsS -H "X-Vault-Token: <token>" -X DELETE "$ADDR/v1/secret/metadata/monitoring/alertmanager"
 #   curl -qsS -H "X-Vault-Token: <token>" -X DELETE "$ADDR/v1/auth/kubernetes/role/alertmanager"
 #   curl -qsS -H "X-Vault-Token: <token>" -X DELETE "$ADDR/v1/sys/policies/acl/alertmanager-read"
+#
+# Undo of what `root-run oidc <consumer>` writes:
+#   curl -qsS -H "X-Vault-Token: <token>" -X DELETE "$ADDR/v1/secret/metadata/oidc/<consumer>"
+#   # role/policy are shared by every oidc consumer - delete only after removing ALL of them:
+#   curl -qsS -H "X-Vault-Token: <token>" -X DELETE "$ADDR/v1/auth/kubernetes/role/oidc"
+#   curl -qsS -H "X-Vault-Token: <token>" -X DELETE "$ADDR/v1/sys/policies/acl/oidc-read"
 #
 # Requires an ssh alias `sectools` (e.g. HostName 192.168.1.95, User tunsadmin) or the
 # BREAKGLASS_SSH override. Test-only overrides (used by openbao-breakglass-test.sh):
@@ -67,7 +78,9 @@ read -r -a SSH_RUNNER <<<"${BREAKGLASS_SSH:-ssh -o BatchMode=yes tunsadmin@192.1
 REMOTE_ADDR="${BREAKGLASS_BAO_ADDR:-http://127.0.0.1:8200}"
 PLAYBOOK_DIR="${BREAKGLASS_PLAYBOOK_DIR:-$REPO_ROOT/ansible}"
 
-usage() { sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'; }
+# Print the header comment as the help text, stopping at the `set` line (robust to the
+# header growing, unlike a fixed sed line range).
+usage() { awk 'NR==1{next} /^set -euo pipefail$/{exit} {sub(/^# ?/,""); print}' "$0"; }
 
 say()  { echo "==> $*"; }
 note() { echo "    $*"; }
@@ -133,7 +146,7 @@ unseal_loop() {
 # root-run
 # ---------------------------------------------------------------------------
 cmd_root_run() {
-  local mode="exec" cmd_args=()
+  local mode="exec" cmd_args=() OIDC_CONSUMER=""
   local args=()
   [[ $# -gt 0 ]] || die "root-run needs a command: 'root-run alertmanager' or 'root-run -- <cmd...>'"
   # allow `root-run -- cmd` and `root-run cmd`; --dry-run/--overwrite peeled off anywhere
@@ -150,14 +163,22 @@ cmd_root_run() {
   if [[ "${args[0]}" == "alertmanager" ]]; then
     mode="alertmanager"
     [[ ${#args[@]} -gt 1 ]] && die "root-run alertmanager takes no extra arguments (flags: --overwrite --dry-run)"
+  elif [[ "${args[0]}" == "oidc" ]]; then
+    mode="oidc"
+    [[ ${#args[@]} -eq 2 ]] || die "root-run oidc takes exactly one consumer: grafana|argocd|oauth2-proxy-prometheus|oauth2-proxy-alertmanager"
+    case "${args[1]}" in
+      grafana|argocd|oauth2-proxy-prometheus|oauth2-proxy-alertmanager) OIDC_CONSUMER="${args[1]}" ;;
+      *) die "unknown oidc consumer: ${args[1]} (grafana|argocd|oauth2-proxy-prometheus|oauth2-proxy-alertmanager)" ;;
+    esac
   else
     cmd_args=("${args[@]}")
   fi
 
   say "openbao break-glass root-run ($mode)"
 
-  # Prompt locally for the shares (hidden). The store was inited with a 3-of-5 threshold;
-  # the count is a constant so the flow stays ONE command and ONE session. --dry-run
+  # Prompt locally for the shares (hidden). The store holds 3 shares with a threshold of
+  # 2 (verified live 2026-11-03: seal-status n=3, t=2); the count is a constant so the
+  # flow stays ONE command and ONE session. --dry-run
   # substitutes placeholders: it never asks for (or touches) real secrets.
   local shares=() s i
   if [[ "$DRY_RUN" == true ]]; then
@@ -184,6 +205,13 @@ cmd_root_run() {
         '$p + {smtp: {username: "<prompted>", from: "<prompted>", to: "<prompted>", password: "<hidden>"}, overwrite: false}')
     else
       payload=$(alertmanager_prompt_and_extend "$payload")
+    fi
+  elif [[ "$mode" == "oidc" ]]; then
+    if [[ "$DRY_RUN" == true ]]; then
+      payload=$(jq -cn --argjson p "$payload" --arg c "$OIDC_CONSUMER" \
+        '$p + {oidc: {consumer: $c, client_id: "<hidden>", client_secret: "<hidden>"}, overwrite: false}')
+    else
+      payload=$(oidc_prompt_and_extend "$payload" "$OIDC_CONSUMER")
     fi
   else
     # Shell-quoted so the remote bash -c runs exactly this command; the command is the
@@ -215,7 +243,7 @@ set -euo pipefail
 umask 077
 P="${BREAKGLASS_PAYLOAD:?}"
 ADDR=$(jq -r .addr <<<"$P")
-MODE=$(jq -r 'if .cmd then "exec" else "alertmanager" end' <<<"$P")
+MODE=$(jq -r 'if .cmd then "exec" elif .oidc then "oidc" else "alertmanager" end' <<<"$P")
 
 echo "    [remote] health check"
 curl -q -s "$ADDR/v1/sys/health" | jq -e '.initialized and (.sealed | not)' >/dev/null \
@@ -279,6 +307,74 @@ if [[ "$MODE" == "exec" ]]; then
   CMD=$(jq -r .cmd <<<"$P")
   echo "    [remote] running: $CMD"
   bash -c "$CMD"
+elif [[ "$MODE" == "oidc" ]]; then
+  # ---- the OIDC setup (ADR 0016 decision 8; same call shape as alertmanager) ----
+  CONSUMER=$(jq -r '.oidc.consumer' <<<"$P")
+  KV=oidc/$CONSUMER
+  echo "    [remote] checking mounts (kv v2 at secret/, kubernetes auth)"
+  curl -q -s --config "$CFG" "$ADDR/v1/sys/mounts" | jq -e '.["secret/"].options.version == "2"' >/dev/null \
+    || { echo "ERROR: kv v2 is not mounted at secret/" >&2; exit 1; }
+  curl -q -s --config "$CFG" "$ADDR/v1/sys/auth" | jq -e '.["kubernetes/"].type == "kubernetes"' >/dev/null \
+    || { echo "ERROR: kubernetes auth missing (run openbao-setup-belleshop.sh first)" >&2; exit 1; }
+
+  echo "    [remote] writing policy oidc-read (read-only on the ESO-consumed secret/data/oidc/* paths)"
+  POLICY=$(cat <<'HCL'
+# Least-privilege read policy for ESO OIDC client secrets in namespace monitoring (ADR 0016
+# step 1; consumers are ExternalSecret grafana-oidc today, the two oauth2-proxy instances of
+# ADR 0016 step 3 later). secret/data/oidc/argocd is NOT here on purpose: the owner reads it
+# over the admin SSH path (Argo CD is out-of-git, ADR 0008).
+path "secret/data/oidc/grafana" {
+  capabilities = ["read"]
+}
+path "secret/data/oidc/oauth2-proxy-prometheus" {
+  capabilities = ["read"]
+}
+path "secret/data/oidc/oauth2-proxy-alertmanager" {
+  capabilities = ["read"]
+}
+HCL
+)
+  jq -n --arg policy "$POLICY" '{policy: $policy}' \
+    | curl -q -s -o /dev/null --config "$CFG" -X PUT --data-binary @- "$ADDR/v1/sys/policies/acl/oidc-read"
+
+  echo "    [remote] writing kubernetes auth role oidc (SA monitoring/eso-oidc)"
+  jq -n '{bound_service_account_names: ["eso-oidc"], bound_service_account_namespaces: ["monitoring"], token_policies: ["oidc-read"], token_ttl: "1h"}' \
+    | curl -q -s -o /dev/null --config "$CFG" -X POST --data-binary @- "$ADDR/v1/auth/kubernetes/role/oidc"
+
+  EXISTS=$(curl -q -s --config "$CFG" -o /dev/null -w '%{http_code}' "$ADDR/v1/secret/metadata/$KV")
+  OVER=$(jq -r '.overwrite // false' <<<"$P")
+  if [[ "$EXISTS" == "200" && "$OVER" != "true" ]]; then
+    echo "    [remote] secret/$KV already exists (pass --overwrite to replace)"
+  else
+    echo "    [remote] writing secret/$KV with the prompted Gitea OAuth2 credentials"
+    # The client id/secret arrive in the payload (ssh stdin, never argv). The cookie
+    # secret for the oauth2-proxy consumers is generated HERE on sectools - it never
+    # touches the Mac at all. oauth2-proxy wants 16/24/32 raw bytes base64-encoded;
+    # python3, not `openssl | head`: with pipefail, head closing the pipe early
+    # SIGPIPE-kills the producer (same lesson as the OTP generation above).
+    if [[ "$CONSUMER" == oauth2-proxy-* ]]; then
+      COOKIE_SECRET=$(python3 -c 'import base64, os; print(base64.b64encode(os.urandom(32)).decode())')
+      CODE=$(CS="$COOKIE_SECRET" jq -c '{data: {client_id: .oidc.client_id, client_secret: .oidc.client_secret, cookie_secret: env.CS}}' <<<"$P" \
+        | curl -q -s --config "$CFG" -o /dev/null -w '%{http_code}' -X POST --data-binary @- "$ADDR/v1/secret/data/$KV")
+      unset COOKIE_SECRET
+    else
+      CODE=$(jq -c '{data: {client_id: .oidc.client_id, client_secret: .oidc.client_secret}}' <<<"$P" \
+        | curl -q -s --config "$CFG" -o /dev/null -w '%{http_code}' -X POST --data-binary @- "$ADDR/v1/secret/data/$KV")
+    fi
+    [[ "$CODE" == "200" || "$CODE" == "204" ]] \
+      || { echo "ERROR: writing secret/$KV failed (HTTP $CODE)" >&2; exit 1; }
+  fi
+
+  echo "    [remote] verifying the secret key set (values never printed)"
+  if [[ "$CONSUMER" == oauth2-proxy-* ]]; then
+    EXPECTED='["client_id","client_secret","cookie_secret"]'
+  else
+    EXPECTED='["client_id","client_secret"]'
+  fi
+  curl -q -s --config "$CFG" "$ADDR/v1/secret/data/$KV" \
+    | jq -e --argjson exp "$EXPECTED" '.data.data | keys | sort == $exp' >/dev/null \
+    || { echo "ERROR: unexpected keys in secret/$KV" >&2; exit 1; }
+  echo "    [remote] oidc setup complete ($CONSUMER)"
 else
   # ---- the alertmanager setup (same calls and payloads as the falco PR #33 script) ----
   KV=monitoring/alertmanager
@@ -365,6 +461,29 @@ alertmanager_prompt_and_extend() {   # $1 payload-so-far -> full payload on stdo
     jq -cn --argjson p "$payload" --argjson overwrite "$overwrite" \
     '$p + {smtp: {username: env.SMTP_USERNAME, from: env.SMTP_FROM, to: env.SMTP_TO, password: env.SMTP_PASSWORD}, overwrite: $overwrite}'
   unset p
+}
+
+# Prompts for the Gitea OAuth2 app credentials locally (both hidden: the client id is not
+# secret, but typing it blind avoids shoulder-surfing and keeps the flow uniform) and
+# extends the payload. Same stderr rule as alertmanager_prompt_and_extend: this runs inside
+# $( ), so stdout must carry ONLY the payload JSON.
+oidc_prompt_and_extend() {   # $1 payload-so-far, $2 consumer -> full payload on stdout
+  local payload="$1" consumer="$2" cid csec overwrite=false
+  [[ "$OVERWRITE" == true ]] && overwrite=true
+  echo "==> Gitea OAuth2 app credentials for consumer '${consumer}' (ADR 0016 decision 8)" >&2
+  read -rs -p "    Client ID (input hidden): " cid
+  echo >&2
+  [[ -n "$cid" ]] || die "client id must not be empty"
+  read -rs -p "    Client Secret (input hidden): " csec
+  echo >&2
+  [[ -n "$csec" ]] || die "client secret must not be empty"
+  # The values reach jq through its environment (allowed), never argv; they then travel to
+  # sectools inside the payload on ssh stdin. The oauth2-proxy cookie secret is NOT here:
+  # it is generated on sectools, so it never touches the Mac at all.
+  OIDC_CLIENT_ID="$cid" OIDC_CLIENT_SECRET="$csec" \
+    jq -cn --argjson p "$payload" --arg c "$consumer" --argjson overwrite "$overwrite" \
+      '$p + {oidc: {consumer: $c, client_id: env.OIDC_CLIENT_ID, client_secret: env.OIDC_CLIENT_SECRET}, overwrite: $overwrite}'
+  unset csec
 }
 
 # ---------------------------------------------------------------------------

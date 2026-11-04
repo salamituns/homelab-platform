@@ -2,6 +2,12 @@
 # Grafana's admin login is the Secret monitoring/grafana-admin, created OUTSIDE git (ADR 0008).
 # Alertmanager's config is the Secret monitoring/alertmanager-config-eso synced by ESO from
 # OpenBao `secret/data/monitoring/alertmanager` (ADR 0015 section D, step 5).
+# Grafana's OIDC login (Gitea provider, ADR 0016 step 1): client id/secret come from the
+# ESO-synced Secret monitoring/grafana-oidc as OPTIONAL env vars - before the owner stores
+# `secret/data/oidc/grafana` in OpenBao (scripts/openbao-breakglass.sh root-run oidc grafana),
+# that Secret does not
+# exist and Grafana starts with SSO broken while the local admin login keeps working.
+# docs/runbooks/oidc-sso.md has the owner steps, proofs and rollback.
 # kube-proxy/etcd/scheduler/controller-manager metrics bind 127.0.0.1 on this
 # cluster (ss on the nodes, 2026-11-03), so the chart's ServiceMonitors scrape
 # dead endpoints and fire etcdInsufficientMembers / TargetDown / *Unreachable
@@ -58,6 +64,47 @@ grafana:
     existingSecret: grafana-admin
     passwordKey: admin-password
     userKey: admin-user
+  # OIDC SSO via Gitea (ADR 0016 decisions 2/5/7/8/11). Endpoints are from the live
+  # discovery doc https://gitea.home.arpa/.well-known/openid-configuration (2026-11-03).
+  # GF_AUTH_GENERIC_OAUTH_* env vars override grafana.ini, so the id/secret never sit in git:
+  # both are optional:true on purpose - a missing grafana-oidc Secret (before the owner stores
+  # the OpenBao path) leaves SSO broken but Grafana running; the local admin login is unchanged.
+  envValueFrom:
+    GF_AUTH_GENERIC_OAUTH_CLIENT_ID:
+      secretKeyRef:
+        name: grafana-oidc
+        key: client-id
+        optional: true
+    GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET:
+      secretKeyRef:
+        name: grafana-oidc
+        key: client-secret
+        optional: true
+  # The Gitea Caddy root as tls_client_ca (ADR 0016 decision 2): gitea.home.arpa is signed by
+  # this root, NOT the lab root. Public certificate, so it is a ConfigMap, not a Secret.
+  extraConfigmapMounts:
+    - name: gitea-caddy-root
+      configMap: gitea-caddy-root
+      mountPath: /etc/grafana/ca
+      subPath: gitea-caddy-root.crt
+      readOnly: true
+  grafana.ini:
+    auth.generic_oauth:
+      name: Gitea
+      enabled: true
+      allow_sign_up: true
+      scopes: "openid profile email groups"
+      auth_url: https://gitea.home.arpa/login/oauth/authorize
+      token_url: https://gitea.home.arpa/login/oauth/access_token
+      api_url: https://gitea.home.arpa/login/oauth/userinfo
+      use_pkce: true
+      tls_client_ca: /etc/grafana/ca/gitea-caddy-root.crt
+      groups_claim_path: groups
+      # Space-separated ini list (ADR 0016 decision 5): only members of Gitea org `homelab`
+      # may log in. Team names arrive lowercased in the groups claim (ADR 0016 decision 7).
+      allowed_groups: homelab homelab:platform-admins
+      # platform-admins -> Admin, org members -> Viewer, everyone else blocked above (ADR 0016 decision 7).
+      role_attribute_path: "contains(groups[*], 'homelab:platform-admins') && 'Admin' || 'Viewer'"
   enabled: true
   service:
     annotations: {}

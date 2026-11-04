@@ -1,0 +1,26 @@
+# The Gitea Caddy Local Authority 2026 ECC Root, from homelab-platform ansible/files/ca/
+# gitea-caddy-root.crt (identical bytes; ADR 0015 section B keeps the vendored file the source
+# of truth). Grafana uses it as `tls_client_ca` for the OIDC token/userinfo calls (ADR 0016
+# decision 2): gitea.home.arpa is signed by THIS root, not the lab root - openssl verify with
+# the lab root fails error 20 (verified 2026-11-03). A CA certificate is public material, so a
+# ConfigMap is correct here, not a Secret. Mounted into grafana via
+# `grafana.extraConfigmapMounts` in k8s/platform/monitoring/values.yaml at
+# /etc/grafana/ca/gitea-caddy-root.crt.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gitea-caddy-root
+  namespace: monitoring
+data:
+  gitea-caddy-root.crt: |
+    -----BEGIN CERTIFICATE-----
+    MIIBpDCCAUmgAwIBAgIQdPXsIHzvv0nOxfIVa4zCPzAKBggqhkjOPQQDAjAwMS4w
+    LAYDVQQDEyVDYWRkeSBMb2NhbCBBdXRob3JpdHkgLSAyMDI2IEVDQyBSb290MB4X
+    DTI2MTAyNjAxMTYxMVoXDTM2MDkwMzAxMTYxMVowMDEuMCwGA1UEAxMlQ2FkZHkg
+    TG9jYWwgQXV0aG9yaXR5IC0gMjAyNiBFQ0MgUm9vdDBZMBMGByqGSM49AgEGCCqG
+    SM49AwEHA0IABMP/vHZkDSGe28As8w8gTSvr+iOlcxiIX+XC8yCJm/RVuDeHHkZl
+    2MpArxtTbtlLbBgqIYkFXMnuZYV4brcrGLejRTBDMA4GA1UdDwEB/wQEAwIBBjAS
+    BgNVHRMBAf8ECDAGAQH/AgEBMB0GA1UdDgQWBBSosPv0qwkCrwQBKEHd1xljG2ru
+    RTAKBggqhkjOPQQDAgNJADBGAiEAzpeQqCd6p1+XjiMrntriy5N06mPaFuH/quBO
+    YEeGn/MCIQDV43+4hzefhILrn3/tgb/U43PNVKAQeWCRtfHKhVamcw==
+    -----END CERTIFICATE-----

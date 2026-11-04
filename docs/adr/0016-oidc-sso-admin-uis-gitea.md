@@ -1,6 +1,6 @@
 # ADR 0016: OIDC single sign-on for the admin UIs, with Gitea as the provider
 
-- Status: Proposed (owner decision recorded 2026-11-03; design only — nothing in this ADR is applied to the lab yet).
+- Status: Accepted (owner, 2026-11-03, PR #44). Step 1 (Grafana) is being implemented; nothing in this ADR is live yet.
 - Date: 2026-11-03
 
 ## Context
@@ -23,7 +23,7 @@ expired, so no pod exec/list with it):
 | Discovery | `https://gitea.home.arpa/.well-known/openid-configuration` (fetched with `--cacert`): issuer `https://gitea.home.arpa`; authorize `/login/oauth/authorize`, token `/login/oauth/access_token`, JWKS `/login/oauth/keys`, userinfo `/login/oauth/userinfo`; RS256; PKCE S256 supported; grants `authorization_code` + `refresh_token` | Endpoints and crypto the consumers must be configured with |
 | Groups | The discovery doc advertises a `groups` scope and claim. Upstream PR [#17367](https://github.com/go-gitea/gitea/pull/17367): the claim is a list of `"org"` and `"org:team"` strings, **team names lowercased** (`org.Name + ":" + team.LowerName`), in both the ID token (when the `groups` scope is granted) and the userinfo response | Authorization can map Gitea org/team membership to UI roles — no groups means per-user config in every UI |
 | TLS | `gitea.home.arpa` is signed by the **Gitea Caddy root** (`ansible/files/ca/gitea-caddy-root.crt`), not the lab root: `openssl verify -CAfile gitea-caddy-root.crt` OK, lab-root fails error 20. Chain: leaf ← "Caddy Local Authority - ECC Intermediate" ← "Caddy Local Authority - 2026 ECC Root" | Every in-cluster consumer must pin the Gitea root. ADR 0015 decision 5 already deferred re-rooting the five Caddy VM roots |
-| In-cluster DNS | CoreDNS Corefile forwards `home.arpa:53` to `192.168.1.96` (the gateway) | Pods can resolve `gitea.home.arpa`. **In-cluster HTTPS reachability from a pod was NOT tested** (no exec path today); rollout step 0 proves it |
+| In-cluster DNS | CoreDNS Corefile forwards `home.arpa:53` to `192.168.1.96` (the gateway). Proven from the grafana pod on 2026-11-03 (read-only admin exec, the one allowed): `gitea.home.arpa` resolves to `192.168.1.97`, and HTTPS `:443` times out (curl error 28) — the monitoring default-deny has no egress rule to `.97` yet, which is exactly the gap decision 11 closes | Pods resolve the provider; the grafana egress rule is required, and the in-pod TLS proof (curl with the mounted Caddy root) belongs to the runbook after the rule merges |
 | Argo CD | `argocd-cm` has no `oidc.config` (only resource customizations/exclusions). **`argocd-rbac-cm` is empty**. With no `policy.default` and no matching rule, an SSO user gets no permissions at all (only the built-in local `admin` account carries `role:admin`), so SSO without an RBAC policy fails closed: people can log in but see nothing. The `dex-server` pod runs but is unused. Argo CD's own manifests are out of git ([ADR 0008](0008-argocd-app-of-apps-platform.md)): only Application objects live here | OIDC is a config patch, owner-applied. The RBAC policy must ship in the same change, or SSO logins succeed but are useless |
 | Argo CD network | The `argocd-server` egress netpol already allows 443 to `192.168.1.97/32` (plus 5556/5557 to dex); 16 netpols exist in `argocd` | No netpol change needed for Argo CD's OIDC flow (code exchange + JWKS from `argocd-server`) |
 | Grafana | kube-prometheus-stack chart 88.3.0 (release `prometheus-stack`), values in `k8s/platform/monitoring/values.yaml`; admin login from the out-of-git `grafana-admin` Secret; served at `grafana.apps.home.arpa` through the shared Gateway (`grafana-httproute.yaml`) | Grafana's `generic_oauth` needs chart values, a CA mount and an egress rule |
@@ -143,7 +143,10 @@ Out of scope (and where it lives instead):
    | org `homelab` only | `["homelab"]` | `role:readonly` | Viewer | allowed |
    | no org membership | absent / empty | denied (`policy.default: ""`) | denied (`allowed_groups`) | denied (`--allowed-group`) |
 
-8. **Secrets live only in OpenBao**, under the ADR 0014 path pattern: `secret/data/oidc/{argocd,grafana,oauth2-proxy-prometheus,oauth2-proxy-alertmanager}` (client secrets, plus a 32-byte cookie secret per oauth2-proxy instance). In-git consumers (Grafana, the two oauth2-proxy instances) fetch through the existing `monitoring` SecretStore with new ExternalSecrets. Argo CD is out-of-git (ADR 0008), so its client secret is written by the owner into the `argocd-secret` key `oidc.gitea.clientSecret` from the OpenBao value over the admin SSH path (value from stdin, never argv). The owner creates the four OAuth2 apps in the Gitea UI and copies each secret into OpenBao with the CLI on `sectools`.
+8. **Secrets live only in OpenBao**, under the ADR 0014 path pattern: `secret/data/oidc/{argocd,grafana,oauth2-proxy-prometheus,oauth2-proxy-alertmanager}` (client secrets, plus a 32-byte cookie secret per oauth2-proxy instance). In-git consumers (Grafana, the two oauth2-proxy instances) fetch through the existing `monitoring` SecretStore with new ExternalSecrets. Argo CD is out-of-git (ADR 0008), so its client secret is written by the owner into the `argocd-secret` key `oidc.gitea.clientSecret` from the OpenBao value over the admin SSH path (value from stdin, never argv). The owner creates the four OAuth2 apps in the Gitea UI and stores each secret in OpenBao with
+`scripts/openbao-breakglass.sh root-run oidc <consumer>` — one command; the short-lived root token is minted, used
+and revoked on sectools and never reaches the Mac (and cannot: OpenBao's listener is loopback-only and Caddy 403s
+the generate-root paths from the network, both verified 2026-11-03).
 
 9. **Break-glass does not change.** The Argo CD built-in admin stays enabled (its password lives in
    `argocd-initial-admin-secret`; disable it only after SSO has proven itself, and re-enabling is one ConfigMap
@@ -196,12 +199,13 @@ Stated precisely, because it is the main argument against a Gitea-only IdP:
 **Step 0 — shared prep (owner, no cluster change).**
 
 - Create org `homelab` and team `platform-admins` (lowercase, per decision 7), put the owner's account in the team.
-- Create the four OAuth2 applications (decision 1) in the Gitea admin UI; copy the four client secrets into
-  OpenBao paths (decision 8) via the `sectools` CLI over SSH, values from stdin.
-- Prove in-cluster reachability, still missing from the context table: with the read-only admin path, resolve and
-  TLS-verify `https://gitea.home.arpa` **from an existing pod** (the operator certificate no longer allows pod exec
-  from the Mac) — a `kubectl exec` TLS check from a monitoring pod using the mounted Gitea root. If this fails, the
-  rest does not roll out; fix DNS or the CoreDNS forward first.
+- Create the four OAuth2 applications (decision 1) in the Gitea admin UI; store the four client secrets into
+  OpenBao paths (decision 8) with `scripts/openbao-breakglass.sh root-run oidc <consumer>` (prompts: 2 unseal
+  shares, client id, client secret; cookie secret generated on sectools for oauth2-proxy-*).
+- Prove in-cluster reachability: DNS and the netpol gap are proven (context table, grafana pod exec 2026-11-03). The
+  remaining proof — TLS verification against the Gitea Caddy root **from a pod** — needs the egress rule from step 1
+  first, so it moved into the runbook ([docs/runbooks/oidc-sso.md](../runbooks/oidc-sso.md)), to run right after the
+  step 1 merge. If it fails, the rest does not roll out; fix DNS or the CoreDNS forward first.
 - Check the 2FA state of every account in the Gitea admin panel (decision 10); record the result in the runbook.
 
 **Step 1 — Grafana (in-git, Argo-synced).** Values change in `k8s/platform/monitoring/values.yaml` (decision 5) plus

@@ -8,13 +8,20 @@
 #   2. SIGHUP does NOT reload the listener flag (why apply-config restarts);
 #   3. flag false opens the endpoints after a restart, and the legacy endpoint the bao
 #      CLI uses stays gated regardless (why the script speaks the new API);
-#   4. --dry-run of both subcommands contacts nothing and prompts for nothing;
+#   4. --dry-run of every subcommand (apply-config, root-run alertmanager, root-run oidc)
+#      contacts nothing and prompts for nothing;
 #   5. the full root-run alertmanager flow through the LOCAL shell override
 #      (BREAKGLASS_SSH="bash -c"): hidden-share prompts fed over stdin, the root token
 #      minted/decoded/used/revoked, the alertmanager policy, role and secret written,
 #      the revocation verified, and no token shape anywhere in the output;
 #   6. re-running is idempotent (secret exists -> skip) and revokes again;
-#   7. the root-run -- <cmd> passthrough works with BAO_TOKEN set.
+#   7. the full root-run oidc grafana flow: same assertions as 5, plus the oidc-read
+#      policy, the kubernetes role oidc (monitoring/eso-oidc) and the KV secret written;
+#   8. re-running root-run oidc is idempotent (secret exists -> skip) and revokes again;
+#   9. root-run oidc oauth2-proxy-prometheus: the 32-byte cookie secret is generated ON
+#      the "remote" side (it is never in the payload from the Mac) - proven by the key set;
+#   10. the root-run -- <cmd> passthrough works with BAO_TOKEN set;
+#   11. the written objects have the right shape (keys only, never values).
 #
 # Nothing touches sectools: the "remote" side runs on this Mac via BREAKGLASS_SSH.
 # Test shares/password are throwaway. No secret values are printed; the harness prints
@@ -111,6 +118,13 @@ feed_shares() {   # writes just the 2 hidden shares
   echo "$f"
 }
 
+feed_oidc() {   # writes the 2 hidden shares + the 2 hidden oidc prompts (throwaway values)
+  local f; f=$(mktemp "$TD/answers.XXXXXX")
+  jq -r '.unseal_keys_b64[0,1]' "$TD/init.json" >"$f"
+  printf '%s\n' 'test-client-id-throwaway' 'test-client-secret-throwaway' >>"$f"
+  echo "$f"
+}
+
 echo "== 1. flag TRUE (the production state before this change) blocks generate-root"
 start_server true
 bao operator init -key-shares=3 -key-threshold=2 -format=json >"$TD/init.json" 2>/dev/null
@@ -153,7 +167,7 @@ else
   bad "could not enable kubernetes auth"; exit 1
 fi
 
-echo "== 4. --dry-run of both subcommands (no contact, no prompts)"
+echo "== 4. --dry-run of every subcommand (no contact, no prompts)"
 "$SCRIPT" apply-config --dry-run >"$TD/dry1.out" 2>&1
 if grep -q "ansible-playbook playbooks/openbao.yml --limit sectools --check --diff" "$TD/dry1.out"; then
   ok "apply-config --dry-run prints the exact playbook commands"
@@ -162,9 +176,15 @@ else
 fi
 "$SCRIPT" root-run --dry-run alertmanager >"$TD/dry2.out" 2>&1
 if grep -q "revocation" "$TD/dry2.out"; then
-  ok "root-run --dry-run prints the flow, prompted for nothing"
+  ok "root-run alertmanager --dry-run prints the flow, prompted for nothing"
 else
-  bad "root-run --dry-run"; cat "$TD/dry2.out"
+  bad "root-run alertmanager --dry-run"; cat "$TD/dry2.out"
+fi
+"$SCRIPT" root-run --dry-run oidc grafana >"$TD/dry3.out" 2>&1
+if grep -q "revocation" "$TD/dry3.out"; then
+  ok "root-run oidc --dry-run prints the flow, prompted for nothing"
+else
+  bad "root-run oidc --dry-run"; cat "$TD/dry3.out"
 fi
 
 echo "== 5. root-run alertmanager through the local-shell override (the full flow)"
@@ -193,7 +213,51 @@ else
 fi
 grep -q "revocation verified" "$TD/run2.out" && ok "second run also revoked its token"
 
-echo "== 7. root-run -- <cmd> passthrough works with BAO_TOKEN set"
+echo "== 7. root-run oidc grafana through the local-shell override (the full flow)"
+F4=$(feed_oidc)
+if run_flow "$TD/run4.out" root-run oidc grafana <"$F4"; then
+  ok "root-run oidc grafana exited 0"
+else
+  bad "root-run oidc grafana failed"; cat "$TD/run4.out"; exit 1
+fi
+grep -q "verifying the minted token is root" "$TD/run4.out" && ok "minted token verified as root (oidc run)"
+grep -q "oidc setup complete (grafana)" "$TD/run4.out" && ok "policy, role and secret written (oidc grafana)"
+grep -q "revocation verified" "$TD/run4.out" && ok "root token revoked and verified revoked (oidc run)"
+if grep -qsE '(^|[^a-z])s\.[A-Za-z0-9]{10,}' "$TD/run4.out"; then
+  bad "A TOKEN-SHAPED STRING LEAKED INTO THE OIDC OUTPUT"
+else
+  ok "no token shape anywhere in the oidc output"
+fi
+
+echo "== 8. root-run oidc re-run is idempotent (secret exists -> skip) and revokes again"
+F5=$(feed_oidc)
+run_flow "$TD/run5.out" root-run oidc grafana <"$F5"
+if grep -q "already exists" "$TD/run5.out"; then
+  ok "second oidc run skips the existing secret"
+else
+  bad "second oidc run not idempotent"; cat "$TD/run5.out"
+fi
+grep -q "revocation verified" "$TD/run5.out" && ok "second oidc run also revoked its token"
+
+echo "== 9. root-run oidc oauth2-proxy-prometheus: cookie secret generated on the remote side"
+F6=$(feed_oidc)
+if run_flow "$TD/run6.out" root-run oidc oauth2-proxy-prometheus <"$F6"; then
+  ok "root-run oidc oauth2-proxy-prometheus exited 0"
+else
+  bad "root-run oidc oauth2-proxy-prometheus failed"; cat "$TD/run6.out"; exit 1
+fi
+grep -q "oidc setup complete (oauth2-proxy-prometheus)" "$TD/run6.out" \
+  && ok "policy, role and secret written (oauth2-proxy-prometheus)"
+# The cookie secret never appears in the Mac-side payload (only client id/secret are prompted
+# here); the key-set check below is what proves it was generated and stored remotely.
+if grep -q "test-client-secret-throwaway" "$TD/run6.out"; then
+  bad "THE CLIENT SECRET WAS PRINTED INTO THE OUTPUT"
+else
+  ok "client secret never printed in the output"
+fi
+grep -q "revocation verified" "$TD/run6.out" && ok "oauth2-proxy run revoked its token"
+
+echo "== 10. root-run -- <cmd> passthrough works with BAO_TOKEN set"
 F3=$(feed_shares)
 run_flow "$TD/run3.out" root-run -- bao auth list <"$F3"
 if grep -q "kubernetes/" "$TD/run3.out"; then
@@ -203,7 +267,7 @@ else
 fi
 grep -q "revocation verified" "$TD/run3.out" && ok "passthrough run revoked its token"
 
-echo "== 8. the written objects have the right shape (keys only, never values)"
+echo "== 11. the written objects have the right shape (keys only, never values)"
 BAO_TOKEN="$(jq -r .root_token "$TD/init.json")" bao read -format=json secret/data/monitoring/alertmanager \
   | jq -e '.data.data | keys | sort == ["from","password","to","username"]' >/dev/null \
   && ok "secret/data/monitoring/alertmanager has exactly the four expected keys"
@@ -212,6 +276,17 @@ BAO_TOKEN="$(jq -r .root_token "$TD/init.json")" bao read -format=json auth/kube
   && ok "auth/kubernetes/role/alertmanager bound to monitoring/eso-alertmanager with alertmanager-read"
 BAO_TOKEN="$(jq -r .root_token "$TD/init.json")" bao policy read alertmanager-read >/dev/null \
   && ok "policy alertmanager-read exists"
+BAO_TOKEN="$(jq -r .root_token "$TD/init.json")" bao read -format=json secret/data/oidc/grafana \
+  | jq -e '.data.data | keys | sort == ["client_id","client_secret"]' >/dev/null \
+  && ok "secret/data/oidc/grafana has exactly client_id and client_secret"
+BAO_TOKEN="$(jq -r .root_token "$TD/init.json")" bao read -format=json secret/data/oidc/oauth2-proxy-prometheus \
+  | jq -e '.data.data | keys | sort == ["client_id","client_secret","cookie_secret"]' >/dev/null \
+  && ok "secret/data/oidc/oauth2-proxy-prometheus has client_id, client_secret AND the remotely generated cookie_secret"
+BAO_TOKEN="$(jq -r .root_token "$TD/init.json")" bao read -format=json auth/kubernetes/role/oidc \
+  | jq -e '.data.bound_service_account_names == ["eso-oidc"] and .data.bound_service_account_namespaces == ["monitoring"] and .data.token_policies == ["oidc-read"]' >/dev/null \
+  && ok "auth/kubernetes/role/oidc bound to monitoring/eso-oidc with oidc-read"
+BAO_TOKEN="$(jq -r .root_token "$TD/init.json")" bao policy read oidc-read >/dev/null \
+  && ok "policy oidc-read exists"
 
 echo ""
 echo "result: $PASS passed, $FAIL failed"
