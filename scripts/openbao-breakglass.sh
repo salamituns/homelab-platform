@@ -353,7 +353,7 @@ HCL
     # python3, not `openssl | head`: with pipefail, head closing the pipe early
     # SIGPIPE-kills the producer (same lesson as the OTP generation above).
     if [[ "$CONSUMER" == oauth2-proxy-* ]]; then
-      COOKIE_SECRET=$(python3 -c 'import base64, os; print(base64.b64encode(os.urandom(32)).decode())')
+      COOKIE_SECRET=$(python3 -c 'import base64, os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())')
       CODE=$(CS="$COOKIE_SECRET" jq -c '{data: {client_id: .oidc.client_id, client_secret: .oidc.client_secret, cookie_secret: env.CS}}' <<<"$P" \
         | curl -q -s --config "$CFG" -o /dev/null -w '%{http_code}' -X POST --data-binary @- "$ADDR/v1/secret/data/$KV")
       unset COOKIE_SECRET
