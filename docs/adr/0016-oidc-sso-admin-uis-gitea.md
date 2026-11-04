@@ -230,9 +230,7 @@ the netpol back — the OIDC login button disappears, the local admin never chan
 **Step 2 — Argo CD (owner-applied, out-of-git per ADR 0008).** Back up the live `argocd-cm`, `argocd-rbac-cm` and
 `argocd-secret` (`kubectl get -o yaml` to gitignored `~/homelab-platform/private/argocd-backup-<ts>/`) — rollback
 is `kubectl replace` of those three files. Apply via `scripts/argocd-oidc-apply.sh` (OpenBao `root-run oidc argocd`
-first; merge-patch CMs; secret patch via stdin). *Do not* `kubectl rollout restart`: v3.5.1 `watchSettings` treats
-oidc/url changes as a process restart (`"oidc config modified. restarting"` / `"url modified. restarting"` then
-`GracefulRestartSignal`). RBAC (`policy.csv` / `policy.default` / `scopes`) reloads through the informer without
+first; merge-patch CMs; secret patch via stdin). Then `kubectl rollout restart deploy/argocd-server`. Live 2026-11-04: the in-process restart rebuilds the login handler (it trusted the Gitea root and redirected fine) but NOT the session manager's HTTP client, built at pod start without rootCA, so every session check failed with `x509: certificate signed by unknown authority` and the browser bounced back to /login. A `kubectl rollout restart deploy/argocd-server` fixed it. RBAC (`policy.csv` / `policy.default` / `scopes`) reloads through the informer without
 that restart. *Proof:* `curl -q -sSI https://argocd.apps.home.arpa/auth/login` is 302/303 to Gitea authorize with
 `redirect_uri=https://argocd.apps.home.arpa/auth/callback`; browser login via Gitea reaches the Applications list;
 the owner (admin team) can sync an app; logs show JWKS against `192.168.1.97`; local admin still works; for the
