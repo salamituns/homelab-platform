@@ -4,7 +4,8 @@
 # OpenBao `secret/data/monitoring/alertmanager` (ADR 0015 section D, step 5).
 # Grafana's OIDC login (Gitea provider, ADR 0016 step 1): client id/secret come from the
 # ESO-synced Secret monitoring/grafana-oidc as OPTIONAL env vars - before the owner stores
-# `secret/data/oidc/grafana` in OpenBao (scripts/openbao-setup-oidc.sh), that Secret does not
+# `secret/data/oidc/grafana` in OpenBao (scripts/openbao-breakglass.sh root-run oidc grafana),
+# that Secret does not
 # exist and Grafana starts with SSO broken while the local admin login keeps working.
 # docs/runbooks/oidc-sso.md has the owner steps, proofs and rollback.
 # kube-proxy/etcd/scheduler/controller-manager metrics bind 127.0.0.1 on this

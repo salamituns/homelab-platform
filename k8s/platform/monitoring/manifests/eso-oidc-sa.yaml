@@ -1,7 +1,7 @@
 # Dedicated identity for External Secrets Operator when reading the OIDC client secrets
 # (ADR 0016 decisions 8/5) from OpenBao. Kept separate from eso-alertmanager so the OpenBao
 # policies stay per-path: alertmanager-read covers only secret/data/monitoring/alertmanager,
-# oidc-read (written by scripts/openbao-setup-oidc.sh) covers only the ESO-consumed
+# oidc-read (written by scripts/openbao-breakglass.sh `root-run oidc <consumer>`) covers only the ESO-consumed
 # secret/data/oidc/* paths. Argo CD's client secret is NOT ESO-consumed (Argo CD is out-of-git,
 # ADR 0008; the owner reads it from OpenBao over the admin SSH path), so no ESO identity ever
 # gets read on secret/data/oidc/argocd.

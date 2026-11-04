@@ -143,7 +143,10 @@ Out of scope (and where it lives instead):
    | org `homelab` only | `["homelab"]` | `role:readonly` | Viewer | allowed |
    | no org membership | absent / empty | denied (`policy.default: ""`) | denied (`allowed_groups`) | denied (`--allowed-group`) |
 
-8. **Secrets live only in OpenBao**, under the ADR 0014 path pattern: `secret/data/oidc/{argocd,grafana,oauth2-proxy-prometheus,oauth2-proxy-alertmanager}` (client secrets, plus a 32-byte cookie secret per oauth2-proxy instance). In-git consumers (Grafana, the two oauth2-proxy instances) fetch through the existing `monitoring` SecretStore with new ExternalSecrets. Argo CD is out-of-git (ADR 0008), so its client secret is written by the owner into the `argocd-secret` key `oidc.gitea.clientSecret` from the OpenBao value over the admin SSH path (value from stdin, never argv). The owner creates the four OAuth2 apps in the Gitea UI and copies each secret into OpenBao with the CLI on `sectools`.
+8. **Secrets live only in OpenBao**, under the ADR 0014 path pattern: `secret/data/oidc/{argocd,grafana,oauth2-proxy-prometheus,oauth2-proxy-alertmanager}` (client secrets, plus a 32-byte cookie secret per oauth2-proxy instance). In-git consumers (Grafana, the two oauth2-proxy instances) fetch through the existing `monitoring` SecretStore with new ExternalSecrets. Argo CD is out-of-git (ADR 0008), so its client secret is written by the owner into the `argocd-secret` key `oidc.gitea.clientSecret` from the OpenBao value over the admin SSH path (value from stdin, never argv). The owner creates the four OAuth2 apps in the Gitea UI and stores each secret in OpenBao with
+`scripts/openbao-breakglass.sh root-run oidc <consumer>` — one command; the short-lived root token is minted, used
+and revoked on sectools and never reaches the Mac (and cannot: OpenBao's listener is loopback-only and Caddy 403s
+the generate-root paths from the network, both verified 2026-11-03).
 
 9. **Break-glass does not change.** The Argo CD built-in admin stays enabled (its password lives in
    `argocd-initial-admin-secret`; disable it only after SSO has proven itself, and re-enabling is one ConfigMap
@@ -196,8 +199,9 @@ Stated precisely, because it is the main argument against a Gitea-only IdP:
 **Step 0 — shared prep (owner, no cluster change).**
 
 - Create org `homelab` and team `platform-admins` (lowercase, per decision 7), put the owner's account in the team.
-- Create the four OAuth2 applications (decision 1) in the Gitea admin UI; copy the four client secrets into
-  OpenBao paths (decision 8) via the `sectools` CLI over SSH, values from stdin.
+- Create the four OAuth2 applications (decision 1) in the Gitea admin UI; store the four client secrets into
+  OpenBao paths (decision 8) with `scripts/openbao-breakglass.sh root-run oidc <consumer>` (prompts: 2 unseal
+  shares, client id, client secret; cookie secret generated on sectools for oauth2-proxy-*).
 - Prove in-cluster reachability: DNS and the netpol gap are proven (context table, grafana pod exec 2026-11-03). The
   remaining proof — TLS verification against the Gitea Caddy root **from a pod** — needs the egress rule from step 1
   first, so it moved into the runbook ([docs/runbooks/oidc-sso.md](../runbooks/oidc-sso.md)), to run right after the
