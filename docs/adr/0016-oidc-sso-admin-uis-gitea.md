@@ -1,7 +1,10 @@
 # ADR 0016: OIDC single sign-on for the admin UIs, with Gitea as the provider
 
-- Status: Accepted (owner, 2026-11-03, PR #44). Step 1 (Grafana) is being implemented; nothing in this ADR is live yet.
-- Date: 2026-11-03
+- Status: Accepted (owner, 2026-11-03, PR #44). Step 1 (Grafana) is in git and live. Step 2 (Argo CD)
+  is prepared against **v3.5.1** (live image `quay.io/argoproj/argocd:v3.5.1`, in-pod `argocd-server: v3.5.1`,
+  2026-11-04); owner-applied, not yet live.
+- Date: 2026-11-03 (corrections 2026-11-04: live version, `url`, `$oidc.gitea.clientID`, PKCE,
+  `admin.password` in `argocd-secret`, settings restart vs hot-reload)
 
 ## Context
 
@@ -87,12 +90,18 @@ Out of scope (and where it lives instead):
    that worked on the Mac was succeeding through system trust, not the supplied CA. The file is a public
    certificate, so it is shipped as a ConfigMap (`gitea-caddy-root`), not a Secret.
 
-3. **Argo CD: native OIDC, no Dex.** Patch `argocd-cm` `data.oidc.config` (name, issuer, client ID,
-   `rootCA` inline, `requestedScopes: ["openid", "profile", "email", "groups"]` and
-   `requestedIDTokenClaims: {"groups": {"essential": true}}`) with the client secret referenced, never inlined:
-   `$oidc.gitea.clientSecret` resolves against a key in `argocd-secret` (Argo CD docs, "Secrets in oidc.config";
-   verify the key form on the installed Argo CD version at rollout). Delete the unused `dex-server` deployment
-   afterwards (one less pod with one less egress rule), as an owner step.
+3. **Argo CD: native OIDC, no Dex.** Verified on **v3.5.1** source (`util/settings`, `util/oidc`,
+   `util/rbac`, `server/server.go`), not assumed from `stable` docs. Patch `argocd-cm` merge keys only
+   (`url`, `admin.enabled`, `oidc.config`) — live `argocd-cm` already has `resource.exclusions` and must
+   not be replaced. `data.url` is required: `RedirectURL()` is `url` + `common.CallbackEndpoint` (`/auth/callback`);
+   live (2026-11-04) has **no** `url`, so omitting it would send Gitea a localhost/empty redirect (Grafana
+   lesson: missing `root_url`). `oidc.config` fields that exist on the v3.5.1 `OIDCConfig` struct: `name`,
+   `issuer`, `clientID`, `clientSecret`, `requestedScopes`, `requestedIDTokenClaims`, `rootCA` (PEM string,
+   `AppendCertsFromPEM`; not a volume path), `enablePKCEAuthentication` (Gitea advertises S256; confidential
+   client still uses PKCE). There is **no** `groups_claim_path`. Secret refs are `$oidc.gitea.clientID` and
+   `$oidc.gitea.clientSecret` (`replaceStringSecret`: leading `$`, key without `$` in `argocd-secret`). Dex
+   rewrite is skipped when `OIDCConfigRAW` is set; **leave `dex-server` running** until SSO is proven — do
+   not delete it in the same change as the OIDC patch.
 
 4. **Argo CD RBAC is group-based and deny-by-default.**
    `argocd-rbac-cm` today is empty, which Argo CD treats as "no permissions" for any user other than the
@@ -143,14 +152,16 @@ Out of scope (and where it lives instead):
    | org `homelab` only | `["homelab"]` | `role:readonly` | Viewer | allowed |
    | no org membership | absent / empty | denied (`policy.default: ""`) | denied (`allowed_groups`) | denied (`--allowed-group`) |
 
-8. **Secrets live only in OpenBao**, under the ADR 0014 path pattern: `secret/data/oidc/{argocd,grafana,oauth2-proxy-prometheus,oauth2-proxy-alertmanager}` (client secrets, plus a 32-byte cookie secret per oauth2-proxy instance). In-git consumers (Grafana, the two oauth2-proxy instances) fetch through the existing `monitoring` SecretStore with new ExternalSecrets. Argo CD is out-of-git (ADR 0008), so its client secret is written by the owner into the `argocd-secret` key `oidc.gitea.clientSecret` from the OpenBao value over the admin SSH path (value from stdin, never argv). The owner creates the four OAuth2 apps in the Gitea UI and stores each secret in OpenBao with
+8. **Secrets live only in OpenBao**, under the ADR 0014 path pattern: `secret/data/oidc/{argocd,grafana,oauth2-proxy-prometheus,oauth2-proxy-alertmanager}` (client secrets, plus a 32-byte cookie secret per oauth2-proxy instance). In-git consumers (Grafana, the two oauth2-proxy instances) fetch through the existing `monitoring` SecretStore with new ExternalSecrets. Argo CD is out-of-git (ADR 0008), so its client id and secret are written by the owner into the `argocd-secret` keys `oidc.gitea.clientID` and `oidc.gitea.clientSecret` from the OpenBao value over the admin SSH path (value from stdin, never argv). The owner creates the four OAuth2 apps in the Gitea UI and stores each secret in OpenBao with
 `scripts/openbao-breakglass.sh root-run oidc <consumer>` — one command; the short-lived root token is minted, used
 and revoked on sectools and never reaches the Mac (and cannot: OpenBao's listener is loopback-only and Caddy 403s
 the generate-root paths from the network, both verified 2026-11-03).
 
-9. **Break-glass does not change.** The Argo CD built-in admin stays enabled (its password lives in
-   `argocd-initial-admin-secret`; disable it only after SSO has proven itself, and re-enabling is one ConfigMap
-   edit). The Grafana local admin (`grafana-admin`) stays. The oauth2-proxy hosts have no local accounts by
+9. **Break-glass does not change.** The Argo CD built-in admin stays enabled (`argocd-cm`
+   `admin.enabled: "true"`; `parseAdminAccount` defaults Enabled true). The password hash is
+   `argocd-secret` key `admin.password` (live 2026-11-04 keys: `admin.password`, `admin.passwordMtime`,
+   `server.secretkey` — there is no `argocd-initial-admin-secret` in this cluster). Disable local admin
+   only after SSO has proven itself (`admin.enabled: "false"`). The Grafana local admin (`grafana-admin`) stays. The oauth2-proxy hosts have no local accounts by
    design; their break-glass is the admin SSH port-forward (read-only path, [ADR 0003](0003-break-glass-access.md)),
    which reaches the web ports without the Gateway and without oauth2-proxy. The in-cluster netpols are the control
    there, and they are unchanged.
@@ -217,14 +228,16 @@ appears on the login page (break-glass). *Rollback:* revert the commit; Argo syn
 the netpol back — the OIDC login button disappears, the local admin never changed.
 
 **Step 2 — Argo CD (owner-applied, out-of-git per ADR 0008).** Back up the live `argocd-cm`, `argocd-rbac-cm` and
-`argocd-secret` (`kubectl get -o yaml` to `private/` on the Mac) — the rollback depends on these files. Apply the
-OIDC patch (decision 3), the RBAC policy (decision 4), and write the client secret into `argocd-secret` from the
-OpenBao value over stdin. *Proof:* browser login via Gitea reaches the Applications list; the owner (admin team)
-can sync an app; Argo CD logs show the JWKS fetch against `192.168.1.97`; for the deny path, create a throwaway
-second Gitea account with no org membership, confirm it authenticates but sees nothing (`policy.default` is empty),
-then delete the account — with one real user this negative test needs a second account, and that limitation is
-stated here rather than skipped. *Rollback:* re-apply the three backed-up objects; Argo CD hot-reloads both
-ConfigMaps, so if any setting misbehaves the fallback is restarting `argocd-server` (owner decision, one command).
+`argocd-secret` (`kubectl get -o yaml` to gitignored `~/homelab-platform/private/argocd-backup-<ts>/`) — rollback
+is `kubectl replace` of those three files. Apply via `scripts/argocd-oidc-apply.sh` (OpenBao `root-run oidc argocd`
+first; merge-patch CMs; secret patch via stdin). *Do not* `kubectl rollout restart`: v3.5.1 `watchSettings` treats
+oidc/url changes as a process restart (`"oidc config modified. restarting"` / `"url modified. restarting"` then
+`GracefulRestartSignal`). RBAC (`policy.csv` / `policy.default` / `scopes`) reloads through the informer without
+that restart. *Proof:* `curl -q -sSI https://argocd.apps.home.arpa/auth/login` is 302/303 to Gitea authorize with
+`redirect_uri=https://argocd.apps.home.arpa/auth/callback`; browser login via Gitea reaches the Applications list;
+the owner (admin team) can sync an app; logs show JWKS against `192.168.1.97`; local admin still works; for the
+deny path, a throwaway Gitea account with no org membership authenticates and sees nothing, then is deleted.
+*Rollback:* `scripts/argocd-oidc-apply.sh --rollback`.
 
 **Step 3 — oauth2-proxy for the two UIs (in-git, Argo-synced, last).** New Argo app for the two oauth2-proxy
 deployments (chart 10.7.1, values per decision 6, ExternalSecrets for client + cookie secrets), repoint the
@@ -269,16 +282,19 @@ Gateway-only ingress; the oauth2-proxy deployments can be deleted with the app.
 - **Instance-wide 2FA enforcement**: pending the CI-token interaction check (decision 10).
 - **Bringing Argo CD's own manifests into git**: out-of-git by ADR 0008; revisiting that is its own decision, not a
   side effect of this one.
-- **Deleting the `dex-server` deployment**: decided here (decision 3), executed with the rollout, listed so it is
-  not forgotten or mistaken for a live change made by this ADR.
+- **Deleting the `dex-server` deployment**: still intended after SSO is proven (decision 3 originally named it
+  as an owner step). It is **not** part of the v3.5.1 OIDC patch: native OIDC already skips Dex when
+  `OIDCConfigRAW` is set. Deleting it in the same change as the first login would mix two failure modes.
 
 ## References
 
 - Gitea OAuth2 provider: <https://docs.gitea.com/development/oauth2-provider>; groups claim format from upstream
   PR [#17367](https://github.com/go-gitea/gitea/pull/17367); 2FA enforcement history in issue
   [#880](https://github.com/go-gitea/gitea/issues/880) (closed for 1.24.0).
-- Argo CD SSO: <https://argo-cd.readthedocs.io/en/stable/operator-manual/sso/> (`oidc.config`, "Secrets in
-  oidc.config") and RBAC: <https://argo-cd.readthedocs.io/en/stable/operator-manual/rbac/>.
+- Argo CD v3.5.1 SSO: <https://argo-cd.readthedocs.io/en/v3.5.1/operator-manual/sso/> (`oidc.config`, "Secrets
+  in oidc.config") and RBAC: <https://argo-cd.readthedocs.io/en/v3.5.1/operator-manual/rbac/>. Struct and
+  restart behaviour taken from tag `v3.5.1` (`util/settings/settings.go`, `util/oidc/oidc.go`,
+  `util/rbac/rbac.go`, `server/server.go`, `common/common.go`), not from `stable`.
 - Grafana `generic_oauth`: <https://grafana.com/docs/grafana/latest/setup/configure-security/configure-authentication/generic-oauth/>
   (`allowed_groups`, `role_attribute_path`, `tls_client_ca`).
 - oauth2-proxy: <https://oauth2-proxy.github.io/oauth2-proxy/> (OIDC provider, PKCE, `--trusted-proxy-ip`) and
