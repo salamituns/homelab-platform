@@ -146,9 +146,14 @@ Carried over from Week 6 (kept at the level described in [ADR 0015](docs/adr/001
       - [x] oauth2-proxy for the Prometheus and Alertmanager UIs (2026-11-04, PRs #51-#53; Alertmanager admin-team only,
             gateway can no longer reach :9090/:9093 directly)
       - [ ] Separate bot account for agent pushes (today the push token belongs to the owner's `tunsgit`)
-- [ ] Loki for logs, Grafana dashboards as code
-- [ ] SLOs for BelleShop (availability, p95 latency) and alerts on burn rate
-- **Proof:** a dashboard plus an alert that fired for a real reason
+- [ ] Loki for logs, Grafana dashboards as code ([ADR 0017](docs/adr/0017-logs-dashboards-belleshop-slos.md)):
+      grafana/loki SingleBinary on `local-path` (worker PVC, 10Gi, 7d) + Grafana Alloy DaemonSet (Promtail is EOL);
+      dashboards as JSON ConfigMaps through the existing kube-prometheus-stack sidecar (`grafana_dashboard=1`)
+- [ ] SLOs for BelleShop (availability, p95 latency) and alerts on burn rate ([ADR 0017](docs/adr/0017-logs-dashboards-belleshop-slos.md)):
+      blackbox_exporter Probe CRs through the Gateway, hand-written multi-window burn PrometheusRules, email via
+      the existing Alertmanager route with Week 6 grouping/`repeat_interval` constraints
+- **Proof:** a dashboard plus an alert that fired for a real reason (scale BelleShop backend to 0, then restore;
+      ADR 0017 decision 4)
 
 ## Week 8: Chaos + postmortems
 - [ ] Five incidents on purpose: node loss, disk full, bad deploy (Rollouts abort),
