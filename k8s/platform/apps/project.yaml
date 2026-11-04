@@ -16,6 +16,8 @@ spec:
     - https://charts.jetstack.io   # cert-manager (ADR 0015 B)
     - https://falcosecurity.github.io/charts   # falco + falcosidekick (ADR 0015 D)
     - https://oauth2-proxy.github.io/manifests   # oauth2-proxy (ADR 0016 step 3)
+    - https://grafana-community.github.io/helm-charts   # OSS Loki (ADR 0017; grafana/loki 7.x is GEL-only)
+    - https://grafana.github.io/helm-charts   # Grafana Alloy (ADR 0017)
   destinations:
     - { server: https://kubernetes.default.svc, namespace: argocd }
     - { server: https://kubernetes.default.svc, namespace: kube-system }

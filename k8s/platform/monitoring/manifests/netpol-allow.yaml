@@ -109,7 +109,8 @@ spec:
 # Intra-namespace metric traffic, port-limited instead of a blanket allow (round 1
 # lesson): prometheus scrapes grafana 3000, itself 9090, alertmanager 9093, the operator
 # 10250 and kube-state-metrics 8080; the reloader-web ports are 8080; grafana's
-# datasources dial prometheus 9090 and alertmanager 9093.
+# datasources dial prometheus 9090 and alertmanager 9093. Loki 3100 and Alloy 12345
+# (ADR 0017 PR 1) are the same-namespace push/query/scrape ports.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -127,6 +128,9 @@ spec:
         - { protocol: TCP, port: 9090 }   # prometheus web
         - { protocol: TCP, port: 9093 }   # alertmanager web
         - { protocol: TCP, port: 10250 }  # operator (Service 443 -> 10250)
+        - { protocol: TCP, port: 3100 }   # Loki HTTP (push + query + /metrics)
+        - { protocol: TCP, port: 12345 }  # Alloy HTTP /metrics
+        - { protocol: TCP, port: 7946 }   # Loki memberlist (single replica still joins via the Service)
   egress:
     - to:
         - podSelector: {}
@@ -136,6 +140,9 @@ spec:
         - { protocol: TCP, port: 9090 }
         - { protocol: TCP, port: 9093 }
         - { protocol: TCP, port: 10250 }
+        - { protocol: TCP, port: 3100 }
+        - { protocol: TCP, port: 12345 }
+        - { protocol: TCP, port: 7946 }
 ---
 # Alertmanager -> the gmail SMTP relay (ADR 0015 D): smtp.gmail.com:465. A policy cannot
 # name hosts, so this is the public internet minus the private ranges - deliberately NOT

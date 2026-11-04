@@ -1,0 +1,84 @@
+# grafana/alloy 1.15.0 (app v1.21.3). DaemonSet on every node including master
+# (ADR 0017 decision 1). Pod logs via the Kubernetes API, not hostPath.
+# Owner decision 2: drop namespace kube-system.
+fullnameOverride: alloy
+
+crds:
+  create: false
+
+image:
+  registry: docker.io
+  repository: grafana/alloy
+  tag: v1.21.3
+  digest: sha256:8ab871206bd2d8f89277f53abffee5f452a293980788d52f85fa183a87a505a4
+
+alloy:
+  enableReporting: false
+  clustering:
+    enabled: false
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+  mounts:
+    varlog: false
+    dockercontainers: false
+  configMap:
+    create: true
+    content: |-
+      logging {
+        level  = "info"
+        format = "logfmt"
+      }
+
+      discovery.kubernetes "pods" {
+        role = "pod"
+      }
+
+      discovery.relabel "filtered_pods" {
+        targets = discovery.kubernetes.pods.targets
+
+        rule {
+          source_labels = ["__meta_kubernetes_namespace"]
+          regex         = "kube-system"
+          action        = "drop"
+        }
+      }
+
+      loki.source.kubernetes "pods" {
+        targets    = discovery.relabel.filtered_pods.output
+        forward_to = [loki.write.default.receiver]
+      }
+
+      loki.write "default" {
+        endpoint {
+          url = "http://loki.monitoring.svc.cluster.local:3100/loki/api/v1/push"
+        }
+      }
+
+controller:
+  type: daemonset
+  hostNetwork: false
+  tolerations:
+    - key: node-role.kubernetes.io/control-plane
+      operator: Exists
+      effect: NoSchedule
+
+configReloader:
+  enabled: true
+  resources:
+    requests:
+      cpu: 10m
+      memory: 16Mi
+    limits:
+      memory: 32Mi
+
+serviceMonitor:
+  enabled: true
+  interval: 30s
+
+rbac:
+  create: true
