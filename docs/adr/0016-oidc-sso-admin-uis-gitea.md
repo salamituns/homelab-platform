@@ -24,7 +24,7 @@ expired, so no pod exec/list with it):
 | Groups | The discovery doc advertises a `groups` scope and claim. Upstream PR [#17367](https://github.com/go-gitea/gitea/pull/17367): the claim is a list of `"org"` and `"org:team"` strings, **team names lowercased** (`org.Name + ":" + team.LowerName`), in both the ID token (when the `groups` scope is granted) and the userinfo response | Authorization can map Gitea org/team membership to UI roles — no groups means per-user config in every UI |
 | TLS | `gitea.home.arpa` is signed by the **Gitea Caddy root** (`ansible/files/ca/gitea-caddy-root.crt`), not the lab root: `openssl verify -CAfile gitea-caddy-root.crt` OK, lab-root fails error 20. Chain: leaf ← "Caddy Local Authority - ECC Intermediate" ← "Caddy Local Authority - 2026 ECC Root" | Every in-cluster consumer must pin the Gitea root. ADR 0015 decision 5 already deferred re-rooting the five Caddy VM roots |
 | In-cluster DNS | CoreDNS Corefile forwards `home.arpa:53` to `192.168.1.96` (the gateway) | Pods can resolve `gitea.home.arpa`. **In-cluster HTTPS reachability from a pod was NOT tested** (no exec path today); rollout step 0 proves it |
-| Argo CD | `argocd-cm` has no `oidc.config` (only resource customizations/exclusions). **`argocd-rbac-cm` is empty** — with an empty policy Argo CD's documented default is `role:admin` for every authenticated user, so SSO without an RBAC policy would grant admin to anyone who can log in to Gitea. The `dex-server` pod runs but is unused. Argo CD's own manifests are out of git ([ADR 0008](0008-argocd-app-of-apps-platform.md)): only Application objects live here | OIDC is a config patch, owner-applied. The empty RBAC ConfigMap is a pre-existing gap this rollout must close in the same change, or SSO makes it worse |
+| Argo CD | `argocd-cm` has no `oidc.config` (only resource customizations/exclusions). **`argocd-rbac-cm` is empty**. With no `policy.default` and no matching rule, an SSO user gets no permissions at all (only the built-in local `admin` account carries `role:admin`), so SSO without an RBAC policy fails closed: people can log in but see nothing. The `dex-server` pod runs but is unused. Argo CD's own manifests are out of git ([ADR 0008](0008-argocd-app-of-apps-platform.md)): only Application objects live here | OIDC is a config patch, owner-applied. The RBAC policy must ship in the same change, or SSO logins succeed but are useless |
 | Argo CD network | The `argocd-server` egress netpol already allows 443 to `192.168.1.97/32` (plus 5556/5557 to dex); 16 netpols exist in `argocd` | No netpol change needed for Argo CD's OIDC flow (code exchange + JWKS from `argocd-server`) |
 | Grafana | kube-prometheus-stack chart 88.3.0 (release `prometheus-stack`), values in `k8s/platform/monitoring/values.yaml`; admin login from the out-of-git `grafana-admin` Secret; served at `grafana.apps.home.arpa` through the shared Gateway (`grafana-httproute.yaml`) | Grafana's `generic_oauth` needs chart values, a CA mount and an egress rule |
 | Prometheus / Alertmanager UIs | `prometheus.apps.home.arpa` and `alertmanager.apps.home.arpa` HTTPRoutes point straight at the web ports; ingress is limited to the Gateway data plane (`netpol-allow.yaml`); the Alertmanager UI is unauthenticated and can create silences (`docs/runbooks/monitoring.md`) | Prometheus/Alertmanager have no OIDC support; they need a proxy that does the OIDC dance for them |
@@ -94,10 +94,10 @@ Out of scope (and where it lives instead):
    verify the key form on the installed Argo CD version at rollout). Delete the unused `dex-server` deployment
    afterwards (one less pod with one less egress rule), as an owner step.
 
-4. **Argo CD RBAC moves from "everyone is admin" to groups, and that is a fix, not a risk of this change.**
-   `argocd-rbac-cm` today is empty, so the documented default `policy.default: role:admin` applies to every
-   authenticated user — with SSO that would mean every Gitea account gets cluster admin. The rollout sets
-   `policy.default: ""` (deny) plus:
+4. **Argo CD RBAC is group-based and deny-by-default.**
+   `argocd-rbac-cm` today is empty, which Argo CD treats as "no permissions" for any user other than the
+   built-in `admin` (fail-closed). The rollout keeps `policy.default: ""` explicit (deny), so a later edit cannot
+   silently widen it, plus:
 
    ```text
    g, homelab:platform-admins, role:admin
@@ -237,9 +237,8 @@ Gateway-only ingress; the oauth2-proxy deployments can be deleted with the app.
 - UI access gains a dependency chain: Gitea, its Caddy TLS, the CoreDNS `home.arpa` forward, and (for
   Prometheus/Alertmanager) oauth2-proxy. Serving the lab does not — GitOps, scraping and alerting never pass
   through Gitea (see "Gitea-down behaviour").
-- The empty `argocd-rbac-cm` finding is fixed by this rollout. It is a pre-existing gap (today it is masked
-  because the only login is the local admin), recorded here because SSO without the RBAC policy would turn it into
-  every-Gitea-account-is-cluster-admin.
+- `argocd-rbac-cm` gains an explicit policy. Today it is empty (fail-closed for any non-`admin` user); the rollout
+  writes `policy.default: ""` explicitly and the group mappings, so the intent is recorded rather than implied.
 - The `monitoring` namespace gains two small deployments. No netpol widens beyond what decisions 6 and 11 name:
   oauth2-proxy reaches the UIs on ports the intra-metrics rule already allows, and the UI ingress rules get
   *narrower* (oauth2-proxy pods instead of the whole Gateway data plane namespace).
