@@ -105,7 +105,9 @@ grafana:
       api_url: https://gitea.home.arpa/login/oauth/userinfo
       use_pkce: true
       tls_client_ca: /etc/grafana/ca/gitea-caddy-root.crt
-      groups_claim_path: groups
+      # Grafana generic_oauth reads groups via a JMESPath in groups_attribute_path (an unknown key
+      # like groups_claim_path is silently ignored -> no groups -> "not a member", live 2026-11-04).
+      groups_attribute_path: groups
       # Space-separated ini list (ADR 0016 decision 5): only members of Gitea org `homelab`
       # may log in. Team names arrive lowercased in the groups claim (ADR 0016 decision 7).
       allowed_groups: homelab homelab:platform-admins
