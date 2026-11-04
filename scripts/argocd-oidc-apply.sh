@@ -192,7 +192,16 @@ if [[ "$MODE" == rollback ]]; then
   done
   for f in argocd-cm.yaml argocd-rbac-cm.yaml argocd-secret.yaml; do
     echo "replace $f"
-    remote_stdin "replace -f -" <"$BACKUP_DIR/$f"
+    # Strip the server-set metadata (resourceVersion above all): replace with the backup's
+    # stale resourceVersion is rejected as a conflict once the apply has changed the object.
+    python3 -c '
+import sys, yaml
+o = yaml.safe_load(sys.stdin)
+for k in ("resourceVersion", "uid", "creationTimestamp", "managedFields", "generation"):
+    o.get("metadata", {}).pop(k, None)
+o["metadata"].get("annotations", {}).pop("kubectl.kubernetes.io/last-applied-configuration", None)
+yaml.safe_dump(o, sys.stdout)
+' <"$BACKUP_DIR/$f" | remote_stdin "replace -f -"
   done
   echo "replaced. v3.5.1 restarts the API server in-process on url/oidc change; wait for Ready:"
   echo "  ssh $SSH_HOST '$REMOTE_KUBECTL -n $NS wait --for=condition=Ready pod -l app.kubernetes.io/name=argocd-server --timeout=120s'"
