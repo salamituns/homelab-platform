@@ -34,8 +34,14 @@ alloy:
         format = "logfmt"
       }
 
+      // Each DaemonSet pod tails only the pods on ITS node. Without this selector every Alloy pod
+      // discovered every pod in the cluster, so each line was shipped three times (live 2026-11-04).
       discovery.kubernetes "pods" {
         role = "pod"
+        selectors {
+          role  = "pod"
+          field = "spec.nodeName=" + sys.env("K8S_NODE_NAME")  // set by the chart from spec.nodeName
+        }
       }
 
       discovery.relabel "filtered_pods" {
@@ -45,6 +51,29 @@ alloy:
           source_labels = ["__meta_kubernetes_namespace"]
           regex         = "kube-system"
           action        = "drop"
+        }
+
+        // Promote the Kubernetes metadata to Loki labels. Without these only instance/job/service_name
+        // existed and {namespace="dev"} matched nothing (live 2026-11-04).
+        rule {
+          source_labels = ["__meta_kubernetes_namespace"]
+          target_label  = "namespace"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_name"]
+          target_label  = "pod"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_container_name"]
+          target_label  = "container"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_node_name"]
+          target_label  = "node"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
+          target_label  = "app"
         }
       }
 
