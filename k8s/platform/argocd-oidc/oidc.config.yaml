@@ -1,0 +1,29 @@
+# Inner YAML for argocd-cm data.oidc.config (v3.5.1 OIDCConfig).
+# clientID/clientSecret are $key refs; replaceStringSecret looks them up in argocd-secret.
+# rootCA is PEM, not a volume path. Byte-identical to ansible/files/ca/gitea-caddy-root.crt
+# (Gitea is signed by this Caddy root, not the lab root).
+name: Gitea
+issuer: https://gitea.home.arpa
+clientID: $oidc.gitea.clientID
+clientSecret: $oidc.gitea.clientSecret
+requestedScopes:
+  - openid
+  - profile
+  - email
+  - groups
+requestedIDTokenClaims:
+  groups:
+    essential: true
+enablePKCEAuthentication: true
+rootCA: |
+  -----BEGIN CERTIFICATE-----
+  MIIBpDCCAUmgAwIBAgIQdPXsIHzvv0nOxfIVa4zCPzAKBggqhkjOPQQDAjAwMS4w
+  LAYDVQQDEyVDYWRkeSBMb2NhbCBBdXRob3JpdHkgLSAyMDI2IEVDQyBSb290MB4X
+  DTI2MTAyNjAxMTYxMVoXDTM2MDkwMzAxMTYxMVowMDEuMCwGA1UEAxMlQ2FkZHkg
+  TG9jYWwgQXV0aG9yaXR5IC0gMjAyNiBFQ0MgUm9vdDBZMBMGByqGSM49AgEGCCqG
+  SM49AwEHA0IABMP/vHZkDSGe28As8w8gTSvr+iOlcxiIX+XC8yCJm/RVuDeHHkZl
+  2MpArxtTbtlLbBgqIYkFXMnuZYV4brcrGLejRTBDMA4GA1UdDwEB/wQEAwIBBjAS
+  BgNVHRMBAf8ECDAGAQH/AgEBMB0GA1UdDgQWBBSosPv0qwkCrwQBKEHd1xljG2ru
+  RTAKBggqhkjOPQQDAgNJADBGAiEAzpeQqCd6p1+XjiMrntriy5N06mPaFuH/quBO
+  YEeGn/MCIQDV43+4hzefhILrn3/tgb/U43PNVKAQeWCRtfHKhVamcw==
+  -----END CERTIFICATE-----

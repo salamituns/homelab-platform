@@ -1,9 +1,9 @@
 # Runbook: OIDC SSO for the admin UIs (ADR 0016)
 
-Owner-only. This runbook executes [ADR 0016](../adr/0016-oidc-sso-admin-uis-gitea.md): today it covers the shared
-prep (step 0) and Grafana (step 1). Argo CD (step 2) and oauth2-proxy for the Prometheus/Alertmanager UIs (step 3)
-are added here when they are implemented. Nothing in this runbook is agent-applied; every command either changes git
-via a PR or is run by you.
+Owner-only. This runbook executes [ADR 0016](../adr/0016-oidc-sso-admin-uis-gitea.md): shared prep (step 0),
+Grafana (step 1), and Argo CD (step 2, owner-applied against live **v3.5.1**). oauth2-proxy for the
+Prometheus/Alertmanager UIs (step 3) is added here when it is implemented. Nothing in this runbook is
+agent-applied to the cluster; step 2's apply script is yours.
 
 ## What already exists (verified 2026-11-03)
 
@@ -122,10 +122,84 @@ below.
 Grafana returns to local-admin-only; nothing else changed. Optionally remove the OpenBao side with the
 `root-run oidc` undo block in the header of `scripts/openbao-breakglass.sh`.
 
+## Step 2 — Argo CD (owner-applied; not Argo-synced)
+
+Live (2026-11-04, read-only): `quay.io/argoproj/argocd:v3.5.1`, pod `argocd-server-755b4b6b89-892hf`.
+`argocd-cm` has resource customizations/exclusions only — **no `url`, no `oidc.config`**. `argocd-rbac-cm`
+data is empty. `argocd-secret` keys: `admin.password`, `admin.passwordMtime`, `server.secretkey`.
+`dex-server` is Running (`ghcr.io/dexidp/dex:v2.45.0`) and stays; native OIDC skips Dex when
+`oidc.config` is set. `argocd-server` already has egress to `192.168.1.97:443`.
+`argocd-tls-certs-cm` already has the Gitea Caddy root for **git** TLS; OIDC HTTP still needs
+`oidc.config.rootCA` (PEM, not a volume).
+
+What shipped in git (path `k8s/platform/argocd-oidc/` is **not** an Application source;
+`cluster-config` only syncs `k8s/platform/cluster-config`):
+
+- `argocd-cm.yaml` / `oidc.config.yaml`: merge keys `url: https://argocd.apps.home.arpa`,
+  `admin.enabled: "true"`, `oidc.config` with Gitea issuer, `$oidc.gitea.clientID` /
+  `$oidc.gitea.clientSecret`, scopes including `groups`, `enablePKCEAuthentication: true`,
+  `rootCA` PEM from `ansible/files/ca/gitea-caddy-root.crt`.
+- `argocd-rbac-cm.yaml`: `policy.default: ""`, `scopes: '[groups]'`,
+  `g, homelab:platform-admins, role:admin` and `g, homelab, role:readonly`.
+- `scripts/argocd-oidc-apply.sh`: `--dry-run`, apply, `--rollback`. Backups go to
+  `~/homelab-platform/private/argocd-backup-<ts>/` (gitignored, 0600). Secret patch is stdin
+  (`--patch-file=/dev/stdin`). No `kubectl rollout`.
+
+Grafana lessons this step must not repeat: set `url` (redirect is `url` + `/auth/callback`);
+`rootCA` is PEM in the ConfigMap string, not a mount; there is no `groups_claim_path` on v3.5.1
+(unknown keys are not a Grafana-style silent ignore here — we simply do not invent keys);
+patch the Secret **before** the `oidc.config` that references it (the script does secret then CMs).
+
+**Owner sequence, in order:**
+
+1. Gitea OAuth2 app `argocd` with redirect `https://argocd.apps.home.arpa/auth/callback` (step 0).
+2. Store it: `scripts/openbao-breakglass.sh root-run oidc argocd` (2 unseal shares, client id, client
+   secret). `oidc-read` **excludes** `secret/data/oidc/argocd`; you read that value yourself when the
+   apply script prompts.
+3. `scripts/argocd-oidc-apply.sh --dry-run` — prints the merge keys and `kubectl diff` of the two
+   ConfigMaps. Expect `url`, `admin.enabled`, `oidc.config` added; existing `resource.*` keys kept.
+4. `scripts/argocd-oidc-apply.sh` — confirm OpenBao, paste id+secret (hidden). Wait for Ready.
+5. Proofs below. If wrong: `scripts/argocd-oidc-apply.sh --rollback`.
+
+v3.5.1 `watchSettings` logs `oidc config modified. restarting` or `url modified. restarting` and
+sends `GracefulRestartSignal`. That is an in-process restart, not a Deployment rollout. Do not
+`kubectl rollout restart` on top of it.
+
+### Proofs (ADR 0016 step 2)
+
+1. **Login redirect** (from the Mac, `curl -q`):
+
+   ```bash
+   curl -q -sSI https://argocd.apps.home.arpa/auth/login
+   ```
+
+   Expect `302` or `303` with `Location` to `https://gitea.home.arpa/login/oauth/authorize` and
+   `redirect_uri=https://argocd.apps.home.arpa/auth/callback`. A redirect to localhost means `url`
+   did not take (the Grafana `root_url` failure mode).
+
+2. **Browser login**: Gitea → Applications list; you can sync (you are in `homelab:platform-admins`).
+3. **Local admin still works**: username `admin` + `argocd-secret` `admin.password` hash (break-glass).
+4. **Logs** (admin SSH): `oidc config modified. restarting` / `url modified. restarting`, then Ready;
+   JWKS/token against `192.168.1.97`, no PEM-append warning (`failed to append certificates from PEM`).
+5. **Deny path** (needs a throwaway Gitea account with no org): login succeeds, UI is empty
+   (`policy.default` is `""`); delete the account afterwards.
+
+### Rollback
+
+```bash
+scripts/argocd-oidc-apply.sh --rollback
+# or BACKUP_DIR=~/homelab-platform/private/argocd-backup-<ts> scripts/argocd-oidc-apply.sh --rollback
+```
+
+`kubectl replace` of the three backed-up objects. Dex is untouched. Optionally remove the OpenBao
+side with the `root-run oidc` undo block in `scripts/openbao-breakglass.sh`.
+
 ## Break-glass (ADR 0016 decision 9)
 
 - Grafana local admin: unchanged by this rollout; password in the `grafana-admin` Secret (out of git, ADR 0008).
-- If Gitea is down: SSO logins fail everywhere, the local admin still logs in, and the Prometheus/Alertmanager UIs
+- Argo CD local admin: stays enabled (`admin.enabled: "true"`); password hash is `argocd-secret` key
+  `admin.password` (not `argocd-initial-admin-secret` on this cluster).
+- If Gitea is down: SSO logins fail everywhere, the local admins still log in, and the Prometheus/Alertmanager UIs
   (no login) are reachable only through the admin SSH port-forward (ADR 0003). Argo CD keeps running the cluster;
   syncs retry.
 

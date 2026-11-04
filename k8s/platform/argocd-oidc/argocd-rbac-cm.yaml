@@ -1,0 +1,16 @@
+# Live argocd-rbac-cm data is empty (2026-11-04). SSO without this fails closed
+# (no policy.default, no matching g-rule → no permissions except local admin).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-rbac-cm
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: argocd-rbac-cm
+    app.kubernetes.io/part-of: argocd
+data:
+  policy.default: ""
+  scopes: '[groups]'
+  policy.csv: |
+    g, homelab:platform-admins, role:admin
+    g, homelab, role:readonly
