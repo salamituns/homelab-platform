@@ -85,8 +85,9 @@ grafana:
   extraConfigmapMounts:
     - name: gitea-caddy-root
       configMap: gitea-caddy-root
+      # Directory mount, no subPath: with subPath the FILE was mounted AT /etc/grafana/ca, so
+      # /etc/grafana/ca/gitea-caddy-root.crt was 'not a directory' (live 2026-11-04 after #46).
       mountPath: /etc/grafana/ca
-      subPath: gitea-caddy-root.crt
       readOnly: true
   grafana.ini:
     # Grafana builds its OAuth redirect_uri (and every absolute link) from root_url. Without it
