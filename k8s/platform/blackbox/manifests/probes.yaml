@@ -81,32 +81,3 @@ spec:
       labels:
         probe: shop-api-debug
         slo: belleshop-debug
----
-# Week 8 Drill 3 (Expired Certificate, ADR 0018 owner override): probes the
-# isolated TLS server in chaos-drill3 on :8443. Uses slo: chaos-drill so
-# BelleShop availability burn-rate rules (slo="belleshop-availability") are
-# completely unaffected when the 1h leaf expires in PR B.
-apiVersion: monitoring.coreos.com/v1
-kind: Probe
-metadata:
-  name: chaos-expiry
-  namespace: monitoring
-  labels:
-    release: prometheus-stack
-    slo: chaos-drill
-spec:
-  jobName: blackbox
-  interval: 30s
-  scrapeTimeout: 10s
-  module: http_2xx_chaos
-  prober:
-    url: blackbox-exporter.monitoring.svc:9115
-    scheme: http
-    path: /probe
-  targets:
-    staticConfig:
-      static:
-        - https://chaos-expiry.chaos-drill3.svc:8443/
-      labels:
-        probe: chaos-expiry
-        slo: chaos-drill

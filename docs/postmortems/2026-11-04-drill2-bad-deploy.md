@@ -87,3 +87,22 @@ login.
    the broken version's errors.
 3. **"No errors" and "no traffic" look the same in a ratio.** Guard on request volume before trusting a success rate.
 4. **Health checks that skip dependencies make SLOs blind to dependency failures.** Probe a path that uses them.
+
+## Addendum: runs 2 and 3 (2026-11-04 21:05-22:48 CST)
+
+| Run | Analysis | Result |
+|---|---|---|
+| 1 (above) | all `job="backend"` pods, 30 s | bad version promoted; the fix was aborted |
+| 2 (#31) | canary-only (pod hash), 2 m window, request guard (belleshop-deploy #30) | **Inconclusive**, rollout paused at 50% (safe; owner aborted to stop half of logins failing) |
+| 3 (#33) | canary by `namespace` + pod (belleshop-deploy #32) | **aborted automatically** at 22:45:17, 57 s after the analysis began: `error-rate-check` Failed `[1] [1]`, `canary-request-count` Successful (75, 116 real requests) |
+
+**The real root cause (found in run 2):** Prometheus takes the `job` label from the Service a target is scraped
+through. The ServiceMonitor matches both `backend` and `backend-canary`, so canary pods carry
+`job="backend-canary"`. Every query that filtered `job="backend"` (run 1's and run 2's) could never see a canary pod:
+run 1 therefore judged only stable pods, and run 2 found no series at all. Filtering by `namespace="dev"` plus the
+canary pod-name prefix fixed it; run 3 proved it live.
+
+Also learned: when a restore PR reverts to a spec that matches the existing stable ReplicaSet, Argo Rollouts does a
+fast "Rollback to stable" that skips steps and analysis (#32, 21:53 CST), so a restore is not a test of the analysis.
+
+**Action items closed:** canary-only analysis with a long-enough window and a request guard (#30, #32), proven by run 3.

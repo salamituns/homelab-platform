@@ -34,14 +34,3 @@ spec:
               app.kubernetes.io/name: homelab-gateway-nginx
       ports:
         - { protocol: TCP, port: 443 }
-    # Week 8 Drill 3 (ADR 0018): egress to the isolated chaos-expiry pod in
-    # chaos-drill3 on TCP 8443 (post-DNAT from Service chaos-expiry:8443).
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: chaos-drill3
-          podSelector:
-            matchLabels:
-              app: chaos-expiry
-      ports:
-        - { protocol: TCP, port: 8443 }

@@ -168,7 +168,11 @@ Carried over from Week 6 (kept at the level described in [ADR 0015](docs/adr/001
             ([postmortem](docs/postmortems/2026-11-04-drill1-leaked-secret.md))
       - [x] Drill 2 bad deploy (2026-11-04): analysis PROMOTED the bad canary and then ABORTED the fix; 11.5 min
             login outage, no alert ([postmortem](docs/postmortems/2026-11-04-drill2-bad-deploy.md))
-      - [ ] Drill 3 expired cert · [ ] Drill 4 disk full · [ ] Drill 5 node loss
+      - [x] Drill 2 re-runs: run 3 aborted the bad canary automatically after the analysis fixes
+            (belleshop-deploy #30, #32; root cause was the `job` label)
+      - [x] Drill 3 expired cert (2026-11-04): critical expiring-soon email after 1 h; isolated cert really expired;
+            BelleShop untouched ([postmortem](docs/postmortems/2026-11-04-drill3-expired-cert.md))
+      - [ ] Drill 4 disk full · [ ] Drill 5 node loss
 - [ ] One postmortem per incident in `docs/postmortems/` from
       [TEMPLATE.md](docs/postmortems/TEMPLATE.md) (detect / mitigate / recover)
 - **Proof:** five postmortems. This is what senior interviews ask about.
