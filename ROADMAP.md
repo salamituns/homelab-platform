@@ -163,6 +163,10 @@ Carried over from Week 6 (kept at the level described in [ADR 0015](docs/adr/001
       [ADR 0018](docs/adr/0018-week8-chaos-drills.md) (Proposed). Run in that ADR's
       safest-first order; owner-present for disk-full and node-loss (`qm shutdown 107`
       only). Do not run until the listed pre-drill alert PRs exist.
+      - [x] Pre-drill alerts: TLS expiry, disk canary eviction, fast node-down (2026-11-04, PR #66)
+      - [x] Drill 1 leaked secret (2026-11-04): gitleaks blocked in ~1 s; `oauth2-proxy-alertmanager` rotated
+            ([postmortem](docs/postmortems/2026-11-04-drill1-leaked-secret.md))
+      - [ ] Drill 2 bad deploy · [ ] Drill 3 expired cert · [ ] Drill 4 disk full · [ ] Drill 5 node loss
 - [ ] One postmortem per incident in `docs/postmortems/` from
       [TEMPLATE.md](docs/postmortems/TEMPLATE.md) (detect / mitigate / recover)
 - **Proof:** five postmortems. This is what senior interviews ask about.

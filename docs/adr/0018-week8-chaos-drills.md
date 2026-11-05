@@ -1,6 +1,6 @@
 # ADR 0018: Week 8 chaos drills — plan, safety rails, and detection gaps
 
-- Status: Proposed
+- Status: Accepted (owner, 2026-11-04, PR #65). Drill results are in docs/postmortems/.
 - Date: 2026-11-04
 - Owner: owner
 - Last reviewed: 4 Nov 2026
@@ -162,8 +162,10 @@ Argo CD or agent pushes):
 1. Gitea → OAuth2 application `oauth2-proxy-alertmanager` → Regenerate Secret. Copy once.
 2. `scripts/openbao-breakglass.sh root-run oidc oauth2-proxy-alertmanager --overwrite`
    (owner terminal; script already exists, `--overwrite` is required or the re-run is a skip).
-3. `kubectl -n monitoring rollout restart deploy/oauth2-proxy-alertmanager` (ESO should
-   rewrite the Secret; restart if the proxy does not rescan).
+3. Force the ExternalSecret to re-read OpenBao, THEN restart (its `refreshInterval` is 1h, so a restart alone
+   reloads the old Secret; found in the drill, see the 2026-11-04 postmortem):
+   `kubectl -n monitoring annotate externalsecret oauth2-proxy-alertmanager force-sync=$(date +%s) --overwrite`,
+   wait ~20 s, then `kubectl -n monitoring rollout restart deploy/oauth2-proxy-alertmanager`.
 4. Prove: old client secret is rejected at Gitea; new login at the Alertmanager gate works.
 
 **Detect.** No Prometheus rule. Detectors are `gitleaks` (pre-commit v8.30.0; Jenkins gate)
