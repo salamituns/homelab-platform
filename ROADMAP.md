@@ -172,7 +172,9 @@ Carried over from Week 6 (kept at the level described in [ADR 0015](docs/adr/001
             (belleshop-deploy #30, #32; root cause was the `job` label)
       - [x] Drill 3 expired cert (2026-11-04): critical expiring-soon email after 1 h; isolated cert really expired;
             BelleShop untouched ([postmortem](docs/postmortems/2026-11-04-drill3-expired-cert.md))
-      - [ ] Drill 4 disk full · [ ] Drill 5 node loss
+      - [x] Drill 4 disk full (2026-11-05): 256Mi-capped canary evicted in 48 s, alert 2 min later, node disks
+            unchanged ([postmortem](docs/postmortems/2026-11-05-drill4-disk-full.md))
+      - [ ] Drill 5 node loss
 - [ ] One postmortem per incident in `docs/postmortems/` from
       [TEMPLATE.md](docs/postmortems/TEMPLATE.md) (detect / mitigate / recover)
 - **Proof:** five postmortems. This is what senior interviews ask about.
