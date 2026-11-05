@@ -1,0 +1,13 @@
+# Default-deny for the drill namespace. The canary needs no Ingress or Egress
+# (dd writes to emptyDir; image pull is kubelet on the node, not this pod).
+# Wave 1: if this app ever grows an allow, the deny must land after it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  name: chaos-drill4-default-deny
+  namespace: chaos-drill4
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
