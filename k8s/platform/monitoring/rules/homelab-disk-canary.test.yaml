@@ -1,0 +1,40 @@
+rule_files:
+  - homelab-disk-canary.rules.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - name: no evicted canary does not fire
+    interval: 1m
+    input_series:
+      - series: 'kube_pod_status_reason{reason="Evicted",pod="homelab-disk-canary-abc",namespace="kube-system"}'
+        values: "0x10"
+      - series: 'kube_pod_status_reason{reason="Evicted",pod="some-other-pod",namespace="dev"}'
+        values: "1x10"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: HomelabDiskCanaryEvicted
+        exp_alerts: []
+
+  - name: evicted canary warns after 1m
+    interval: 1m
+    input_series:
+      - series: 'kube_pod_status_reason{reason="Evicted",pod="homelab-disk-canary-abc",namespace="kube-system"}'
+        values: "1x10"
+    alert_rule_test:
+      - eval_time: 0m
+        alertname: HomelabDiskCanaryEvicted
+        exp_alerts: []
+      - eval_time: 2m
+        alertname: HomelabDiskCanaryEvicted
+        exp_alerts:
+          - exp_labels:
+              alertname: HomelabDiskCanaryEvicted
+              severity: warning
+              reason: Evicted
+              pod: homelab-disk-canary-abc
+              namespace: kube-system
+            exp_annotations:
+              summary: "Disk-fill canary pod was evicted"
+              description: "Pod kube-system/homelab-disk-canary-abc is Evicted (kube-state-metrics). This is the ADR 0018 drill-4 signal: emptyDir sizeLimit on the canary, not NodeFilesystemAlmostOutOfSpace. kubelet_evictions is not scraped on this cluster. See docs/runbooks/monitoring.md."
+              runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/monitoring.md
