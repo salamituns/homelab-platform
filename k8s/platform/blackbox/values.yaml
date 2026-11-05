@@ -61,3 +61,19 @@ config:
         tls_config:
           ca_file: /etc/blackbox/ca/lab-root.crt
           insecure_skip_verify: false
+    # Week 8 Drill 3 (ADR 0018 owner override): probes https://chaos-expiry.chaos-drill3.svc:8443/
+    # in-cluster via cluster DNS while sending SNI / verifying SAN chaos-expiry.chaos-drill3.home.arpa
+    # so the leaf satisfies lab-root.crt's X509v3 Name Constraints (Permitted: DNS:home.arpa)
+    # without touching CoreDNS or homelab-gateway.
+    http_2xx_chaos:
+      prober: http
+      timeout: 5s
+      http:
+        valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
+        follow_redirects: false
+        preferred_ip_protocol: ip4
+        fail_if_not_ssl: true
+        tls_config:
+          ca_file: /etc/blackbox/ca/lab-root.crt
+          server_name: chaos-expiry.chaos-drill3.home.arpa
+          insecure_skip_verify: false
