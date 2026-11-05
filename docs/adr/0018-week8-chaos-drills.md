@@ -227,6 +227,13 @@ healthz-safe image exists. Paging the SLO is a different experiment and already 
 
 ---
 
+**Result 2026-11-04 (hypothesis FAILED):** the `success-rate` analysis passed the bad canary (30 s of checks on
+`rate[1m]` ran before the canary's errors were scraped) and later aborted the good revert (stable + canary pods are
+counted together). Recovery needed `promoteFull`. See the
+[postmortem](../postmortems/2026-11-04-drill2-bad-deploy.md).
+
+---
+
 ## Drill 3 — Expired cert
 
 **Hypothesis.** When a **dedicated** leaf for `chaos-expiry.apps.home.arpa` is past
