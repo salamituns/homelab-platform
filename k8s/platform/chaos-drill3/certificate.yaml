@@ -33,5 +33,5 @@ spec:
   dnsNames:
     - chaos-expiry.chaos-drill3.home.arpa
   issuerRef:
-    name: lab-ca
+    name: chaos-drill3-no-such-issuer
     kind: ClusterIssuer
