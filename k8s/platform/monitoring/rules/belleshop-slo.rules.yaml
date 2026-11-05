@@ -38,7 +38,7 @@ groups:
             Availability error ratio is above 14.4× the 99.5%/30d budget on both the 1h
             and 5m windows (about 7.2% failed probes). The shop-home or shop-api probe
             through homelab-gateway is failing. See docs/runbooks/belleshop-slo.md.
-          runbook_url: https://grafana.apps.home.arpa/d/belleshop-slo
+          runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/belleshop-slo.md
           dashboard_url: https://grafana.apps.home.arpa/d/belleshop-slo
       - alert: BelleShopAvailabilityBurnMedium
         expr: |
@@ -54,7 +54,7 @@ groups:
           description: >-
             Availability error ratio is above 6× the 99.5%/30d budget on both the 6h
             and 30m windows. See docs/runbooks/belleshop-slo.md.
-          runbook_url: https://grafana.apps.home.arpa/d/belleshop-slo
+          runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/belleshop-slo.md
           dashboard_url: https://grafana.apps.home.arpa/d/belleshop-slo
       - alert: BelleShopAvailabilityBurnSlow
         expr: |
@@ -70,7 +70,7 @@ groups:
           description: >-
             Availability error ratio is consuming the 99.5%/30d budget at about 1× on
             the 3d and 6h windows (ticket, not a page). See docs/runbooks/belleshop-slo.md.
-          runbook_url: https://grafana.apps.home.arpa/d/belleshop-slo
+          runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/belleshop-slo.md
           dashboard_url: https://grafana.apps.home.arpa/d/belleshop-slo
 
   - name: belleshop-slo.latency
@@ -118,5 +118,5 @@ groups:
             at 14.4× on the 1h and 5m windows. This alert is severity=warning until 24h
             of probe_duration_seconds justifies paging (ADR 0017 owner decision 1).
             See docs/runbooks/belleshop-slo.md.
-          runbook_url: https://grafana.apps.home.arpa/d/belleshop-slo
+          runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/belleshop-slo.md
           dashboard_url: https://grafana.apps.home.arpa/d/belleshop-slo
