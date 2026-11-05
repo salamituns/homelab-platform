@@ -467,3 +467,17 @@ After the live run, write `docs/postmortems/YYYY-MM-DD-drill5-node-loss.md`
 whether the 300 s stampede happened, PBS unused). Link it from ADR 0018 when
 that file is touched next. This plan commit does **not** invent that
 postmortem.
+
+### Drill 5 safety-check corrections (independent read-only check, 2026-11-05 09:46-09:54 CST)
+
+- `argocd-application-controller-0` is a **StatefulSet** pod: it does NOT move at 300 s; it stays Terminating on
+  workernode1 until the node returns (never force-delete it). Only the 18 ReplicaSet pods (~686 Mi requests,
+  ~688 Mi working set) would move, so the requests fit on workernode2 (~56%).
+- If the outage ran past ~5 m 40 s and workernode2 hit `memory.available < 100Mi`, the **BestEffort**
+  `prometheus-0` (~555 Mi) and `grafana` (~349 Mi) would be evicted first. Hence the short window: start VM 107
+  again **before 5 minutes**.
+- No `failurePolicy: Fail` webhook that intercepts pods runs on workernode1 (Kyverno, cert-manager and ESO are all
+  on workernode2). The MetalLB webhook on workernode1 only guards `metallb.io` CRDs.
+- kubelet `shutdownGracePeriod: 0s` on workernode1: an ACPI shutdown stops containers via systemd, not the kubelet's
+  graceful pod sequence. InnoDB recovered cleanly after the last such shutdown (2026-10-29/31). Restore point:
+  PBS `vm/107/2026-11-05T07:33:19Z`.
