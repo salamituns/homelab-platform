@@ -158,7 +158,7 @@ Carried over from Week 6 (kept at the level described in [ADR 0015](docs/adr/001
       (53 s) -> Fast-burn resolved email. Timeline in `docs/runbooks/belleshop-slo.md`
 
 ## Week 8: Chaos + postmortems
-- [ ] Five incidents on purpose: node loss, disk full, bad deploy (Rollouts abort),
+- [x] Five incidents on purpose: node loss, disk full, bad deploy (Rollouts abort),
       expired cert, leaked secret (detect, revoke, rotate). Design:
       [ADR 0018](docs/adr/0018-week8-chaos-drills.md) (Accepted). Run in that ADR's
       safest-first order; owner-present for disk-full and node-loss (`qm shutdown 107`
@@ -176,6 +176,6 @@ Carried over from Week 6 (kept at the level described in [ADR 0015](docs/adr/001
             unchanged ([postmortem](docs/postmortems/2026-11-05-drill4-disk-full.md))
       - [x] Drill 5 node loss (2026-11-05): `qm shutdown 107` ~5 min; Fast node-down alert at 2 min, no
             email; shop ~7.5 min; MySQL remounted ([postmortem](docs/postmortems/2026-11-05-drill5-node-loss.md))
-- [ ] One postmortem per incident in `docs/postmortems/` from
+- [x] One postmortem per incident in `docs/postmortems/` from
       [TEMPLATE.md](docs/postmortems/TEMPLATE.md) (detect / mitigate / recover)
 - **Proof:** five postmortems. This is what senior interviews ask about.
