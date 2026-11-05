@@ -186,36 +186,3 @@ prometheus:
             requests:
               storage: 5Gi
           storageClassName: local-path
-
-# Gossip for Alertmanager HA (TCP+UDP 9094). monitoring-intra-metrics does not list 9094,
-# so default-deny would split the mesh and duplicate emails. Shipped here because this
-# follow-up may only edit values.yaml (not netpol-allow.yaml).
-extraManifests:
-  - apiVersion: networking.k8s.io/v1
-    kind: NetworkPolicy
-    metadata:
-      name: monitoring-alertmanager-cluster
-      namespace: monitoring
-    spec:
-      podSelector:
-        matchLabels:
-          app.kubernetes.io/name: alertmanager
-      policyTypes:
-        - Ingress
-        - Egress
-      ingress:
-        - from:
-            - podSelector:
-                matchLabels:
-                  app.kubernetes.io/name: alertmanager
-          ports:
-            - { protocol: TCP, port: 9094 }
-            - { protocol: UDP, port: 9094 }
-      egress:
-        - to:
-            - podSelector:
-                matchLabels:
-                  app.kubernetes.io/name: alertmanager
-          ports:
-            - { protocol: TCP, port: 9094 }
-            - { protocol: UDP, port: 9094 }

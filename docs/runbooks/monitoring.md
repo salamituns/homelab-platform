@@ -168,7 +168,7 @@ on the other worker. The operator turns on gossip (`--cluster.listen-address=:90
 `--cluster.peer` for both ordinals) when `replicas > 1`. Prometheus already
 discovers every ready endpoint of `prometheus-stack-kube-prom-alertmanager`
 (`kubernetes_sd` role `endpoints`). Gossip needs TCP+UDP 9094, shipped as
-`extraManifests` NetworkPolicy `monitoring-alertmanager-cluster` because
+NetworkPolicy `monitoring-alertmanager-cluster` in `manifests/netpol-allow.yaml` because
 `monitoring-intra-metrics` does not list 9094.
 
 ### After merge, owner verifies
