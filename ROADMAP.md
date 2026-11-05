@@ -160,7 +160,7 @@ Carried over from Week 6 (kept at the level described in [ADR 0015](docs/adr/001
 ## Week 8: Chaos + postmortems
 - [ ] Five incidents on purpose: node loss, disk full, bad deploy (Rollouts abort),
       expired cert, leaked secret (detect, revoke, rotate). Design:
-      [ADR 0018](docs/adr/0018-week8-chaos-drills.md) (Proposed). Run in that ADR's
+      [ADR 0018](docs/adr/0018-week8-chaos-drills.md) (Accepted). Run in that ADR's
       safest-first order; owner-present for disk-full and node-loss (`qm shutdown 107`
       only). Do not run until the listed pre-drill alert PRs exist.
       - [x] Pre-drill alerts: TLS expiry, disk canary eviction, fast node-down (2026-11-04, PR #66)
