@@ -4,8 +4,32 @@
 # chain — openssl s_client -CAfile lab-root.crt to .240:443 SNI belleshop.apps.home.arpa
 # returned Verify return code 0 on 2026-11-04).
 fullnameOverride: blackbox-exporter
-replicaCount: 1
+# Drill 5 follow-up B (docs/postmortems/2026-11-05-drill5-node-loss.md action item 2):
+# 2 replicas spread across worker nodes via required podAntiAffinity on
+# kubernetes.io/hostname so losing one worker does not take down blackbox_exporter
+# and blind SLO probes. Probe CRs scrape Service blackbox-exporter.monitoring.svc:9115
+# (one scrape per target per 15s via the ClusterIP Service, not per pod), so a second
+# replica never doubles probe_success series.
+# With 2 workers (master is NoSchedule) and required anti-affinity, RollingUpdate
+# must use maxSurge: 0, maxUnavailable: 1 so rollouts replace one pod at a time
+# instead of deadlocking on an unschedulable 3rd surge pod.
+replicaCount: 2
 revisionHistoryLimit: 2
+
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 0
+    maxUnavailable: 1
+
+affinity:
+  podAntiAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      - labelSelector:
+          matchLabels:
+            app.kubernetes.io/name: prometheus-blackbox-exporter
+            app.kubernetes.io/instance: blackbox-exporter
+        topologyKey: kubernetes.io/hostname
 
 image:
   registry: quay.io
