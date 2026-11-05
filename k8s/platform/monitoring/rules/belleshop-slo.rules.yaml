@@ -78,23 +78,23 @@ groups:
       - record: belleshop:latency_good:ratio5m
         expr: |
           avg(
-            avg_over_time((probe_success{slo="belleshop-availability",probe="shop-home"} * (probe_duration_seconds{slo="belleshop-availability",probe="shop-home"} < 0.5))[5m:])
+            avg_over_time((probe_success{slo="belleshop-availability",probe="shop-home"} * (probe_duration_seconds{slo="belleshop-availability",probe="shop-home"} < bool 0.5))[5m:])
             or
-            avg_over_time((probe_success{slo="belleshop-availability",probe="shop-api"} * (probe_duration_seconds{slo="belleshop-availability",probe="shop-api"} < 0.3))[5m:])
+            avg_over_time((probe_success{slo="belleshop-availability",probe="shop-api"} * (probe_duration_seconds{slo="belleshop-availability",probe="shop-api"} < bool 0.3))[5m:])
           )
       - record: belleshop:latency_good:ratio30m
         expr: |
           avg(
-            avg_over_time((probe_success{slo="belleshop-availability",probe="shop-home"} * (probe_duration_seconds{slo="belleshop-availability",probe="shop-home"} < 0.5))[30m:])
+            avg_over_time((probe_success{slo="belleshop-availability",probe="shop-home"} * (probe_duration_seconds{slo="belleshop-availability",probe="shop-home"} < bool 0.5))[30m:])
             or
-            avg_over_time((probe_success{slo="belleshop-availability",probe="shop-api"} * (probe_duration_seconds{slo="belleshop-availability",probe="shop-api"} < 0.3))[30m:])
+            avg_over_time((probe_success{slo="belleshop-availability",probe="shop-api"} * (probe_duration_seconds{slo="belleshop-availability",probe="shop-api"} < bool 0.3))[30m:])
           )
       - record: belleshop:latency_good:ratio1h
         expr: |
           avg(
-            avg_over_time((probe_success{slo="belleshop-availability",probe="shop-home"} * (probe_duration_seconds{slo="belleshop-availability",probe="shop-home"} < 0.5))[1h:])
+            avg_over_time((probe_success{slo="belleshop-availability",probe="shop-home"} * (probe_duration_seconds{slo="belleshop-availability",probe="shop-home"} < bool 0.5))[1h:])
             or
-            avg_over_time((probe_success{slo="belleshop-availability",probe="shop-api"} * (probe_duration_seconds{slo="belleshop-availability",probe="shop-api"} < 0.3))[1h:])
+            avg_over_time((probe_success{slo="belleshop-availability",probe="shop-api"} * (probe_duration_seconds{slo="belleshop-availability",probe="shop-api"} < bool 0.3))[1h:])
           )
       - record: belleshop:latency_error:ratio5m
         expr: 1 - belleshop:latency_good:ratio5m
