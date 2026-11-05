@@ -17,3 +17,6 @@ configMapGenerator:
   - name: grafana-dashboard-belleshop-overview
     files:
       - belleshop-overview.json
+  - name: grafana-dashboard-belleshop-slo
+    files:
+      - belleshop-slo.json
