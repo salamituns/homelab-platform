@@ -174,7 +174,8 @@ Carried over from Week 6 (kept at the level described in [ADR 0015](docs/adr/001
             BelleShop untouched ([postmortem](docs/postmortems/2026-11-04-drill3-expired-cert.md))
       - [x] Drill 4 disk full (2026-11-05): 256Mi-capped canary evicted in 48 s, alert 2 min later, node disks
             unchanged ([postmortem](docs/postmortems/2026-11-05-drill4-disk-full.md))
-      - [ ] Drill 5 node loss
+      - [x] Drill 5 node loss (2026-11-05): `qm shutdown 107` ~5 min; Fast node-down alert at 2 min, no
+            email; shop ~7.5 min; MySQL remounted ([postmortem](docs/postmortems/2026-11-05-drill5-node-loss.md))
 - [ ] One postmortem per incident in `docs/postmortems/` from
       [TEMPLATE.md](docs/postmortems/TEMPLATE.md) (detect / mitigate / recover)
 - **Proof:** five postmortems. This is what senior interviews ask about.

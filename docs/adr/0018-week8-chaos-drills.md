@@ -3,14 +3,15 @@
 - Status: Accepted (owner, 2026-11-04, PR #65). Drill results are in docs/postmortems/.
 - Date: 2026-11-04
 - Owner: owner
-- Last reviewed: 4 Nov 2026
-- Next review: after the five postmortems exist, or if a pre-drill alert PR changes detection
+- Last reviewed: 5 Nov 2026
+- Next review: after the drill-5 action items (Alertmanager placement / blackbox absent / BestEffort limits), or if a pre-drill alert PR changes detection
 
 ## Revision history
 
 | Rev | Date | Change |
 |---|---|---|
 | A | 4 Nov 2026 | Initial proposal from live cluster and hypervisor facts |
+| B | 5 Nov 2026 | Drill 5 ran: Fast alert at 2 m, no email, no stampede; see postmortem |
 
 ## Scope
 
@@ -335,6 +336,12 @@ fraction of targets (node-exporter 1/3, plus blackbox and kube-state-metrics as 
 jobs). BelleShop `/api` fails because MySQL is pinned to wn1. Gateway and Grafana stay
 up. Gitea, OpenBao and PBS stay up. After `qm start 107` and node Ready, mysql/loki/AM
 bind their local-path volumes and recover without restore-from-PBS.
+
+**Result (2026-11-05).** Short window (~5 min, under the 300 s unreachable taint):
+`HomelabKubeNodeNotReadyFast` fired at 2 m (Grafana only; **no email**). `TargetDown`
+did not fire (`for: 600`). No reschedule, 0 Evicted. MySQL remounted; wrong-password
+login 400. Shop impact ~7.5 min.
+[postmortem](../postmortems/2026-11-05-drill5-node-loss.md).
 
 **Injection (owner, hypervisor).** Not git. Do **not** drain.
 
