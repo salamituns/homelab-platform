@@ -13,7 +13,7 @@ fullnameOverride: blackbox-exporter
 # With 2 workers (master is NoSchedule) and required anti-affinity, RollingUpdate
 # must use maxSurge: 0, maxUnavailable: 1 so rollouts replace one pod at a time
 # instead of deadlocking on an unschedulable 3rd surge pod.
-replicaCount: 2
+replicas: 2
 revisionHistoryLimit: 2
 
 strategy:
