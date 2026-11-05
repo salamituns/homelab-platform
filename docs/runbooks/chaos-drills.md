@@ -1,6 +1,7 @@
 # Runbook: Week 8 Chaos Drills (ADR 0018)
 
-This runbook documents the execution, verification, and clean-up procedure for **Week 8 Drill 3 (Expired Certificate)**.
+Owner-run procedures for the Week 8 drills. Drill 3 (expired cert) is below;
+drill 4 (disk canary) follows it. Do not run these from an agent session.
 
 ---
 
@@ -109,3 +110,60 @@ Once detection evidence (`probe_success{probe="chaos-expiry"} == 0`, negative `c
    sudo -n kubectl --kubeconfig /etc/kubernetes/admin.conf delete namespace chaos-drill3
    ```
 3. Confirm in Prometheus/Alertmanager that `Probe/chaos-expiry` is gone and `HomelabTlsCertExpiringSoon` / `HomelabCertManagerCertExpiringSoon` resolve within 5 minutes.
+
+---
+
+## Drill 4: Disk-full canary (`chaos-drill4`)
+
+Isolated emptyDir fill on **master** only. Does not trip `NodeFilesystemAlmostOutOfSpace`.
+The detector is `HomelabDiskCanaryEvicted` (**warning → UI only**, not email).
+
+### Must not
+
+- `dd`/`fallocate` on worker or master **root**. Fill MySQL / Prometheus / Loki PVCs.
+- Let the pod schedule on `workernode1` or `workernode2` (abort if it does).
+- `kubectl delete pod homelab-disk-canary` while the Application still exists:
+  `selfHeal: true` will recreate a **new** fill.
+
+### Expected timings
+
+| T | What |
+|---|---|
+| merge + ~1–2 min | Application Synced; pod Running on `master` |
+| seconds after Running | `dd` hits `emptyDir.sizeLimit: 256Mi` (command asks for 300Mi) |
+| kubelet eviction | Pod `Failed` / `Reason=Evicted`; Argo health **Degraded**, sync still **Synced** (spec unchanged) |
+| +1 min | `HomelabDiskCanaryEvicted` pending then firing (rule `for: 1m`) in Prometheus/AM UI |
+| revert + owner delete | objects gone; alert resolves |
+
+### Owner steps (PR A, branch `week8-drill4`)
+
+1. Baseline (Grafana pod wget or the Prometheus UI):
+
+   ```
+   node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"} * 100
+   HomelabDiskCanaryEvicted
+   ```
+
+   Record free-% on master `.90`, wn1 `.89`, wn2 `.84`.
+2. Merge PR A. Wait for `argocd app chaos-drill4` Synced.
+3. `kubectl -n chaos-drill4 get pod homelab-disk-canary -o wide` — NODE must be `master`. If not, abort (revert, do not wait).
+4. Watch `kubectl -n chaos-drill4 describe pod homelab-disk-canary` for Evicted.
+5. Confirm `kube_pod_status_reason{reason="Evicted",pod="homelab-disk-canary"} == 1` (or `last_terminated_reason`). Alert warning in the UI, no email.
+6. Re-check nodefs % — must not drop more than ~2 points. If master free falls toward 15%, merge revert immediately.
+
+### Abort
+
+- Pod not on master.
+- Nodefs on any node moves more than ~2 percentage points.
+- `sizeLimit` ignored and `dd` finishes (pod stays Running with a 300Mi file): merge revert; do not `qm` anything.
+
+### Clean-up (PR B, branch `week8-drill4-revert`)
+
+`platform-root` has **`prune: false`**. A resources finalizer on the child does **not** delete the Application when git drops it. After PR B merges:
+
+```sh
+sudo -n kubectl --kubeconfig /etc/kubernetes/admin.conf -n argocd delete application chaos-drill4
+sudo -n kubectl --kubeconfig /etc/kubernetes/admin.conf delete namespace chaos-drill4
+```
+
+The first command is the one the finalizer needs: Argo then prunes the Failed pod and NetworkPolicy. The namespace from `CreateNamespace` is **not** removed by that prune. Do not skip the namespace delete (drill 3 left a running app for the same reason).
