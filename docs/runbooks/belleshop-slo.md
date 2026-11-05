@@ -49,49 +49,33 @@ debug signal, not a page.
 A blackhole here is often the NetworkPolicy: blackbox must egress to
 `homelab-gateway-nginx:443` (pod IP), not only to `192.168.1.240/32`.
 
-## ROADMAP proof (owner, after this PR is synced)
+## Drill: prove the page fires (done 2026-11-05)
 
-The ROADMAP tick is an email that fired because the API was down, then a resolve.
-**Do not** `kubectl -n dev scale deploy/backend`: that object does not exist
-(live 2026-11-04: `rollout.argoproj.io/backend`, `deployment.apps/frontend` only).
+Cause the outage **through git**, like a real bad deploy. Do not scale with `kubectl`: the `belleshop` app
+has `selfHeal: true` AND is itself managed by `platform-root` (also `selfHeal: true`), so pausing the child's
+automation is undone by the parent within minutes and the scale is reverted (checked live 2026-11-05). The
+workload is `rollout/backend` (Argo Rollouts), not a Deployment.
 
-**Do not** scale while Argo CD `belleshop` has `syncPolicy.automated.selfHeal: true`
-(live). Git says 2 replicas; selfHeal restores them in seconds and the fast-burn
-never fills a 5m window.
+1. Confirm both SLO probes are `1` (dashboard `belleshop-slo`).
+2. PR in `belleshop-deploy`: `base/backend-rollout.yaml` `replicas: 0`. The owner merges it in the Gitea UI
+   (branch protection: `homelab-bot` cannot merge in that repo, by design).
+3. Wait for the critical email(s). Prepare the restore PR (`replicas: 2`) meanwhile.
+4. Owner merges the restore PR. Fast-burn resolves within ~5-8 min of recovery (5m window); Medium-burn about
+   30 min later (30m window still holds the outage); the 3d warning stays a while (UI only, no email).
 
-Procedure:
+### Recorded run 2026-11-05 (UTC)
 
-1. Confirm both SLO probes are `1` and the dashboard is green.
-2. Pause selfHeal (keeps `syncOptions`; only clears automation):
+| Time | Event | Elapsed |
+|---|---|---|
+| 00:26:08 | belleshop-deploy #26 merged (backend replicas 0) | 0:00 |
+| 00:28:53 | Argo CD synced, backend 0 replicas | +2:45 |
+| 00:29:18 | `shop-api` probe `probe_success=0` | +3:10 |
+| 00:30:07 | `BelleShopAvailabilityBurnMedium` firing; email received | ~+4 |
+| 00:32:13 | `BelleShopAvailabilityBurnFast` firing; Alertmanager -> email | +6:05 |
+| 00:35:00 | belleshop-deploy #27 merged (restore) | +8:52 |
+| 00:35:53 | backend 2/2 ready, `shop-api` probe back to 1 | +9:45 (recovery 53 s) |
+| ~00:43 | Fast-burn resolved email | |
 
-   ```sh
-   kubectl -n argocd patch app belleshop --type merge \
-     -p '{"spec":{"syncPolicy":{"automated":null}}}'
-   ```
-
-3. Scale the Rollout, not a Deployment:
-
-   ```sh
-   kubectl -n dev scale rollout/backend --replicas=0
-   ```
-
-   Frontend stays up. `shop-home` may still be 200; `shop-api` fails at the Gateway.
-   The SLI is the **average** of the two probes, so availability drops to ~50% with
-   only the API down — that is **well above** the 7.2% fast-burn threshold, so the
-   page still fires.
-
-4. Wait 5–10 minutes. Capture: Grafana `belleshop-slo`, the
-   `BelleShopAvailabilityBurnFast` email, Prometheus alert.
-
-5. Restore and re-enable selfHeal:
-
-   ```sh
-   kubectl -n dev scale rollout/backend --replicas=2
-   kubectl -n argocd patch app belleshop --type merge \
-     -p '{"spec":{"syncPolicy":{"automated":{"prune":true,"selfHeal":true}}}}'
-   ```
-
-6. Confirm the resolve email and probes back at `1`. Record timestamps. That is
-   the interview artefact.
-
-Do not leave `automated: null` or replicas at 0.
+Notes: Medium fired before Fast because the probes had existed only ~20 min, so the 6h/1h windows held only
+20 min of data (a new SLO's long windows are not yet long). The `runbook_url` annotation pointed at the
+dashboard; fixed to this document after the drill.

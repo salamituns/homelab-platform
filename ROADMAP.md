@@ -145,15 +145,17 @@ Carried over from Week 6 (kept at the level described in [ADR 0015](docs/adr/001
             `rollout restart` so the session manager trusts the Gitea root, now in the script)
       - [x] oauth2-proxy for the Prometheus and Alertmanager UIs (2026-11-04, PRs #51-#53; Alertmanager admin-team only,
             gateway can no longer reach :9090/:9093 directly)
-      - [ ] Separate bot account for agent pushes (today the push token belongs to the owner's `tunsgit`)
-- [ ] Loki for logs, Grafana dashboards as code ([ADR 0017](docs/adr/0017-logs-dashboards-belleshop-slos.md)):
+      - [x] Separate bot account for agent pushes: `homelab-bot` (2026-11-04, PR #55; Argo CD read token #60)
+- [x] Loki for logs, Grafana dashboards as code (2026-11-04, PRs #58, #60, #61; [ADR 0017](docs/adr/0017-logs-dashboards-belleshop-slos.md)):
       grafana/loki SingleBinary on `local-path` (worker PVC, 10Gi, 7d) + Grafana Alloy DaemonSet (Promtail is EOL);
       dashboards as JSON ConfigMaps through the existing kube-prometheus-stack sidecar (`grafana_dashboard=1`)
-- [ ] SLOs for BelleShop (availability, p95 latency) and alerts on burn rate ([ADR 0017](docs/adr/0017-logs-dashboards-belleshop-slos.md)):
+- [x] SLOs for BelleShop (availability, p95 latency) and alerts on burn rate (2026-11-05, PRs #62, #63; [ADR 0017](docs/adr/0017-logs-dashboards-belleshop-slos.md)):
       blackbox_exporter Probe CRs through the Gateway, hand-written multi-window burn PrometheusRules, email via
       the existing Alertmanager route with Week 6 grouping/`repeat_interval` constraints
-- **Proof:** a dashboard plus an alert that fired for a real reason (scale BelleShop backend to 0, then restore;
-      ADR 0017 decision 4)
+- **Proof (done 2026-11-05):** drill via git, belleshop-deploy #26 (backend `replicas: 0`) then #27 (restore).
+      Merge 00:26:08Z -> Argo synced 00:28:53Z -> probe failing 00:29:18Z -> Medium-burn email ~00:30Z,
+      Fast-burn email 00:32:13Z (6 min merge-to-page) -> restore merged 00:35:00Z -> API back 00:35:53Z
+      (53 s) -> Fast-burn resolved email. Timeline in `docs/runbooks/belleshop-slo.md`
 
 ## Week 8: Chaos + postmortems
 - [ ] Five incidents on purpose: node loss, disk full, bad deploy (Rollouts abort),

@@ -37,7 +37,7 @@ tests:
             exp_annotations:
               summary: "BelleShop availability fast-burn (14.4× on 1h/5m)"
               description: "Availability error ratio is above 14.4× the 99.5%/30d budget on both the 1h and 5m windows (about 7.2% failed probes). The shop-home or shop-api probe through homelab-gateway is failing. See docs/runbooks/belleshop-slo.md."
-              runbook_url: https://grafana.apps.home.arpa/d/belleshop-slo
+              runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/belleshop-slo.md
               dashboard_url: https://grafana.apps.home.arpa/d/belleshop-slo
       # Recovery: 10m of success after the fail. 5m window is healthy; alert clears.
       - eval_time: 76m
