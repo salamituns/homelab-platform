@@ -60,3 +60,34 @@ tests:
       - eval_time: 70m
         alertname: BelleShopAvailabilityBurnFast
         exp_alerts: []
+
+  # Latency SLI must be a good-event RATIO (0..1), not an average of durations.
+  # Live 2026-11-05 the rule used `duration < 0.5` (filter keeps the value) instead of
+  # `< bool 0.5`, so it recorded ~0.17 with every probe fast and fired a false warning.
+  - interval: 1m
+    input_series:
+      - series: 'probe_success{slo="belleshop-availability",probe="shop-home",job="blackbox"}'
+        values: "1x30"
+      - series: 'probe_success{slo="belleshop-availability",probe="shop-api",job="blackbox"}'
+        values: "1x30"
+      - series: 'probe_duration_seconds{slo="belleshop-availability",probe="shop-home",job="blackbox"}'
+        values: "0.334x15 0.9x15"
+      - series: 'probe_duration_seconds{slo="belleshop-availability",probe="shop-api",job="blackbox"}'
+        values: "0.146x30"
+    promql_expr_test:
+      # all fast -> ratio exactly 1
+      - expr: belleshop:latency_good:ratio5m
+        eval_time: 10m
+        exp_samples:
+          - labels: 'belleshop:latency_good:ratio5m'
+            value: 1
+      # home slow (0.9s > 0.5s) for >5m, api fast -> half the probes good
+      - expr: belleshop:latency_good:ratio5m
+        eval_time: 25m
+        exp_samples:
+          - labels: 'belleshop:latency_good:ratio5m'
+            value: 0.5
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: BelleShopLatencyBurnFast
+        exp_alerts: []
