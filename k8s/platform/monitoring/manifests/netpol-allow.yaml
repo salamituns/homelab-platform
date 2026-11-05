@@ -13,8 +13,10 @@
 # kube-proxy 192.168.1.{90,89,84}:10249; kubelet 10250 plus 4194/10255 on all three node
 # IPs; node-exporter hostNetwork :9100 on all three node IPs (hostNetwork pods are outside
 # policy scope themselves, but prometheus reaches them AT the node IP, which IS in scope);
-# coredns pods 10.244.x:9153; external-secrets and belleshop-backend pod targets; the
-# intra-namespace monitors (grafana, alertmanager, prometheus self, operator, ksm).
+# coredns pods 10.244.x:9153; external-secrets and belleshop-backend pod targets;
+# cert-manager controller :9402 (ADR 0018; covered by the pod-CIDR egress below,
+# paired with cert-manager-metrics-ingress); the intra-namespace monitors
+# (grafana, alertmanager, prometheus self, operator, ksm).
 #
 # No blanket intra-namespace allow (round 1 lesson): the intra rule below is port-limited
 # to the metric ports the monitors actually use. falcosidekick in `falco` is allowed into
@@ -63,7 +65,8 @@ spec:
 # Prometheus scrapes, from the prometheus pods only (nothing else in monitoring dials
 # out). Two rule groups:
 #  - pod targets by CIDR without ports (coredns 9153, external-secrets, belleshop backend
-#    8000 - and whatever pod target a future ServiceMonitor adds): 10.244.0.0/16.
+#    8000, cert-manager 9402 - and whatever pod target a future ServiceMonitor adds):
+#    10.244.0.0/16.
 #  - node targets with the exact ports read from the live Endpoints. The control-plane
 #    node carries the apiserver/etcd/scheduler/controller-manager targets; all three
 #    nodes carry kube-proxy, kubelet (+cadvisor/metrics ports) and node-exporter.

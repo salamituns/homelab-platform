@@ -9,9 +9,11 @@
 # instance=cert-manager). Container ports: controller 9402 (http-metrics) + 9403
 # (http-healthz); cainjector 9402; webhook 10250 (https, Service cert-manager-webhook
 # 443 -> 10250, Endpoints 10.244.4.229:10250) + 6080 (healthcheck) + 9402. The three
-# 9402 metrics Services exist but NO ServiceMonitors do (verified via the admin
-# path) - nothing scrapes cert-manager, so there is deliberately no monitoring
-# ingress on 9402.
+# 9402 metrics Services exist. As of ADR 0018 pre-drill, ServiceMonitor
+# cert-manager (controller, port http-metrics) scrapes :9402, so monitoring
+# ingress on 9402 is required (cert-manager-metrics-ingress below). Without
+# that pair Prometheus's scrape egress (pod CIDR, no port filter) still
+# cannot land: default-deny isolates Ingress on every cert-manager pod.
 #
 # Flows:
 #   controller  -> API (watches Certificates/Requests/Orders, reads the lab-ca
@@ -91,3 +93,27 @@ spec:
             cidr: 10.244.0.0/24   # master podCIDR (apiserver -> webhook, cross-node)
       ports:
         - { protocol: TCP, port: 10250 }
+---
+# Prometheus -> cert-manager :9402 (controller Service port name http-metrics;
+# cainjector the same; webhook Service port name is metrics, same container
+# port 9402). Live 2026-11-04: pods on workernode2, labels
+# app.kubernetes.io/instance=cert-manager,
+# app.kubernetes.io/name={cert-manager,cainjector,webhook}. Prometheus scrape
+# egress already allows 10.244.0.0/16 with no port list; this is the matching
+# ingress. podSelector {} covers all three 9402 Services so a later SM on
+# cainjector/webhook does not need another policy. Do not open 10250 here.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cert-manager-metrics-ingress
+  namespace: cert-manager
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - { protocol: TCP, port: 9402 }
