@@ -110,7 +110,8 @@ spec:
 # lesson): prometheus scrapes grafana 3000, itself 9090, alertmanager 9093, the operator
 # 10250 and kube-state-metrics 8080; the reloader-web ports are 8080; grafana's
 # datasources dial prometheus 9090 and alertmanager 9093. Loki 3100 and Alloy 12345
-# (ADR 0017 PR 1) are the same-namespace push/query/scrape ports.
+# (ADR 0017 PR 1) are the same-namespace push/query/scrape ports. blackbox 9115
+# (ADR 0017 PR 3) is the Probe scrape.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -131,6 +132,7 @@ spec:
         - { protocol: TCP, port: 3100 }   # Loki HTTP (push + query + /metrics)
         - { protocol: TCP, port: 12345 }  # Alloy HTTP /metrics
         - { protocol: TCP, port: 7946 }   # Loki memberlist (single replica still joins via the Service)
+        - { protocol: TCP, port: 9115 }   # blackbox_exporter /probe + /metrics (ADR 0017 PR 3)
   egress:
     - to:
         - podSelector: {}
@@ -143,6 +145,7 @@ spec:
         - { protocol: TCP, port: 3100 }
         - { protocol: TCP, port: 12345 }
         - { protocol: TCP, port: 7946 }
+        - { protocol: TCP, port: 9115 }   # Prometheus Probe scrape of blackbox :9115
 ---
 # Alertmanager -> the gmail SMTP relay (ADR 0015 D): smtp.gmail.com:465. A policy cannot
 # name hosts, so this is the public internet minus the private ranges - deliberately NOT

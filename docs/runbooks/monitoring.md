@@ -100,5 +100,7 @@ WATCH event; Viewers can only look.
    `manifests/`) is what includes the ConfigMaps. After sync, Grafana folder **Homelab**
    shows the dashboard. Sidecar log: `kubectl -n monitoring logs deploy/prometheus-stack-grafana -c grafana-sc-dashboard`.
 
-The first dashboard in this repo is **BelleShop overview** (`uid: belleshop-overview`).
-The SLO dashboard (`belleshop-slo.json`) is a later PR. Do not duplicate golden-signals here.
+Dashboards in this repo: **BelleShop overview** (`uid: belleshop-overview`) and
+**BelleShop SLO** (`uid: belleshop-slo`). SLO probe panels are empty until the
+blackbox Probe CRs scrape. Do not duplicate golden-signals here; see
+[`belleshop-slo.md`](belleshop-slo.md) for the scale-to-zero proof.

@@ -1,0 +1,36 @@
+# blackbox_exporter egress to the Gateway data-plane pod :443.
+#
+# kube-network-policies v1.1.2 evaluates AFTER kube-proxy DNAT (w7-rules lesson 2).
+# A probe of https://belleshop.apps.home.arpa/ resolves to MetalLB 192.168.1.240:443,
+# then kube-proxy DNATs to the LoadBalancer endpoints. Live 2026-11-04:
+#   svc/homelab-gateway-nginx  192.168.1.240:443
+#   endpoints                  10.244.4.225:443  (pod homelab-gateway-nginx on workernode2)
+# so the packet the agent sees is dest = gateway pod IP + 443, NOT .240/32.
+# Allowing only 192.168.1.240/32:443 would drop every probe.
+#
+# Gateway ingress already admits 10.244.0.0/16:443
+# (nginx-gateway-data-plane-ingress); no change on that side.
+#
+# DNS is monitoring-dns-egress (podSelector: {}). Prometheus -> :9115 is
+# monitoring-intra-metrics once 9115 is listed there (prometheus scrape egress
+# already allows 10.244.0.0/16 without ports).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: monitoring-blackbox-gateway-egress
+  namespace: monitoring
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: prometheus-blackbox-exporter
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: nginx-gateway
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: homelab-gateway-nginx
+      ports:
+        - { protocol: TCP, port: 443 }

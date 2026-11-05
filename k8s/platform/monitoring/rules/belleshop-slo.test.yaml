@@ -1,0 +1,62 @@
+# promtool test rules. Rule file is extracted from the PrometheusRule CR (spec.groups).
+# interval 1m so a 5-minute failure is five samples. Two series (shop-home, shop-api)
+# because the SLI is the average of both SLO probes.
+rule_files:
+  - belleshop-slo.rules.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    input_series:
+      - series: 'probe_success{slo="belleshop-availability",probe="shop-home",job="blackbox"}'
+        # 60m healthy, 6m hard fail, 10m recovered
+        values: "1x59 0x5 1x10"
+      - series: 'probe_success{slo="belleshop-availability",probe="shop-api",job="blackbox"}'
+        values: "1x59 0x5 1x10"
+      - series: 'probe_duration_seconds{slo="belleshop-availability",probe="shop-home",job="blackbox"}'
+        values: "0.1x75"
+      - series: 'probe_duration_seconds{slo="belleshop-availability",probe="shop-api",job="blackbox"}'
+        values: "0.05x75"
+    alert_rule_test:
+      # After 60m of success, nothing pages.
+      - eval_time: 60m
+        alertname: BelleShopAvailabilityBurnFast
+        exp_alerts: []
+      # 2-minute blip at t=61-62 would be inside the 6m fail window; check the
+      # dedicated blip test below. Here at t=65m we have 5m of 100% failure:
+      # 5m window ≈ 1.0, 1h window ≈ 5/60 ≈ 0.083 > 0.072 → page.
+      - eval_time: 65m
+        alertname: BelleShopAvailabilityBurnFast
+        exp_alerts:
+          - exp_labels:
+              alertname: BelleShopAvailabilityBurnFast
+              severity: critical
+              slo: belleshop-availability
+              window: "1h"
+            exp_annotations:
+              summary: "BelleShop availability fast-burn (14.4× on 1h/5m)"
+              description: "Availability error ratio is above 14.4× the 99.5%/30d budget on both the 1h and 5m windows (about 7.2% failed probes). The shop-home or shop-api probe through homelab-gateway is failing. See docs/runbooks/belleshop-slo.md."
+              runbook_url: https://grafana.apps.home.arpa/d/belleshop-slo
+              dashboard_url: https://grafana.apps.home.arpa/d/belleshop-slo
+      # Recovery: 10m of success after the fail. 5m window is healthy; alert clears.
+      - eval_time: 76m
+        alertname: BelleShopAvailabilityBurnFast
+        exp_alerts: []
+
+  - interval: 1m
+    name: two-minute-blip-does-not-page
+    input_series:
+      - series: 'probe_success{slo="belleshop-availability",probe="shop-home",job="blackbox"}'
+        values: "1x59 0x1 1x20"
+      - series: 'probe_success{slo="belleshop-availability",probe="shop-api",job="blackbox"}'
+        values: "1x59 0x1 1x20"
+    alert_rule_test:
+      # 2 minutes of 100% failure (samples at 60m and 61m). 5m window is hot
+      # (~40%) but 1h window is 2/60 ≈ 3.3% < 7.2%, so the AND does not page.
+      - eval_time: 62m
+        alertname: BelleShopAvailabilityBurnFast
+        exp_alerts: []
+      - eval_time: 70m
+        alertname: BelleShopAvailabilityBurnFast
+        exp_alerts: []

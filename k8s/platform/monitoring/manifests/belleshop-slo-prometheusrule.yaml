@@ -1,0 +1,140 @@
+# BelleShop SLO recording + multi-window multi-burn-rate alerts (ADR 0017 decision 3/4).
+# Live ruleSelector is {} (ruleSelectorNilUsesHelmValues: false), so any PrometheusRule
+# in any namespace is loaded; release: prometheus-stack matches the other custom rules.
+#
+# Availability SLI: probe_success on slo="belleshop-availability" (shop-home + shop-api).
+# Target 99.5% / 30d → error budget 0.5%. Page (severity=critical) at 14.4× (1h AND 5m)
+# and 6× (6h AND 30m). Ticket (severity=warning) at 1× (3d AND 6h).
+# Latency SLI: success AND duration < 500ms home / 300ms healthz, 99% target, WARNING only
+# (owner decision 1) until 24h of probe_duration_seconds exists.
+#
+# Prometheus retention is 7d (values.yaml), so there is no 30d series. Error-budget
+# remaining on the dashboard uses the 3d window.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: belleshop-slo-rules
+  namespace: monitoring
+  labels:
+    release: prometheus-stack
+spec:
+  groups:
+    - name: belleshop-slo.availability
+      rules:
+        - record: belleshop:availability:ratio5m
+          expr: avg(avg_over_time(probe_success{slo="belleshop-availability"}[5m]))
+        - record: belleshop:availability:ratio30m
+          expr: avg(avg_over_time(probe_success{slo="belleshop-availability"}[30m]))
+        - record: belleshop:availability:ratio1h
+          expr: avg(avg_over_time(probe_success{slo="belleshop-availability"}[1h]))
+        - record: belleshop:availability:ratio6h
+          expr: avg(avg_over_time(probe_success{slo="belleshop-availability"}[6h]))
+        - record: belleshop:availability:ratio3d
+          expr: avg(avg_over_time(probe_success{slo="belleshop-availability"}[3d]))
+        - record: belleshop:slo_error:ratio5m
+          expr: 1 - belleshop:availability:ratio5m
+        - record: belleshop:slo_error:ratio30m
+          expr: 1 - belleshop:availability:ratio30m
+        - record: belleshop:slo_error:ratio1h
+          expr: 1 - belleshop:availability:ratio1h
+        - record: belleshop:slo_error:ratio6h
+          expr: 1 - belleshop:availability:ratio6h
+        - record: belleshop:slo_error:ratio3d
+          expr: 1 - belleshop:availability:ratio3d
+        - alert: BelleShopAvailabilityBurnFast
+          expr: |
+            belleshop:slo_error:ratio1h > (14.4 * 0.005)
+            and
+            belleshop:slo_error:ratio5m > (14.4 * 0.005)
+          labels:
+            severity: critical
+            slo: belleshop-availability
+            window: 1h
+          annotations:
+            summary: "BelleShop availability fast-burn (14.4× on 1h/5m)"
+            description: >-
+              Availability error ratio is above 14.4× the 99.5%/30d budget on both the 1h
+              and 5m windows (about 7.2% failed probes). The shop-home or shop-api probe
+              through homelab-gateway is failing. See docs/runbooks/belleshop-slo.md.
+            runbook_url: https://grafana.apps.home.arpa/d/belleshop-slo
+            dashboard_url: https://grafana.apps.home.arpa/d/belleshop-slo
+        - alert: BelleShopAvailabilityBurnMedium
+          expr: |
+            belleshop:slo_error:ratio6h > (6 * 0.005)
+            and
+            belleshop:slo_error:ratio30m > (6 * 0.005)
+          labels:
+            severity: critical
+            slo: belleshop-availability
+            window: 6h
+          annotations:
+            summary: "BelleShop availability medium-burn (6× on 6h/30m)"
+            description: >-
+              Availability error ratio is above 6× the 99.5%/30d budget on both the 6h
+              and 30m windows. See docs/runbooks/belleshop-slo.md.
+            runbook_url: https://grafana.apps.home.arpa/d/belleshop-slo
+            dashboard_url: https://grafana.apps.home.arpa/d/belleshop-slo
+        - alert: BelleShopAvailabilityBurnSlow
+          expr: |
+            belleshop:slo_error:ratio3d > (1 * 0.005)
+            and
+            belleshop:slo_error:ratio6h > (1 * 0.005)
+          labels:
+            severity: warning
+            slo: belleshop-availability
+            window: 3d
+          annotations:
+            summary: "BelleShop availability slow-burn (1× on 3d/6h)"
+            description: >-
+              Availability error ratio is consuming the 99.5%/30d budget at about 1× on
+              the 3d and 6h windows (ticket, not a page). See docs/runbooks/belleshop-slo.md.
+            runbook_url: https://grafana.apps.home.arpa/d/belleshop-slo
+            dashboard_url: https://grafana.apps.home.arpa/d/belleshop-slo
+
+    - name: belleshop-slo.latency
+      rules:
+        - record: belleshop:latency_good:ratio5m
+          expr: |
+            avg(
+              avg_over_time((probe_success{slo="belleshop-availability",probe="shop-home"} * (probe_duration_seconds{slo="belleshop-availability",probe="shop-home"} < 0.5))[5m:])
+              or
+              avg_over_time((probe_success{slo="belleshop-availability",probe="shop-api"} * (probe_duration_seconds{slo="belleshop-availability",probe="shop-api"} < 0.3))[5m:])
+            )
+        - record: belleshop:latency_good:ratio30m
+          expr: |
+            avg(
+              avg_over_time((probe_success{slo="belleshop-availability",probe="shop-home"} * (probe_duration_seconds{slo="belleshop-availability",probe="shop-home"} < 0.5))[30m:])
+              or
+              avg_over_time((probe_success{slo="belleshop-availability",probe="shop-api"} * (probe_duration_seconds{slo="belleshop-availability",probe="shop-api"} < 0.3))[30m:])
+            )
+        - record: belleshop:latency_good:ratio1h
+          expr: |
+            avg(
+              avg_over_time((probe_success{slo="belleshop-availability",probe="shop-home"} * (probe_duration_seconds{slo="belleshop-availability",probe="shop-home"} < 0.5))[1h:])
+              or
+              avg_over_time((probe_success{slo="belleshop-availability",probe="shop-api"} * (probe_duration_seconds{slo="belleshop-availability",probe="shop-api"} < 0.3))[1h:])
+            )
+        - record: belleshop:latency_error:ratio5m
+          expr: 1 - belleshop:latency_good:ratio5m
+        - record: belleshop:latency_error:ratio30m
+          expr: 1 - belleshop:latency_good:ratio30m
+        - record: belleshop:latency_error:ratio1h
+          expr: 1 - belleshop:latency_good:ratio1h
+        - alert: BelleShopLatencyBurnFast
+          expr: |
+            belleshop:latency_error:ratio1h > (14.4 * 0.01)
+            and
+            belleshop:latency_error:ratio5m > (14.4 * 0.01)
+          labels:
+            severity: warning
+            slo: belleshop-latency
+            window: 1h
+          annotations:
+            summary: "BelleShop latency fast-burn (warning only; 14.4× on 1h/5m)"
+            description: >-
+              Probe duration is missing the 99% latency SLI (500ms home / 300ms healthz)
+              at 14.4× on the 1h and 5m windows. This alert is severity=warning until 24h
+              of probe_duration_seconds justifies paging (ADR 0017 owner decision 1).
+              See docs/runbooks/belleshop-slo.md.
+            runbook_url: https://grafana.apps.home.arpa/d/belleshop-slo
+            dashboard_url: https://grafana.apps.home.arpa/d/belleshop-slo

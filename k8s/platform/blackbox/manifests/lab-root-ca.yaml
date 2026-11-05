@@ -1,0 +1,22 @@
+# Public lab root CA (same bytes as ansible/files/ca/lab-root.crt). Mounted as a
+# DIRECTORY into blackbox_exporter so http_2xx_lab can set tls_config.ca_file.
+# Not a Secret: this certificate is already in git.
+apiVersion: v1
+data:
+  lab-root.crt: |
+    -----BEGIN CERTIFICATE-----
+    MIIBtDCCAVqgAwIBAgIUatYq97teCFSQQT0MiMDsXfcBQBwwCgYIKoZIzj0EAwIw
+    KDEmMCQGA1UEAwwdSG9tZWxhYiBQbGF0Zm9ybSBSb290IENBIDIwMjYwHhcNMjYx
+    MTAyMjAzODE4WhcNMzYxMDMwMjAzODE4WjAoMSYwJAYDVQQDDB1Ib21lbGFiIFBs
+    YXRmb3JtIFJvb3QgQ0EgMjAyNjBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABDMf
+    1KyVls/Qk7jF/ybqD/WxVFdqYGDeM5lcfb6PrTmwsLTSZOkm5rhRZ0+ZqNq8Di8q
+    3MKexXtqGFY8Xu1YIVejYjBgMBIGA1UdEwEB/wQIMAYBAf8CAQEwDgYDVR0PAQH/
+    BAQDAgEGMB0GA1UdDgQWBBQ4rUG8Wvi6u/IT3bx9stUvAQIOKDAbBgNVHR4BAf8E
+    ETAPoA0wC4IJaG9tZS5hcnBhMAoGCCqGSM49BAMCA0gAMEUCICaJ9uJSo1Kovdbn
+    GSV2opa0S2OvB10JEao06D9AcjvjAiEAy69mYh5nwhQ3NBDfOwlZ84g5nada8rMU
+    rlhe3vazs5g=
+    -----END CERTIFICATE-----
+kind: ConfigMap
+metadata:
+  name: lab-root-ca
+  namespace: monitoring

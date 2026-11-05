@@ -1,0 +1,36 @@
+# blackbox_exporter + Probe CRs (ADR 0017 rollout PR 3).
+# Chart from prometheus-community (already in the platform AppProject sourceRepos).
+# Manifests: lab-root CA ConfigMap, Probe CRs, blackbox egress NetworkPolicy.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: blackbox
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/compare-options: ServerSideDiff=true
+spec:
+  project: platform
+  sources:
+    - repoURL: https://prometheus-community.github.io/helm-charts
+      chart: prometheus-blackbox-exporter
+      targetRevision: 11.20.2
+      helm:
+        releaseName: blackbox-exporter
+        valueFiles:
+          - $values/k8s/platform/blackbox/values.yaml
+    - repoURL: https://gitea.home.arpa/tunsgit/homelab-platform.git
+      targetRevision: main
+      ref: values
+    - repoURL: https://gitea.home.arpa/tunsgit/homelab-platform.git
+      targetRevision: main
+      path: k8s/platform/blackbox/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false
+      - ServerSideApply=true

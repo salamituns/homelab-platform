@@ -1,0 +1,83 @@
+# Probe CRs (prometheus-operator v1). Live Prometheus
+# prometheus-stack-kube-prom-prometheus has probeSelector
+# matchLabels.release=prometheus-stack (helm default; probeSelectorNilUsesHelmValues
+# was left true). Without this label the operator never scrapes these Probes.
+# probeNamespaceSelector is {} so monitoring is in scope.
+#
+# jobName becomes the Prometheus `job` label. slo=belleshop-availability is the SLI
+# matcher; the api-belleshop host is debug-only (owner decision 4) and is excluded
+# from burn-rate rules.
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: belleshop-shop-home
+  namespace: monitoring
+  labels:
+    release: prometheus-stack
+    slo: belleshop-availability
+spec:
+  jobName: blackbox
+  interval: 15s
+  scrapeTimeout: 10s
+  module: http_2xx_lab
+  prober:
+    url: blackbox-exporter.monitoring.svc:9115
+    scheme: http
+    path: /probe
+  targets:
+    staticConfig:
+      static:
+        - https://belleshop.apps.home.arpa/
+      labels:
+        probe: shop-home
+        slo: belleshop-availability
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: belleshop-shop-api
+  namespace: monitoring
+  labels:
+    release: prometheus-stack
+    slo: belleshop-availability
+spec:
+  jobName: blackbox
+  interval: 15s
+  scrapeTimeout: 10s
+  module: http_2xx_lab
+  prober:
+    url: blackbox-exporter.monitoring.svc:9115
+    scheme: http
+    path: /probe
+  targets:
+    staticConfig:
+      static:
+        - https://belleshop.apps.home.arpa/api/healthz
+      labels:
+        probe: shop-api
+        slo: belleshop-availability
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: belleshop-api-debug
+  namespace: monitoring
+  labels:
+    release: prometheus-stack
+    slo: belleshop-debug
+spec:
+  jobName: blackbox
+  interval: 15s
+  scrapeTimeout: 10s
+  module: http_2xx_lab
+  prober:
+    url: blackbox-exporter.monitoring.svc:9115
+    scheme: http
+    path: /probe
+  targets:
+    staticConfig:
+      static:
+        - https://api-belleshop.apps.home.arpa/healthz
+      labels:
+        probe: shop-api-debug
+        slo: belleshop-debug

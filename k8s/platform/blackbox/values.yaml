@@ -1,0 +1,63 @@
+# prometheus-community/prometheus-blackbox-exporter 11.20.2 (app v0.29.1).
+# ADR 0017 decision 3: synthetic HTTPS probes through homelab-gateway, TLS verified
+# against the lab root (leaf is signed by the intermediate; the Gateway presents the
+# chain — openssl s_client -CAfile lab-root.crt to .240:443 SNI belleshop.apps.home.arpa
+# returned Verify return code 0 on 2026-11-04).
+fullnameOverride: blackbox-exporter
+replicaCount: 1
+revisionHistoryLimit: 2
+
+image:
+  registry: quay.io
+  repository: prometheus/blackbox-exporter
+  tag: v0.29.1
+  # Index digest (quay.io, docker-content-digest, 2026-11-04). Workers are linux/amd64.
+  digest: sha256:ea1c7aa3ef3f307cd03e85f34abb604478ccb90b567fc690da0cd9776da76b13
+  pullPolicy: IfNotPresent
+
+# Probe CRs (prometheus-operator) scrape /probe. Do not also ServiceMonitor the same URLs.
+serviceMonitor:
+  enabled: false
+podMonitor:
+  enabled: false
+prometheusRule:
+  enabled: false
+configReloader:
+  enabled: false
+networkPolicy:
+  enabled: false
+
+resources:
+  requests:
+    cpu: 20m
+    memory: 32Mi
+  limits:
+    cpu: 100m
+    memory: 64Mi
+
+# Directory mount, no subPath (Grafana/oauth2-proxy lesson: subPath mounts the FILE
+# at the directory path and the ca_file lookup then fails).
+extraVolumes:
+  - name: lab-root
+    configMap:
+      name: lab-root-ca
+extraVolumeMounts:
+  - name: lab-root
+    mountPath: /etc/blackbox/ca
+    readOnly: true
+
+config:
+  modules:
+    http_2xx_lab:
+      prober: http
+      timeout: 5s
+      http:
+        valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
+        # Live 2026-11-04: / and /api/healthz and api-belleshop /healthz all return 200
+        # with no redirect. Do not follow redirects — a 302 would hide a broken route.
+        follow_redirects: false
+        preferred_ip_protocol: ip4
+        fail_if_not_ssl: true
+        tls_config:
+          ca_file: /etc/blackbox/ca/lab-root.crt
+          insecure_skip_verify: false
