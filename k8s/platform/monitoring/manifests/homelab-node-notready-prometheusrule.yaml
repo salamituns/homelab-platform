@@ -1,0 +1,31 @@
+# Fast node-down page for Week 8 drill 5 (ADR 0018). Live 2026-11-04: job label
+# is node-exporter (three targets .90/.89/.84 all up==1). KubeNodeNotReady is
+# for 900s and depends on kube-state-metrics on workernode1 — the node the
+# drill shuts off. This rule uses the node-exporter scrape, which Prometheus
+# on workernode2 still evaluates.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: homelab-node-notready-rules
+  namespace: monitoring
+  labels:
+    release: prometheus-stack
+spec:
+  groups:
+    - name: homelab.node-notready
+      rules:
+        - alert: HomelabKubeNodeNotReadyFast
+          expr: |
+            up{job="node-exporter"} == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "node-exporter target is down for 2m"
+            description: >-
+              up{job="node-exporter", instance="{{ $labels.instance }}"} is 0 for 2
+              minutes. This is the ADR 0018 drill-5 detector for workernode1 (VM 107):
+              KubeNodeNotReady waits 15m and kube-state-metrics lives on that node.
+              Confirm qm status 107 before assuming a scrape blip. See
+              docs/runbooks/monitoring.md.
+            runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/monitoring.md

@@ -1,0 +1,90 @@
+# promtool test rules for ADR 0018 TLS expiry. time() in these tests is the
+# evaluation timestamp starting at unix 0. A constant expiry of N*86400 is
+# N days remaining at t=0 and a few minutes less at t=1h.
+rule_files:
+  - homelab-tls-expiry.rules.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - name: healthy 90d leaf does not fire
+    interval: 1m
+    input_series:
+      - series: 'probe_ssl_earliest_cert_expiry{job="blackbox",instance="https://belleshop.apps.home.arpa/",probe="shop-home"}'
+        values: "7776000x90"
+      - series: 'certmanager_certificate_expiration_timestamp_seconds{namespace="nginx-gateway",name="apps-home-arpa"}'
+        values: "7776000x90"
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: HomelabTlsCertExpiringSoon
+        exp_alerts: []
+      - eval_time: 90m
+        alertname: HomelabCertManagerCertExpiringSoon
+        exp_alerts: []
+
+  - name: 10d leaf warns after 1h, does not page
+    interval: 1m
+    input_series:
+      - series: 'probe_ssl_earliest_cert_expiry{job="blackbox",instance="https://belleshop.apps.home.arpa/",probe="shop-home"}'
+        values: "864000x90"
+      - series: 'certmanager_certificate_expiration_timestamp_seconds{namespace="nginx-gateway",name="apps-home-arpa"}'
+        values: "864000x90"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: HomelabTlsCertExpiringSoon
+        exp_alerts: []
+      - eval_time: 65m
+        alertname: HomelabTlsCertExpiringSoon
+        exp_alerts:
+          - exp_labels:
+              alertname: HomelabTlsCertExpiringSoon
+              severity: warning
+              instance: https://belleshop.apps.home.arpa/
+              job: blackbox
+              probe: shop-home
+            exp_annotations:
+              summary: "Lab TLS leaf on a blackbox probe expires in under 21 days"
+              description: "probe_ssl_earliest_cert_expiry for https://belleshop.apps.home.arpa/ is under 21 days. The Gateway wildcard *.apps.home.arpa is the leaf those probes see today. Do not shorten that Certificate as a drill — use chaos-expiry.apps.home.arpa (ADR 0018). See docs/runbooks/monitoring.md."
+              runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/monitoring.md
+      - eval_time: 65m
+        alertname: HomelabCertManagerCertExpiringSoon
+        exp_alerts:
+          - exp_labels:
+              alertname: HomelabCertManagerCertExpiringSoon
+              severity: warning
+              namespace: nginx-gateway
+              name: apps-home-arpa
+            exp_annotations:
+              summary: "cert-manager Certificate expires in under 21 days"
+              description: "Certificate nginx-gateway/apps-home-arpa notAfter is under 21 days. Live scrape is ServiceMonitor cert-manager :9402. See docs/runbooks/monitoring.md."
+              runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/monitoring.md
+
+  - name: 3d leaf pages critical after 1h
+    interval: 1m
+    input_series:
+      - series: 'probe_ssl_earliest_cert_expiry{job="blackbox",instance="https://belleshop.apps.home.arpa/",probe="shop-home"}'
+        values: "259200x90"
+    alert_rule_test:
+      - eval_time: 65m
+        alertname: HomelabTlsCertExpiringSoon
+        exp_alerts:
+          - exp_labels:
+              alertname: HomelabTlsCertExpiringSoon
+              severity: warning
+              instance: https://belleshop.apps.home.arpa/
+              job: blackbox
+              probe: shop-home
+            exp_annotations:
+              summary: "Lab TLS leaf on a blackbox probe expires in under 21 days"
+              description: "probe_ssl_earliest_cert_expiry for https://belleshop.apps.home.arpa/ is under 21 days. The Gateway wildcard *.apps.home.arpa is the leaf those probes see today. Do not shorten that Certificate as a drill — use chaos-expiry.apps.home.arpa (ADR 0018). See docs/runbooks/monitoring.md."
+              runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/monitoring.md
+          - exp_labels:
+              alertname: HomelabTlsCertExpiringSoon
+              severity: critical
+              instance: https://belleshop.apps.home.arpa/
+              job: blackbox
+              probe: shop-home
+            exp_annotations:
+              summary: "Lab TLS leaf on a blackbox probe expires in under 7 days"
+              description: "probe_ssl_earliest_cert_expiry for https://belleshop.apps.home.arpa/ is under 7 days. Renew via cert-manager (cmctl renew apps-home-arpa) only if this is the wildcard, not a chaos drill host. See docs/runbooks/monitoring.md."
+              runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/monitoring.md

@@ -1,0 +1,21 @@
+# Extract of spec.groups from manifests/homelab-disk-canary-prometheusrule.yaml
+# (promtool cannot load a PrometheusRule CR). Keep the two files in lockstep.
+groups:
+  - name: homelab.disk-canary
+    rules:
+      - alert: HomelabDiskCanaryEvicted
+        expr: |
+          kube_pod_status_reason{reason="Evicted", pod=~"homelab-disk-canary.*"} == 1
+          or
+          kube_pod_container_status_last_terminated_reason{reason="Evicted", pod=~"homelab-disk-canary.*"} == 1
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Disk-fill canary pod was evicted"
+          description: >-
+            Pod {{ $labels.namespace }}/{{ $labels.pod }} is Evicted (kube-state-metrics).
+            This is the ADR 0018 drill-4 signal: emptyDir sizeLimit on the canary, not
+            NodeFilesystemAlmostOutOfSpace. kubelet_evictions is not scraped on this
+            cluster. See docs/runbooks/monitoring.md.
+          runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/monitoring.md

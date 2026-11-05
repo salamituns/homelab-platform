@@ -1,0 +1,28 @@
+# Scrape cert-manager controller metrics (ADR 0018 drill 3). Live 2026-11-04:
+# Service cert-manager, port name http-metrics, port 9402, selector
+# app.kubernetes.io/component=controller + instance=cert-manager +
+# name=cert-manager. Cainjector/webhook also expose 9402 but the expiry
+# series certmanager_certificate_expiration_timestamp_seconds is on the
+# controller. Prometheus serviceMonitorSelector is {} (nilUsesHelmValues:
+# false), so the release label is not required; it is still set so this
+# object matches every other custom SM/Probe/PrometheusRule.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: cert-manager
+  namespace: cert-manager
+  labels:
+    release: prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames:
+      - cert-manager
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: controller
+      app.kubernetes.io/instance: cert-manager
+      app.kubernetes.io/name: cert-manager
+  endpoints:
+    - port: http-metrics
+      interval: 30s
+      scrapeTimeout: 10s

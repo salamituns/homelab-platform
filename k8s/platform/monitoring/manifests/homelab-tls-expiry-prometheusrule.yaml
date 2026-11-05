@@ -1,0 +1,70 @@
+# TLS expiry pages for Week 8 drill 3 (ADR 0018). Live 2026-11-04:
+# probe_ssl_earliest_cert_expiry{job="blackbox"} exists on shop-home, shop-api,
+# shop-api-debug (~88 days to 2027-01-31T20:38:31Z). cert-manager metrics were
+# not scraped; HomelabCertManagerCertExpiringSoon stays silent until the
+# ServiceMonitor in k8s/platform/cert-manager/manifests/servicemonitor.yaml
+# syncs. ruleSelector is {} so release: prometheus-stack is optional; set to
+# match the other custom rules.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: homelab-tls-expiry-rules
+  namespace: monitoring
+  labels:
+    release: prometheus-stack
+spec:
+  groups:
+    - name: homelab.tls-expiry
+      rules:
+        - alert: HomelabTlsCertExpiringSoon
+          expr: |
+            (probe_ssl_earliest_cert_expiry{job="blackbox"} - time()) / 86400 < 21
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Lab TLS leaf on a blackbox probe expires in under 21 days"
+            description: >-
+              probe_ssl_earliest_cert_expiry for {{ $labels.instance }} is under 21 days.
+              The Gateway wildcard *.apps.home.arpa is the leaf those probes see today.
+              Do not shorten that Certificate as a drill — use chaos-expiry.apps.home.arpa
+              (ADR 0018). See docs/runbooks/monitoring.md.
+            runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/monitoring.md
+        - alert: HomelabTlsCertExpiringSoon
+          expr: |
+            (probe_ssl_earliest_cert_expiry{job="blackbox"} - time()) / 86400 < 7
+          for: 1h
+          labels:
+            severity: critical
+          annotations:
+            summary: "Lab TLS leaf on a blackbox probe expires in under 7 days"
+            description: >-
+              probe_ssl_earliest_cert_expiry for {{ $labels.instance }} is under 7 days.
+              Renew via cert-manager (cmctl renew apps-home-arpa) only if this is the
+              wildcard, not a chaos drill host. See docs/runbooks/monitoring.md.
+            runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/monitoring.md
+        - alert: HomelabCertManagerCertExpiringSoon
+          expr: |
+            (certmanager_certificate_expiration_timestamp_seconds - time()) / 86400 < 21
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "cert-manager Certificate expires in under 21 days"
+            description: >-
+              Certificate {{ $labels.namespace }}/{{ $labels.name }} notAfter is under 21
+              days. Live scrape is ServiceMonitor cert-manager :9402. See
+              docs/runbooks/monitoring.md.
+            runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/monitoring.md
+        - alert: HomelabCertManagerCertExpiringSoon
+          expr: |
+            (certmanager_certificate_expiration_timestamp_seconds - time()) / 86400 < 7
+          for: 1h
+          labels:
+            severity: critical
+          annotations:
+            summary: "cert-manager Certificate expires in under 7 days"
+            description: >-
+              Certificate {{ $labels.namespace }}/{{ $labels.name }} notAfter is under 7
+              days. See docs/runbooks/monitoring.md.
+            runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/monitoring.md
