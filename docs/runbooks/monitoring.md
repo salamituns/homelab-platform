@@ -153,6 +153,69 @@ still sees the dead node-exporter scrape.
 
 **First check:** `qm status 107` on `tuns`. Do not `qm stop`. If this is not a
 drill, check the node-exporter DaemonSet pod on that node and whether the
-instance is `.89` (wn1), `.84` (wn2) or `.90` (master). Alertmanager itself
-lives on wn1 — a real 107 outage will page in Prometheus/Grafana but may not
-email until 107 is back.
+instance is `.89` (wn1), `.84` (wn2) or `.90` (master). After the HA follow-up
+(`fu-alertmanager-ha`), one Alertmanager replica should still be on wn1 and
+the other on wn2; email should survive a 107 loss. The Alertmanager **UI**
+still goes through `oauth2-proxy-alertmanager` (one pod) — that gate can die
+with wn1 even when email works.
+
+## Alertmanager HA (drill 5 follow-up)
+
+Two STS replicas, **hard** `podAntiAffinity` on `kubernetes.io/hostname`, each
+with its own local-path PVC from the existing `volumeClaimTemplate`. Replica
+`-0` keeps `pvc-...-alertmanager-0` on workernode1; `-1` is a new 2 Gi claim
+on the other worker. The operator turns on gossip (`--cluster.listen-address=:9094`,
+`--cluster.peer` for both ordinals) when `replicas > 1`. Prometheus already
+discovers every ready endpoint of `prometheus-stack-kube-prom-alertmanager`
+(`kubernetes_sd` role `endpoints`). Gossip needs TCP+UDP 9094, shipped as
+NetworkPolicy `monitoring-alertmanager-cluster` in `manifests/netpol-allow.yaml` because
+`monitoring-intra-metrics` does not list 9094.
+
+### After merge, owner verifies
+
+```sh
+sudo -n kubectl --kubeconfig /etc/kubernetes/admin.conf -n monitoring get pod \
+  -l app.kubernetes.io/name=alertmanager -o wide
+# expect two Ready pods on different nodes; -0 still on workernode1
+
+# Alertmanager image has no shell. Query /api/v2/status from Grafana (or any
+# monitoring pod with wget) against the Service; cluster.peers should be 2.
+sudo -n kubectl --kubeconfig /etc/kubernetes/admin.conf -n monitoring exec \
+  deploy/prometheus-stack-grafana -c grafana -- \
+  wget -qO- http://prometheus-stack-kube-prom-alertmanager:9093/api/v2/status
+
+sudo -n kubectl --kubeconfig /etc/kubernetes/admin.conf -n monitoring get pvc \
+  -l app.kubernetes.io/name=alertmanager
+```
+
+Send a test critical alert (Watchdog is severity none / null receiver — use a
+throwaway `AlertmanagerConfig` or `amtool alert add` only if you accept a real
+email). **Exactly one** email, not two. If two arrive, gossip is split (check
+the 9094 NetworkPolicy and `--cluster.listen-address` on both pods).
+
+### Prometheus and Grafana requests (same follow-up)
+
+Both were BestEffort. Requests only, sized from live `kubectl top` plus 24 h
+`container_memory_working_set_bytes` max (2026-11-05: Prometheus 639 Mi →
+768 Mi request; Grafana 506 Mi → 576 Mi; sidecars 96 Mi each). **No memory
+limit on Prometheus** — compaction / WAL replay can spike RSS; a limit OOM-kills
+the detector. workernode2 was 1460 Mi / 38% requests and 2712 Mi / 71% usage;
+adding ~1736 Mi of requests still fits under 3816 Mi allocatable (~84%).
+
+### Dead-man's switch (owner decision — not built)
+
+Watchdog already fires in-cluster and is routed to the null receiver. An
+external heartbeat (healthchecks.io, Dead Man's Snitch) is the way to page
+when **this** cluster, including both Alertmanager replicas, is silent.
+
+1. Create a check at the external service (account + ping URL). Do not put
+   the URL in git; store it in OpenBao next to the other Alertmanager SMTP
+   secrets.
+2. Add an Alertmanager receiver that POSTs to that URL on Watchdog (repeat
+   interval shorter than the check's grace).
+3. Route `alertname=Watchdog` there instead of (or as well as) null.
+4. Prove: pause Alertmanager or drop egress, and the external service pages
+   **you**. Do not enable this until the owner has that account.
+
+Email HA (two AM replicas) is not a substitute: a lab-wide outage still
+cannot phone home.

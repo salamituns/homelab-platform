@@ -6,7 +6,7 @@
 # cert and the read-only admin path): prometheus pod (workernode2, label
 # app.kubernetes.io/name=prometheus); grafana Service port 80 -> pod 3000; operator Service
 # 443 -> pod 10250; kube-state-metrics 8080 (+8081 self); alertmanager 9093 (+8080
-# reloader; 9094 mesh unused, single replica); prometheus 9090 (+8080 reloader).
+# reloader; 9094 gossip mesh between the 2 replicas, 2026-11-05 drill-5 follow-up); prometheus 9090 (+8080 reloader).
 # Scrapes (17 ServiceMonitors, all listed live): apiserver endpoints 192.168.1.90:6443;
 # kube-controller-manager 192.168.1.90:10257; kube-scheduler 192.168.1.90:10259; etcd
 # 192.168.1.90:2381 (2381, not the usual 2379 - read from the live Endpoints);
@@ -408,3 +408,34 @@ spec:
               app.kubernetes.io/instance: falco
       ports:
         - { protocol: TCP, port: 9093 }
+---
+# Alertmanager HA gossip (drill-5 follow-up, 2026-11-05). With 2 replicas the pods must reach
+# each other on 9094 TCP+UDP or the mesh splits and every notification is sent twice.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: monitoring-alertmanager-cluster
+  namespace: monitoring
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: alertmanager
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: alertmanager
+      ports:
+        - { protocol: TCP, port: 9094 }
+        - { protocol: UDP, port: 9094 }
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: alertmanager
+      ports:
+        - { protocol: TCP, port: 9094 }
+        - { protocol: UDP, port: 9094 }

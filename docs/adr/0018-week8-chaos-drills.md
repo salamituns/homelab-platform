@@ -4,7 +4,7 @@
 - Date: 2026-11-04
 - Owner: owner
 - Last reviewed: 5 Nov 2026
-- Next review: after the drill-5 action items (Alertmanager placement / blackbox absent / BestEffort limits), or if a pre-drill alert PR changes detection
+- Next review: after remaining drill-5 follow-ups (blackbox `absent()`, BestEffort limits on other platform pods), or if a pre-drill alert PR changes detection
 
 ## Revision history
 
@@ -12,6 +12,7 @@
 |---|---|---|
 | A | 4 Nov 2026 | Initial proposal from live cluster and hypervisor facts |
 | B | 5 Nov 2026 | Drill 5 ran: Fast alert at 2 m, no email, no stampede; see postmortem |
+| C | 5 Nov 2026 | Follow-up: Alertmanager replicas=2 + hard anti-affinity; Prom/Grafana memory requests |
 
 ## Scope
 
@@ -439,3 +440,10 @@ must-not list checked, follow-up PRs.
   later adds a disposable disk. That is accepted.
 - OpenBao/Gitea/PBS surviving worker loss is a stated goal of ADR 0014; this ADR is the
   first planned proof. Do not weaken that by shutting those VMs "to make it interesting."
+
+## Follow-ups (after the five drills)
+
+- **Alertmanager HA + Prom/Grafana requests** (`fu-alertmanager-ha`): two AM replicas
+  with hard hostname anti-affinity so email survives one worker; Prometheus and Grafana
+  get memory/CPU **requests** (no Prometheus memory **limit**). External Watchdog
+  heartbeat is an owner account, not this PR. See `docs/runbooks/monitoring.md`.

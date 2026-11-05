@@ -46,6 +46,20 @@ alertmanager:
     # "/" default - verified in the 88.3.0 chart render below and in monitoring.md).
     externalUrl: https://alertmanager.apps.home.arpa
     retention: 120h
+    # Drill 5: one replica on wn1 meant no email while 107 was down. Two STS pods, each
+    # with its own local-path PVC (volumeClaimTemplate ordinals -0 stays on wn1, -1 is new).
+    # Operator enables gossip (--cluster.listen-address=:9094, --cluster.peer for both
+    # ordinals) when replicas > 1; Prometheus kubernetes_sd of Service
+    # prometheus-stack-kube-prom-alertmanager already lists every ready endpoint.
+    replicas: 2
+    podAntiAffinity: hard
+    podAntiAffinityTopologyKey: kubernetes.io/hostname
+    # Live 2026-11-05: AM working set max 41 Mi / 24h, kubectl top 28 Mi. 200 Mi is the
+    # operator default already on replica-0; keep it so Guaranteed-ish vs BestEffort.
+    resources:
+      requests:
+        cpu: 25m
+        memory: 200Mi
     storage:
       volumeClaimTemplate:
         spec:
@@ -114,10 +128,22 @@ grafana:
       # platform-admins -> Admin, org members -> Viewer, everyone else blocked above (ADR 0016 decision 7).
       role_attribute_path: "contains(groups[*], 'homelab:platform-admins') && 'Admin' || 'Viewer'"
   enabled: true
+  # Drill 5 / BestEffort: Grafana had no requests. Live 2026-11-05: grafana working set
+  # max 506 Mi / 24h (top 209 Mi), sidecars ~85 Mi each. Requests only — a memory limit
+  # on the UI pod is optional later; eviction is the failure we are closing.
+  resources:
+    requests:
+      cpu: 100m
+      memory: 576Mi
   service:
     annotations: {}
     type: LoadBalancer
   sidecar:
+    # Applies to every sidecar container (dashboard + datasource). Live max ~85 Mi each.
+    resources:
+      requests:
+        cpu: 25m
+        memory: 96Mi
     dashboards:
       enabled: true
       label: grafana_dashboard
@@ -143,6 +169,14 @@ prometheus:
     retention: 7d
     ruleSelectorNilUsesHelmValues: false
     serviceMonitorSelectorNilUsesHelmValues: false
+    # Drill 5: Prometheus was BestEffort (0 requests). Live 2026-11-05: working set max
+    # 639 Mi / 24h, top 526 Mi, CPU max 213 m. Requests only. Do NOT set a memory limit:
+    # compaction / WAL replay can spike RSS and a limit causes OOMKill loops that take
+    # the detector with them. Scheduler fit is on workernode2 (see monitoring.md).
+    resources:
+      requests:
+        cpu: 250m
+        memory: 768Mi
     storageSpec:
       volumeClaimTemplate:
         spec:
