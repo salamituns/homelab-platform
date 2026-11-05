@@ -31,7 +31,6 @@ spec:
     - { server: https://kubernetes.default.svc, namespace: cert-manager }             # internal CA (ADR 0015 B)
     - { server: https://kubernetes.default.svc, namespace: falco }                    # runtime alerts (ADR 0015 D)
     - { server: https://kubernetes.default.svc, namespace: kube-network-policies }    # policy enforcement (ADR 0015 A)
-    - { server: https://kubernetes.default.svc, namespace: chaos-drill4 }             # Week 8 drill 4 emptyDir canary
     - { server: https://kubernetes.default.svc, namespace: dev }   # access Role and binding only (ADR 0014 step 8)
   clusterResourceWhitelist:
     - { group: "", kind: Namespace }
