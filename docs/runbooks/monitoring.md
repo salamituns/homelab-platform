@@ -104,3 +104,55 @@ Dashboards in this repo: **BelleShop overview** (`uid: belleshop-overview`) and
 **BelleShop SLO** (`uid: belleshop-slo`). SLO probe panels are empty until the
 blackbox Probe CRs scrape. Do not duplicate golden-signals here; see
 [`belleshop-slo.md`](belleshop-slo.md) for the scale-to-zero proof.
+
+## Week 8 chaos alerts (ADR 0018)
+
+These ship before the matching drill. Critical goes to the generic `severity=critical`
+email route; warnings stay on the root `null` receiver (UI only). Confirmed with
+`amtool config routes test` against `k8s/platform/monitoring/alertmanager/alertmanager.check.yaml`.
+
+### HomelabTlsCertExpiringSoon
+
+**Means:** blackbox `probe_ssl_earliest_cert_expiry` for a shop (or debug) HTTPS
+probe is under 21 days (warning) or 7 days (critical), `for: 1h`. Today those
+probes all see the Gateway wildcard `*.apps.home.arpa` (`notAfter`
+2027-01-31T20:38:31Z).
+
+**First check:** which `instance` label. `openssl s_client -servername
+belleshop.apps.home.arpa -connect 192.168.1.240:443` (lab root). Do **not**
+shorten `nginx-gateway/apps-home-arpa` for a drill — that is the wildcard.
+Chaos host only, per ADR 0018 drill 3.
+
+### HomelabCertManagerCertExpiringSoon
+
+**Means:** `certmanager_certificate_expiration_timestamp_seconds` for a
+Certificate object is under 21 days (warning) or 7 days (critical), `for: 1h`.
+Needs the `cert-manager` ServiceMonitor on controller `:9402` and
+`cert-manager-metrics-ingress`. Until that scrapes, the rule cannot fire.
+
+**First check:** `kubectl -n cert-manager get certificate,certificaterequest`.
+Prometheus targets for job `cert-manager`. Same wildcard warning as above.
+
+### HomelabDiskCanaryEvicted
+
+**Means:** a pod named `homelab-disk-canary*` is Evicted
+(`kube_pod_status_reason` or `kube_pod_container_status_last_terminated_reason`).
+Warning only. This is drill 4: emptyDir `sizeLimit`, not a node root fill.
+`kubelet_evictions` is not a live metric here.
+
+**First check:** `kubectl get pods -A --field-selector=status.phase=Failed`.
+Compare nodefs `%` on all three nodes (`node_filesystem_avail_bytes{mountpoint="/"}`).
+If nodefs moved more than ~2 points, abort the drill. Revert the canary git PR.
+
+### HomelabKubeNodeNotReadyFast
+
+**Means:** `up{job="node-exporter"} == 0` for 2 minutes. Critical (email). This
+is drill 5: workernode1 VM 107 can take kube-state-metrics with it, so
+`KubeNodeNotReady` (`for: 15m`) will not evaluate. Prometheus on workernode2
+still sees the dead node-exporter scrape.
+
+**First check:** `qm status 107` on `tuns`. Do not `qm stop`. If this is not a
+drill, check the node-exporter DaemonSet pod on that node and whether the
+instance is `.89` (wn1), `.84` (wn2) or `.90` (master). Alertmanager itself
+lives on wn1 — a real 107 outage will page in Prometheus/Grafana but may not
+email until 107 is back.

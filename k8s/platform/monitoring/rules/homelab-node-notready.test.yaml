@@ -1,0 +1,41 @@
+rule_files:
+  - homelab-node-notready.rules.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - name: all node-exporters up do not fire
+    interval: 1m
+    input_series:
+      - series: 'up{job="node-exporter",instance="192.168.1.89:9100"}'
+        values: "1x10"
+      - series: 'up{job="node-exporter",instance="192.168.1.84:9100"}'
+        values: "1x10"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: HomelabKubeNodeNotReadyFast
+        exp_alerts: []
+
+  - name: one node-exporter down pages after 2m
+    interval: 1m
+    input_series:
+      - series: 'up{job="node-exporter",instance="192.168.1.89:9100"}'
+        values: "0x10"
+      - series: 'up{job="node-exporter",instance="192.168.1.84:9100"}'
+        values: "1x10"
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: HomelabKubeNodeNotReadyFast
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: HomelabKubeNodeNotReadyFast
+        exp_alerts:
+          - exp_labels:
+              alertname: HomelabKubeNodeNotReadyFast
+              severity: critical
+              job: node-exporter
+              instance: "192.168.1.89:9100"
+            exp_annotations:
+              summary: "node-exporter target is down for 2m"
+              description: 'up{job="node-exporter", instance="192.168.1.89:9100"} is 0 for 2 minutes. This is the ADR 0018 drill-5 detector for workernode1 (VM 107): KubeNodeNotReady waits 15m and kube-state-metrics lives on that node. Confirm qm status 107 before assuming a scrape blip. See docs/runbooks/monitoring.md.'
+              runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/monitoring.md

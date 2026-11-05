@@ -1,0 +1,20 @@
+# Extract of spec.groups from manifests/homelab-node-notready-prometheusrule.yaml
+# (promtool cannot load a PrometheusRule CR). Keep the two files in lockstep.
+groups:
+  - name: homelab.node-notready
+    rules:
+      - alert: HomelabKubeNodeNotReadyFast
+        expr: |
+          up{job="node-exporter"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "node-exporter target is down for 2m"
+          description: >-
+            up{job="node-exporter", instance="{{ $labels.instance }}"} is 0 for 2
+            minutes. This is the ADR 0018 drill-5 detector for workernode1 (VM 107):
+            KubeNodeNotReady waits 15m and kube-state-metrics lives on that node.
+            Confirm qm status 107 before assuming a scrape blip. See
+            docs/runbooks/monitoring.md.
+          runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/monitoring.md
