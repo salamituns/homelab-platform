@@ -91,3 +91,96 @@ tests:
       - eval_time: 10m
         alertname: BelleShopLatencyBurnFast
         exp_alerts: []
+      - eval_time: 10m
+        alertname: BelleShopSloProbeAbsent
+        exp_alerts: []
+
+  # Drill 5 follow-up B: BelleShopSloProbeAbsent must stay silent when probes are
+  # present or across a brief rollout/restart blip (1-2m), and fire (severity=critical)
+  # once either or both SLO probe series have been absent for [2m] + for: 2m.
+  - interval: 1m
+    name: brief-blackbox-rollout-restart-does-not-fire-absent
+    input_series:
+      - series: 'probe_success{slo="belleshop-availability",probe="shop-home",job="blackbox"}'
+        values: "1x10 _x2 1x10"
+      - series: 'probe_success{slo="belleshop-availability",probe="shop-api",job="blackbox"}'
+        values: "1x10 _x2 1x10"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: BelleShopSloProbeAbsent
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: BelleShopSloProbeAbsent
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: BelleShopSloProbeAbsent
+        exp_alerts: []
+
+  - interval: 1m
+    name: vanishing-slo-probes-fire-critical-after-2m-window-plus-2m-for
+    input_series:
+      - series: 'probe_success{slo="belleshop-availability",probe="shop-home",job="blackbox"}'
+        values: "1x5"
+      - series: 'probe_success{slo="belleshop-availability",probe="shop-api",job="blackbox"}'
+        values: "1x5"
+    alert_rule_test:
+      # Present at t=5m -> silent.
+      - eval_time: 5m
+        alertname: BelleShopSloProbeAbsent
+        exp_alerts: []
+      # At t=7m, (5m, 7m] has 0 samples -> absent_over_time([2m]) enters Pending (for: 2m).
+      - eval_time: 8m
+        alertname: BelleShopSloProbeAbsent
+        exp_alerts: []
+      # At t=9m (4m after last sample at t=5m), for: 2m is satisfied -> both fire.
+      - eval_time: 9m
+        alertname: BelleShopSloProbeAbsent
+        exp_alerts:
+          - exp_labels:
+              alertname: BelleShopSloProbeAbsent
+              job: blackbox
+              probe: shop-home
+              severity: critical
+              slo: belleshop-availability
+              window: "2m"
+            exp_annotations:
+              summary: "SLO probes missing - shop availability is UNKNOWN"
+              description: "No probe_success samples for shop-home (slo=belleshop-availability) over the last 2m (for 2m). Multi-window SLO burn rules evaluate to empty when probe series vanish, blinding availability paging (Drill 5 postmortem). Check kubectl get nodes first, then blackbox-exporter pods and Probe CRs. See docs/runbooks/belleshop-slo.md."
+              runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/belleshop-slo.md
+              dashboard_url: https://grafana.apps.home.arpa/d/belleshop-slo
+          - exp_labels:
+              alertname: BelleShopSloProbeAbsent
+              job: blackbox
+              probe: shop-api
+              severity: critical
+              slo: belleshop-availability
+              window: "2m"
+            exp_annotations:
+              summary: "SLO probes missing - shop availability is UNKNOWN"
+              description: "No probe_success samples for shop-api (slo=belleshop-availability) over the last 2m (for 2m). Multi-window SLO burn rules evaluate to empty when probe series vanish, blinding availability paging (Drill 5 postmortem). Check kubectl get nodes first, then blackbox-exporter pods and Probe CRs. See docs/runbooks/belleshop-slo.md."
+              runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/belleshop-slo.md
+              dashboard_url: https://grafana.apps.home.arpa/d/belleshop-slo
+
+  - interval: 1m
+    name: single-slo-probe-absent-fires-for-missing-probe-only
+    input_series:
+      - series: 'probe_success{slo="belleshop-availability",probe="shop-home",job="blackbox"}'
+        values: "1x15"
+      - series: 'probe_success{slo="belleshop-availability",probe="shop-api",job="blackbox"}'
+        values: "1x5"
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: BelleShopSloProbeAbsent
+        exp_alerts:
+          - exp_labels:
+              alertname: BelleShopSloProbeAbsent
+              job: blackbox
+              probe: shop-api
+              severity: critical
+              slo: belleshop-availability
+              window: "2m"
+            exp_annotations:
+              summary: "SLO probes missing - shop availability is UNKNOWN"
+              description: "No probe_success samples for shop-api (slo=belleshop-availability) over the last 2m (for 2m). Multi-window SLO burn rules evaluate to empty when probe series vanish, blinding availability paging (Drill 5 postmortem). Check kubectl get nodes first, then blackbox-exporter pods and Probe CRs. See docs/runbooks/belleshop-slo.md."
+              runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/belleshop-slo.md
+              dashboard_url: https://grafana.apps.home.arpa/d/belleshop-slo

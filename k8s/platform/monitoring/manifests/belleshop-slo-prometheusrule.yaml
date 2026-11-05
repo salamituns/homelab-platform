@@ -90,6 +90,26 @@ spec:
               the 3d and 6h windows (ticket, not a page). See docs/runbooks/belleshop-slo.md.
             runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/belleshop-slo.md
             dashboard_url: https://grafana.apps.home.arpa/d/belleshop-slo
+        - alert: BelleShopSloProbeAbsent
+          expr: |
+            absent_over_time(probe_success{job="blackbox",slo="belleshop-availability",probe="shop-home"}[2m])
+            or
+            absent_over_time(probe_success{job="blackbox",slo="belleshop-availability",probe="shop-api"}[2m])
+          for: 2m
+          labels:
+            severity: critical
+            slo: belleshop-availability
+            window: 2m
+          annotations:
+            summary: "SLO probes missing - shop availability is UNKNOWN"
+            description: >-
+              No probe_success samples for {{ $labels.probe }} (slo=belleshop-availability)
+              over the last 2m (for 2m). Multi-window SLO burn rules evaluate to empty when
+              probe series vanish, blinding availability paging (Drill 5 postmortem). Check
+              kubectl get nodes first, then blackbox-exporter pods and Probe CRs. See
+              docs/runbooks/belleshop-slo.md.
+            runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/belleshop-slo.md
+            dashboard_url: https://grafana.apps.home.arpa/d/belleshop-slo
 
     - name: belleshop-slo.latency
       rules:

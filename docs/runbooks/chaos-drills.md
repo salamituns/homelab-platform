@@ -410,16 +410,24 @@ qm status 107
 
 **Watch (Master + Grafana):**
 
+> **Triage rule #1 (from the Drill 5 postmortem): always check `kubectl get nodes` (`Ready` vs `Unknown` / `NotReady`) FIRST.**
+> A pod whose `.status.phase` is `Running` on a `NotReady` / `Ready=Unknown` node is **stale**: `Running` is the last cached report from the dead kubelet, and stays `Running` for the entire 300 s `node.kubernetes.io/unreachable` toleration window (`podsNotRunning=0` during the live Drill 5 run while `workernode1` was powered off). Always check `kubectl get nodes` first and cross-reference the `NODE` column in `kubectl get pods -o wide`.
+
 ```sh
+# 1. Always check node Ready/Unknown status FIRST:
 sudo -n kubectl --kubeconfig /etc/kubernetes/admin.conf get nodes -w
-sudo -n kubectl --kubeconfig /etc/kubernetes/admin.conf get pods -A --field-selector spec.nodeName=workernode1
+# 2. Cross-check pods on workernode1 (note: STATUS=Running on an Unknown node is stale for 300s!):
+sudo -n kubectl --kubeconfig /etc/kubernetes/admin.conf get pods -A -o wide --field-selector spec.nodeName=workernode1
 sudo -n kubectl --kubeconfig /etc/kubernetes/admin.conf -n monitoring get pod -l app.kubernetes.io/name=alertmanager -o wide
-sudo -n kubectl --kubeconfig /etc/kubernetes/admin.conf -n dev get pod mysql-0
+sudo -n kubectl --kubeconfig /etc/kubernetes/admin.conf -n dev get pod mysql-0 -o wide
 sudo -n kubectl --kubeconfig /etc/kubernetes/admin.conf describe node workernode2 | sed -n '/Allocated resources/,+12p'
 ```
 
 In Grafana: `HomelabKubeNodeNotReadyFast`, node-exporter `up` for 107,
-`BelleShopAvailabilityBurnFast`, workernode2 memory. Inbox will be silent.
+`BelleShopAvailabilityBurnFast`, `BelleShopSloProbeAbsent` (added in Drill 5
+follow-up B along with 2 `blackbox-exporter` replicas spread across workers so
+SLO probes keep scraping `workernode2`'s replica when `workernode1` dies), and
+workernode2 memory. Inbox will be silent while Alertmanager is on `workernode1`.
 
 **Recovery:**
 

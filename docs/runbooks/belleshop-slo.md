@@ -28,23 +28,57 @@ on `workernode1` is still an owner SSH check ([`logs.md`](logs.md)).
 | `BelleShopAvailabilityBurnFast` | critical (page) | 14.4× budget on **1h AND 5m** (~7.2% failed probes). A 2-minute blip does not page; ~5 minutes of total failure does. | Probe series, Gateway, backend Rollout |
 | `BelleShopAvailabilityBurnMedium` | critical (page) | 6× on **6h AND 30m** | Same; this is a slower burn that still pages |
 | `BelleShopAvailabilityBurnSlow` | warning (ticket) | 1× on **3d AND 6h** | Trend, not an outage |
+| `BelleShopSloProbeAbsent` | critical (page) | `absent_over_time(probe_success{job="blackbox",slo="belleshop-availability",probe="shop-home\|shop-api"}[2m])` **`for: 2m`** (`"SLO probes missing - shop availability is UNKNOWN"`) | `kubectl get nodes` first, then `blackbox-exporter` pods & `Probe` CRs |
 | `BelleShopLatencyBurnFast` | **warning only** | 14.4× on 1h AND 5m against the 99% latency SLI (500 ms home / 300 ms healthz) | Promote to page only after 24 h of `probe_duration_seconds` (owner decision 1) |
 
 `api-belleshop.apps.home.arpa` failing while the two SLO probes are green is a
 debug signal, not a page.
 
-## First checks (availability page)
+### Why `BelleShopSloProbeAbsent` exists (Drill 5 postmortem)
 
-1. Grafana dashboard `belleshop-slo`: which probe is `probe_success=0`.
-2. From a machine that trusts the lab root:
+When `probe_success` series disappear completely (for example, if `blackbox-exporter`
+is unreachable or a `Probe` CR is deleted), `avg_over_time(probe_success[...])`
+produces an empty vector rather than `0`, so `BelleShopAvailabilityBurnFast` and
+`BelleShopAvailabilityBurnMedium` cannot fire. `BelleShopSloProbeAbsent` pages
+when either `shop-home` or `shop-api` has produced **zero samples over a 2-minute
+range (`[2m]`) continuously `for: 2m`** (~4 minutes / 16 consecutive missed 15s
+scrapes).
+
+Why a normal `blackbox-exporter` restart or rollout does not page:
+- `blackbox-exporter` runs **`replicaCount: 2`** with required `podAntiAffinity` on
+  `kubernetes.io/hostname` (one pod on `workernode1`, one on `workernode2`) and
+  `RollingUpdate` `maxSurge: 0, maxUnavailable: 1`. Prometheus scrapes
+  `Service/blackbox-exporter:9115` once per target per 15s (never per pod, so
+  metrics do not double), and the surviving replica serves `/probe` throughout a
+  rollout or single-node outage.
+- Even if a single pod restarted in-place, `absent_over_time(...[2m])` stays empty
+  as long as **any single 15s scrape** succeeded in the preceding 2 minutes, and
+  `for: 2m` requires another 2 full minutes of total absence before firing.
+
+## First checks (availability or probe-absent page)
+
+1. **Check node readiness FIRST:**
+   `kubectl get nodes -o wide`
+   **Do not trust `STATUS=Running` on an `Unknown` / `NotReady` node.** During an
+   un-drained node loss (Drill 5), `kubectl get pods` continues to show pods on the
+   dead node as `Running` for up to 300s (`node.kubernetes.io/unreachable`
+   `tolerationSeconds: 300`) because `Running` is the last cached kubelet report,
+   not live health. Always verify that the node hosting `mysql-0`, `backend`, or
+   `blackbox-exporter` is `Ready`.
+2. Grafana dashboard `belleshop-slo`: check whether `probe_success` is `0` (probe
+   failing) or **missing/no data** (`BelleShopSloProbeAbsent`).
+3. From a machine that trusts the lab root:
    `curl -q --cacert ansible/files/ca/lab-root.crt -o /dev/null -w '%{http_code}\n' https://belleshop.apps.home.arpa/api/healthz`
-3. `kubectl -n nginx-gateway get pods,ep -o wide` — data-plane endpoint must stay
+4. `kubectl -n nginx-gateway get pods,ep -o wide` — data-plane endpoint must stay
    `*:443` (post-DNAT dest for blackbox).
-4. `kubectl -n monitoring get pods -l app.kubernetes.io/name=prometheus-blackbox-exporter`
-   and `kubectl -n monitoring describe probe`.
-5. `kubectl -n dev get rollout backend` — Ready replicas. The API is an Argo
-   **Rollout**, not a Deployment.
-6. Logs: Grafana Explore Loki `{namespace="dev"}`.
+5. `kubectl -n monitoring get pods -l app.kubernetes.io/name=prometheus-blackbox-exporter -o wide`
+   and `kubectl -n monitoring describe probe` — confirm both `blackbox-exporter`
+   replicas are `Running` on `Ready` worker nodes and `Endpoints/blackbox-exporter`
+   lists `:9115`.
+6. `kubectl -n dev get rollout backend` and `kubectl -n dev get pod mysql-0 -o wide`
+   — verify Ready replicas and that their assigned node is `Ready`. The API is an
+   Argo **Rollout**, not a Deployment.
+7. Logs: Grafana Explore Loki `{namespace="dev"}`.
 
 A blackhole here is often the NetworkPolicy: blackbox must egress to
 `homelab-gateway-nginx:443` (pod IP), not only to `192.168.1.240/32`.
