@@ -189,6 +189,31 @@ API-server events come from exempted namespaces, so 0 of them would have reached
 Alertmanager; the one real event (the dev shell proof) still emails. Roughly 60
 emails/day to about 1/day for the same activity.
 
+### Lynis nightly audit (6 Nov 2026)
+
+Lynis 3.0.9-1 is on master, workernode1, and workernode2 from the 24 Jan 2026 base
+image. No Ansible role manages it. systemd `lynis.timer` runs
+`lynis audit system --cronjob` ~00:00–00:20 CST; Falco Warning-paged it every
+night (6 events at 06:04Z on workernode1: Clear Log Activities ×2, Read sensitive
+file untrusted ×4).
+
+Two overrides in `homelab-exemptions.yaml`:
+- `allowed_clear_log_files` (`condition: replace`): host, `proc.name = lynis`,
+  `proc.pname = systemd`, exact cron cmdline, and
+  `fd.name` in `/var/log/lynis.log` / `/var/log/lynis-report.dat` only.
+- `user_read_sensitive_file_conditions` (`condition: append`): host,
+  `proc.pname = lynis`, same parent cmdline, ancestors systemd or lynis then
+  systemd. Append keeps the upstream `cmp_cp_by_passwd` content.
+
+Match is **how it was launched**, not `proc.name = lynis` alone. Still alerts:
+anything else reading `/etc/shadow` (or those PAM files), and lynis run by hand
+from a shell (parent would be bash/sudo). Lynis itself is unmanaged drift —
+open item: manage in Ansible or remove.
+
+`falco --validate` was **not** run here (no Docker on the Mac). Reviewer: render
+is at `~/falco-lynis-rendered.yaml`; keep using the docker `-V` steps above
+against the live `falco_rules.yaml` before merge.
+
 ---
 
 ## 6. Undo
