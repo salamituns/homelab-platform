@@ -22,6 +22,9 @@ pve_backup_storage: pbs-store1
 pve_backup_job_id: daily-all
 pve_backup_schedule: "*-*-* 01:30:00"
 pve_backup_mode: snapshot
+# Snapshot copy-before-write stalls guests while PBS is on the same RAID as VM disks.
+# Fleecing parks dirty blocks on local-lvm for the job, then removes the image.
+pve_backup_fleecing_storage: local-lvm
 pve_backup_notes_template: "{{ '{{guestname}}' }}"
 pve_backup_exclude_vmids:
   - 101
