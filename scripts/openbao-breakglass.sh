@@ -502,10 +502,6 @@ alertmanager_prompt_and_extend() {   # $1 payload-so-far -> full payload on stdo
   unset p
 }
 
-# Prompts for the Gitea OAuth2 app credentials locally (both hidden: the client id is not
-# secret, but typing it blind avoids shoulder-surfing and keeps the flow uniform) and
-# extends the payload. Same stderr rule as alertmanager_prompt_and_extend: this runs inside
-# $( ), so stdout must carry ONLY the payload JSON.
 # Hidden prompt for the healthchecks.io ping URL. Prefix-checked here so a bad value
 # never reaches OpenBao. Stdout is ONLY the payload JSON (this runs inside $( )).
 watchdog_prompt_and_extend() {  # $1 payload-so-far -> full payload on stdout
@@ -527,6 +523,10 @@ watchdog_prompt_and_extend() {  # $1 payload-so-far -> full payload on stdout
   unset url WATCHDOG_URL
 }
 
+# Prompts for the Gitea OAuth2 app credentials locally (both hidden: the client id is not
+# secret, but typing it blind avoids shoulder-surfing and keeps the flow uniform) and
+# extends the payload. Same stderr rule as alertmanager_prompt_and_extend: this runs inside
+# $( ), so stdout must carry ONLY the payload JSON.
 oidc_prompt_and_extend() {   # $1 payload-so-far, $2 consumer -> full payload on stdout
   local payload="$1" consumer="$2" cid csec overwrite=false
   [[ "$OVERWRITE" == true ]] && overwrite=true

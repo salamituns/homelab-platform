@@ -249,7 +249,7 @@ Wait until `SecretSynced`. Confirm AM config has receiver `deadman` (do not
 print the URL):
 
 ```bash
-ssh Master 'sudo -n kubectl --kubeconfig /etc/kubernetes/admin.conf -n monitoring exec alertmanager-prometheus-stack-kube-prom-alertmanager-0 -c alertmanager -- amtool config show' | grep -E 'deadman|hc-ping' | sed 's|https://[^ ]*|https://<redacted>|'
+ssh Master 'sudo -n kubectl --kubeconfig /etc/kubernetes/admin.conf -n monitoring exec alertmanager-prometheus-stack-kube-prom-alertmanager-0 -c alertmanager -- amtool config show --alertmanager.url=http://localhost:9093' | grep -E 'deadman|hc-ping' | sed 's|https://[^ ]*|https://<redacted>|'
 ```
 
 (d) In the healthchecks.io UI, confirm the check is receiving pings (status up).
