@@ -210,9 +210,19 @@ anything else reading `/etc/shadow` (or those PAM files), and lynis run by hand
 from a shell (parent would be bash/sudo). Lynis itself is unmanaged drift —
 open item: manage in Ansible or remove.
 
-`falco --validate` was **not** run here (no Docker on the Mac). Reviewer: render
-is at `~/falco-lynis-rendered.yaml`; keep using the docker `-V` steps above
-against the live `falco_rules.yaml` before merge.
+Validated 6 Nov 2026 without Docker, using the falco binary already in a pod
+(read-only; the rendered file goes over stdin, nothing is written):
+
+```bash
+ssh Master 'sudo -n kubectl -n falco exec -i <falco-pod> -c falco -- falco -V /etc/falco/falco_rules.yaml -V /dev/stdin' < homelab-exemptions.yaml
+```
+
+Both files `successful: true`; the same file with a deliberately broken condition
+fails with `LOAD_ERR_COMPILE_CONDITION`. `proc.pcmdline` is not printed in the
+alert output, so its exact value is inferred (a forked subshell keeps lynis' argv).
+If it ever does not match, the exception simply does not apply and the alerts
+keep coming: noisy, never blind. Proof is the next nightly run: no Lynis events
+in `kubectl -n falco logs -l app.kubernetes.io/name=falco -c falco` after ~00:20 CST.
 
 ---
 

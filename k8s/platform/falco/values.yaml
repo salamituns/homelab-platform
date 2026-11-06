@@ -66,8 +66,9 @@ customRules:
     # 0.45 override syntax (the first macro was validated for real: falco -V with the
     # exact live falco_rules.yaml of 2026-11-03 plus that override reports Ok; the same
     # setup with a deliberately broken condition fails with LOAD_ERR_COMPILE_CONDITION,
-    # so the check is not vacuous). The Lynis macros below were NOT falco -V'd here
-    # (no Docker on the Mac); see docs/runbooks/falco-alerts.md.
+    # so the check is not vacuous). The Lynis macros below were validated the same way
+    # on 2026-11-06 with the live falco 0.45.2 binary (falco -V falco_rules.yaml plus
+    # this file: Ok; a broken aname condition: LOAD_ERR_COMPILE_CONDITION).
     - macro: user_known_contact_k8s_api_server_activities
       condition: (k8s.ns.name in ("argocd", "argo-rollouts", "cert-manager", "external-secrets", "falco", "kube-flannel", "kube-network-policies", "kube-system", "kyverno", "local-path-storage", "metallb-system", "monitoring", "nginx-gateway"))
       override:
