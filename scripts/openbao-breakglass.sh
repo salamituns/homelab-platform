@@ -12,14 +12,16 @@
 # and decodes client-side (unpadded-base64 XOR with the OTP, the same math the CLI does).
 #
 # The mint runs ON sectools; the root token never reaches the Mac or any terminal output.
-# Unseal shares, the SMTP app password and the OIDC client credentials are read with
-# `read -rs` locally and travel to sectools over ssh stdin (never argv, never echoed).
+# Unseal shares, the SMTP app password, the OIDC client credentials, and the
+# healthchecks.io ping URL are read with `read -rs` locally and travel to sectools
+# over ssh stdin (never argv, never echoed). The ping URL is a SECRET.
 #
 # Usage (owner, from the Mac):
 #   scripts/openbao-breakglass.sh apply-config            # once: playbook + unseal
 #   scripts/openbao-breakglass.sh root-run alertmanager   # the alert setup (§D step 5)
 #   scripts/openbao-breakglass.sh root-run oidc <consumer> # OIDC client secrets (ADR 0016):
 #       #      consumer = grafana | argocd | oauth2-proxy-prometheus | oauth2-proxy-alertmanager
+#   scripts/openbao-breakglass.sh root-run watchdog-url   # PATCH watchdog_url on monitoring/alertmanager
 #   scripts/openbao-breakglass.sh root-run -- <cmd...>    # anything else with the token
 #   everything also accepts --dry-run (and root-run alertmanager/oidc: --overwrite)
 #
@@ -50,6 +52,9 @@
 #   curl -qsS -H "X-Vault-Token: <token>" -X DELETE "$ADDR/v1/secret/metadata/monitoring/alertmanager"
 #   curl -qsS -H "X-Vault-Token: <token>" -X DELETE "$ADDR/v1/auth/kubernetes/role/alertmanager"
 #   curl -qsS -H "X-Vault-Token: <token>" -X DELETE "$ADDR/v1/sys/policies/acl/alertmanager-read"
+#
+# Undo of what `root-run watchdog-url` writes (SMTP keys stay; do not DELETE the whole secret):
+#   GET secret/data/monitoring/alertmanager, drop watchdog_url, POST the remaining keys.
 #
 # Undo of what `root-run oidc <consumer>` writes:
 #   curl -qsS -H "X-Vault-Token: <token>" -X DELETE "$ADDR/v1/secret/metadata/oidc/<consumer>"
@@ -163,6 +168,9 @@ cmd_root_run() {
   if [[ "${args[0]}" == "alertmanager" ]]; then
     mode="alertmanager"
     [[ ${#args[@]} -gt 1 ]] && die "root-run alertmanager takes no extra arguments (flags: --overwrite --dry-run)"
+  elif [[ "${args[0]}" == "watchdog-url" ]]; then
+    mode="watchdog"
+    [[ ${#args[@]} -gt 1 ]] && die "root-run watchdog-url takes no extra arguments (flags: --dry-run)"
   elif [[ "${args[0]}" == "oidc" ]]; then
     mode="oidc"
     [[ ${#args[@]} -eq 2 ]] || die "root-run oidc takes exactly one consumer: grafana|argocd|oauth2-proxy-prometheus|oauth2-proxy-alertmanager"
@@ -213,6 +221,13 @@ cmd_root_run() {
     else
       payload=$(oidc_prompt_and_extend "$payload" "$OIDC_CONSUMER")
     fi
+  elif [[ "$mode" == "watchdog" ]]; then
+    if [[ "$DRY_RUN" == true ]]; then
+      payload=$(jq -cn --argjson p "$payload" \
+        '$p + {watchdog: {url: "<hidden>", nchars: 0}}')
+    else
+      payload=$(watchdog_prompt_and_extend "$payload")
+    fi
   else
     # Shell-quoted so the remote bash -c runs exactly this command; the command is the
     # operator's own text, not a secret, but quoting keeps word boundaries intact.
@@ -243,7 +258,7 @@ set -euo pipefail
 umask 077
 P="${BREAKGLASS_PAYLOAD:?}"
 ADDR=$(jq -r .addr <<<"$P")
-MODE=$(jq -r 'if .cmd then "exec" elif .oidc then "oidc" else "alertmanager" end' <<<"$P")
+MODE=$(jq -r 'if .cmd then "exec" elif .oidc then "oidc" elif .watchdog then "watchdog" else "alertmanager" end' <<<"$P")
 
 echo "    [remote] health check"
 curl -q -s "$ADDR/v1/sys/health" | jq -e '.initialized and (.sealed | not)' >/dev/null \
@@ -375,6 +390,27 @@ HCL
     | jq -e --argjson exp "$EXPECTED" '.data.data | keys | sort == $exp' >/dev/null \
     || { echo "ERROR: unexpected keys in secret/$KV" >&2; exit 1; }
   echo "    [remote] oidc setup complete ($CONSUMER)"
+elif [[ "$MODE" == "watchdog" ]]; then
+  # PATCH only watchdog_url on the existing SMTP secret. Never rewrite username/password/from/to.
+  KV=monitoring/alertmanager
+  echo "    [remote] reading existing secret/$KV (SMTP fields must already exist)"
+  HTTP=$(curl -q -s --config "$CFG" -o "$CFG.body" -w '%{http_code}' "$ADDR/v1/secret/data/$KV")
+  [[ "$HTTP" == "200" ]] || { echo "ERROR: secret/$KV missing (HTTP $HTTP) - run root-run alertmanager first" >&2; rm -f "$CFG.body"; exit 1; }
+  EXISTING=$(jq -c '.data.data' "$CFG.body")
+  rm -f "$CFG.body"
+  echo "$EXISTING" | jq -e 'has("username") and has("password") and has("from") and has("to")' >/dev/null \
+    || { echo "ERROR: secret/$KV is missing SMTP keys; refusing to patch" >&2; exit 1; }
+  NCHARS=$(jq -r '.watchdog.nchars' <<<"$P")
+  CODE=$(jq -c --argjson ex "$EXISTING" '{data: ($ex + {watchdog_url: .watchdog.url})}' <<<"$P" \
+    | curl -q -s --config "$CFG" -o /dev/null -w '%{http_code}' -X POST --data-binary @- "$ADDR/v1/secret/data/$KV")
+  [[ "$CODE" == "200" || "$CODE" == "204" ]] \
+    || { echo "ERROR: patching secret/$KV watchdog_url failed (HTTP $CODE)" >&2; exit 1; }
+  curl -q -s --config "$CFG" "$ADDR/v1/secret/data/$KV" \
+    | jq -e --argjson n "$NCHARS" \
+      '(.data.data | has("watchdog_url") and has("username") and has("password") and has("from") and has("to"))
+       and ((.data.data.watchdog_url | length) == $n)' >/dev/null \
+    || { echo "ERROR: watchdog_url missing or length mismatch after write" >&2; exit 1; }
+  echo "    [remote] stored ($NCHARS chars)"
 else
   # ---- the alertmanager setup (same calls and payloads as the falco PR #33 script) ----
   KV=monitoring/alertmanager
@@ -414,8 +450,11 @@ HCL
   fi
 
   echo "    [remote] verifying the secret key set (values never printed)"
+  # SMTP keys required. watchdog_url may already have been PATCHed by root-run watchdog-url.
   curl -q -s --config "$CFG" "$ADDR/v1/secret/data/$KV" \
-    | jq -e '.data.data | keys | sort == ["from","password","to","username"]' >/dev/null \
+    | jq -e '.data.data
+        | (has("from") and has("password") and has("to") and has("username"))
+        and ((keys - ["from","password","to","username","watchdog_url"]) | length == 0)' >/dev/null \
     || { echo "ERROR: unexpected keys in secret/$KV" >&2; exit 1; }
   echo "    [remote] alertmanager setup complete"
 fi
@@ -461,6 +500,27 @@ alertmanager_prompt_and_extend() {   # $1 payload-so-far -> full payload on stdo
     jq -cn --argjson p "$payload" --argjson overwrite "$overwrite" \
     '$p + {smtp: {username: env.SMTP_USERNAME, from: env.SMTP_FROM, to: env.SMTP_TO, password: env.SMTP_PASSWORD}, overwrite: $overwrite}'
   unset p
+}
+
+# Hidden prompt for the healthchecks.io ping URL. Prefix-checked here so a bad value
+# never reaches OpenBao. Stdout is ONLY the payload JSON (this runs inside $( )).
+watchdog_prompt_and_extend() {  # $1 payload-so-far -> full payload on stdout
+  local payload="$1" url
+  echo "==> healthchecks.io ping URL (never printed; never argv)" >&2
+  if [[ -t 0 ]]; then
+    read -rs -p "    URL (hidden): " url
+    echo >&2
+  else
+    IFS= read -r url
+  fi
+  [[ -n "$url" ]] || die "watchdog URL must not be empty"
+  [[ "$url" == https://hc-ping.com/* ]] \
+    || die "watchdog URL must start with https://hc-ping.com/ (nothing stored)"
+  local nchars=${#url}
+  WATCHDOG_URL="$url" \
+    jq -cn --argjson p "$payload" --argjson n "$nchars" \
+      '$p + {watchdog: {url: env.WATCHDOG_URL, nchars: $n}}'
+  unset url WATCHDOG_URL
 }
 
 # Prompts for the Gitea OAuth2 app credentials locally (both hidden: the client id is not

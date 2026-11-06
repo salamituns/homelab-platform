@@ -76,11 +76,12 @@ Live check after the drill (2026-11-05 ~16:52 CST): all three nodes Ready; all p
 
 Owner decides; not implemented in this PR.
 
-- [ ] Alerting co-located with the failure: either Alertmanager **2 replicas + anti-affinity** (needs
-      storage that is not a single local-path PVC on wn1) **or** an external dead-man's-switch
-      (Watchdog → off-cluster receiver). Placement was deliberately left as-is for this drill.
-- [ ] Blackbox on one worker blinds SLO alerts. Options: `absent()` / `absent_over_time` on
-      `probe_success`, or blackbox replicas spread across nodes.
+- [x] Alerting co-located with the failure: Alertmanager **2 replicas + anti-affinity**
+      (`fu-alertmanager-ha`) **and** an external dead-man's-switch (Watchdog →
+      healthchecks.io, `fu-deadman-switch`). HA email still dies if both workers or
+      tuns/WAN die; the heartbeat is what pages then.
+- [x] Blackbox on one worker blinds SLO alerts. Options: `absent()` / `absent_over_time` on
+      `probe_success`, or blackbox replicas spread across nodes. (Both shipped.)
 - [ ] Runbook: check **node Ready first**; do not trust `Running` on an unreachable node. Point
       [chaos-drills.md](../runbooks/chaos-drills.md) Drill 5 watch steps at `kubectl get nodes`.
 - [ ] Prometheus/Grafana BestEffort (no memory limits) eviction risk on workernode2 if a node-loss

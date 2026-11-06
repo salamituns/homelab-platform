@@ -4,7 +4,7 @@
 - Date: 2026-11-04
 - Owner: owner
 - Last reviewed: 5 Nov 2026
-- Next review: after remaining drill-5 follow-ups (blackbox `absent()`, BestEffort limits on other platform pods), or if a pre-drill alert PR changes detection
+- Next review: after remaining drill-5 follow-ups (BestEffort limits on other platform pods), or if a pre-drill alert PR changes detection
 
 ## Revision history
 
@@ -13,6 +13,7 @@
 | A | 4 Nov 2026 | Initial proposal from live cluster and hypervisor facts |
 | B | 5 Nov 2026 | Drill 5 ran: Fast alert at 2 m, no email, no stampede; see postmortem |
 | C | 5 Nov 2026 | Follow-up: Alertmanager replicas=2 + hard anti-affinity; Prom/Grafana memory requests |
+| D | 5 Nov 2026 | Follow-up: Watchdog → healthchecks.io dead-man's switch (`watchdog_url` in OpenBao) |
 
 ## Scope
 
@@ -445,5 +446,8 @@ must-not list checked, follow-up PRs.
 
 - **Alertmanager HA + Prom/Grafana requests** (`fu-alertmanager-ha`): two AM replicas
   with hard hostname anti-affinity so email survives one worker; Prometheus and Grafana
-  get memory/CPU **requests** (no Prometheus memory **limit**). External Watchdog
-  heartbeat is an owner account, not this PR. See `docs/runbooks/monitoring.md`.
+  get memory/CPU **requests** (no Prometheus memory **limit**).
+- **Dead-man's switch** (`fu-deadman-switch`): Watchdog → healthchecks.io webhook
+  (`watchdog_url` in OpenBao, never git). Catches tuns/WAN/Prometheus/both-AM silence;
+  does not catch Gmail-only failure. Owner writes the URL **before** merging the
+  ExternalSecret. See `docs/runbooks/monitoring.md`.

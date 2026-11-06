@@ -150,9 +150,10 @@ spec:
         - { protocol: TCP, port: 7946 }
         - { protocol: TCP, port: 9115 }   # Prometheus Probe scrape of blackbox :9115
 ---
-# Alertmanager -> the gmail SMTP relay (ADR 0015 D): smtp.gmail.com:465. A policy cannot
-# name hosts, so this is the public internet minus the private ranges - deliberately NOT
-# 0.0.0.0/0-without-exceptions, which would let alertmanager reach the whole LAN.
+# Alertmanager -> smtp.gmail.com:465 (ADR 0015 D) and healthchecks.io :443 (Watchdog
+# dead-man's switch). A policy cannot name hosts, so this is the public internet minus
+# the private ranges - deliberately NOT 0.0.0.0/0-without-exceptions, which would let
+# alertmanager reach the whole LAN.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -173,6 +174,7 @@ spec:
               - 192.168.0.0/16
       ports:
         - { protocol: TCP, port: 465 }
+        - { protocol: TCP, port: 443 }
 ---
 # Grafana OIDC egress (ADR 0016 decision 11): the generic_oauth token + userinfo calls from
 # the grafana pods to the Gitea instance at 192.168.1.97:443. Live evidence 2026-11-03: grafana
