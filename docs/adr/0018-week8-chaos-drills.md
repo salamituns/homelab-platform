@@ -13,7 +13,7 @@
 | A | 4 Nov 2026 | Initial proposal from live cluster and hypervisor facts |
 | B | 5 Nov 2026 | Drill 5 ran: Fast alert at 2 m, no email, no stampede; see postmortem |
 | C | 5 Nov 2026 | Follow-up: Alertmanager replicas=2 + hard anti-affinity; Prom/Grafana memory requests |
-| D | 5 Nov 2026 | Follow-up: Watchdog → healthchecks.io dead-man's switch (`watchdog_url` in OpenBao) |
+| D | 5 Nov 2026 | Follow-up: Watchdog → healthchecks.io dead-man's switch (`watchdog_url` in OpenBao) — proven 5 Nov (silence drill) |
 
 ## Scope
 
@@ -450,4 +450,6 @@ must-not list checked, follow-up PRs.
 - **Dead-man's switch** (`fu-deadman-switch`): Watchdog → healthchecks.io webhook
   (`watchdog_url` in OpenBao, never git). Catches tuns/WAN/Prometheus/both-AM silence;
   does not catch Gmail-only failure. Owner writes the URL **before** merging the
-  ExternalSecret. See `docs/runbooks/monitoring.md`.
+  ExternalSecret. See `docs/runbooks/monitoring.md`. Proven: ~10 min detection
+  (period 5 + grace 5) on the 5 Nov silence drill; DOWN then UP emails. Details in
+  the [monitoring runbook](../runbooks/monitoring.md) dead-man's switch section.
