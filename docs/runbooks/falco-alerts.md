@@ -210,6 +210,14 @@ anything else reading `/etc/shadow` (or those PAM files), and lynis run by hand
 from a shell (parent would be bash/sudo). Lynis itself is unmanaged drift —
 open item: manage in Ansible or remove.
 
+Hardening (6 Nov, after last night's workernode2 events): the interpreter is
+pinned to `/usr/bin/dash` (`proc.exepath` / `proc.pexepath` / `proc.aexepath[2]`)
+and the system manager to **PID 1** (`proc.ppid` / `proc.apid[N]`). Names and
+cmdlines are user-settable; `proc.aname = systemd` also matches `systemd --user`.
+Dash alone is weak (any sh script). Proof is still: **no Lynis events after the
+next nightly run**, and the override must not break — if Lynis alerts return,
+check `proc.ppid`/`proc.apid` first.
+
 Validated 6 Nov 2026 without Docker, using the falco binary already in a pod
 (read-only; the rendered file goes over stdin, nothing is written):
 
