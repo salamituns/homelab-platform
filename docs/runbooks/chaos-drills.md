@@ -373,7 +373,8 @@ Last 107 backup: **`pbs-store1:backup/vm/107/2026-11-05T07:33:19Z`** (UTC) =
 
 A drill that restarts a VM drops its dirty bitmap; that VM's next nightly backup
 is full (6 Nov: 80 GiB, 9 min). Expect a longer backup window; fleecing (since
-6 Nov) keeps it from stalling the guest.
+6 Nov) should keep it from stalling the guest (unproven until the next full backup;
+see [backups §6](backups.md#6-fleecing-6-nov-2026)).
 
 QEMU guest agent is on (`agent=1`). Disk 80 G, 2 vCPU, 4 G RAM. Snapshot parent
 `before-ansible-hardening` (2026-01-24) is **not** the restore point; PBS is.

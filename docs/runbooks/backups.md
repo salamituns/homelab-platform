@@ -162,5 +162,6 @@ decision.
 On tuns, from a vzdump task log:
 
 ```sh
-grep -E "fleecing|dirty-bitmap|transferred" <task log>
+f=$(ls -t /var/log/pve/tasks/*/*vzdump* | head -1)   # newest vzdump task
+grep -E "archive|fleecing|dirty-bitmap|transferred" "$f"
 ```
