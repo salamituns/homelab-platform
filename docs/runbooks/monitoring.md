@@ -188,7 +188,7 @@ sudo -n kubectl --kubeconfig /etc/kubernetes/admin.conf -n monitoring get pvc \
   -l app.kubernetes.io/name=alertmanager
 ```
 
-Send a test critical alert (Watchdog is severity none / null receiver — use a
+Send a test critical alert (Watchdog is severity none / `deadman` webhook — use a
 throwaway `AlertmanagerConfig` or `amtool alert add` only if you accept a real
 email). **Exactly one** email, not two. If two arrive, gossip is split (check
 the 9094 NetworkPolicy and `--cluster.listen-address` on both pods).
@@ -202,20 +202,63 @@ limit on Prometheus** — compaction / WAL replay can spike RSS; a limit OOM-kil
 the detector. workernode2 was 1460 Mi / 38% requests and 2712 Mi / 71% usage;
 adding ~1736 Mi of requests still fits under 3816 Mi allocatable (~84%).
 
-### Dead-man's switch (owner decision — not built)
+### Dead-man's switch (Watchdog → healthchecks.io)
 
-Watchdog already fires in-cluster and is routed to the null receiver. An
-external heartbeat (healthchecks.io, Dead Man's Snitch) is the way to page
-when **this** cluster, including both Alertmanager replicas, is silent.
+Watchdog fires continuously in Prometheus. Alertmanager routes it to receiver
+`deadman`, which POSTs to the healthchecks.io ping URL stored as OpenBao
+`secret/monitoring/alertmanager` property `watchdog_url` (never in git). Period
+5 min + grace 5 min on the check; AM `repeat_interval: 1m` so pings land well
+inside that window.
 
-1. Create a check at the external service (account + ping URL). Do not put
-   the URL in git; store it in OpenBao next to the other Alertmanager SMTP
-   secrets.
-2. Add an Alertmanager receiver that POSTs to that URL on Watchdog (repeat
-   interval shorter than the check's grace).
-3. Route `alertname=Watchdog` there instead of (or as well as) null.
-4. Prove: pause Alertmanager or drop egress, and the external service pages
-   **you**. Do not enable this until the owner has that account.
+**Catches:** tuns power loss, WAN down, Prometheus down, both Alertmanager
+replicas down, or AM egress blocked — the check stops receiving pings and pages
+the owner.
 
-Email HA (two AM replicas) is not a substitute: a lab-wide outage still
-cannot phone home.
+**Does not catch:** Gmail-only failure (SMTP :465). Watchdog still pings :443, so
+healthchecks stays up while email is silent. That is a different failure; prove
+SMTP with a test critical alert.
+
+Gossip notification-log dedup: two AM replicas send **~1 ping per interval**, not
+two. One replica alone still pings (HA email is complementary, not a substitute).
+
+**Rollout order (required).** ESO needs every listed property to render the
+Secret. If `watchdog_url` is missing, the next sync is `SecretSyncedError` and
+the **last-good Secret is kept** (email still works, Watchdog still on `null`
+until a successful sync). Do not merge the ExternalSecret until the URL is
+stored.
+
+Owner steps:
+
+(a) Store the ping URL (hidden prompt, prefix `https://hc-ping.com/` required):
+
+```bash
+scripts/openbao-breakglass.sh root-run watchdog-url
+# prints only: stored (N chars)
+```
+
+(b) Merge this PR so Argo CD applies the ExternalSecret, NetworkPolicy :443, and
+route tree.
+
+(c) Force-sync ESO (hourly refresh otherwise):
+
+```bash
+ssh Master 'sudo -n kubectl --kubeconfig /etc/kubernetes/admin.conf -n monitoring annotate externalsecret alertmanager-config-eso force-sync=$(date +%s) --overwrite'
+```
+
+Wait until `SecretSynced`. Confirm AM config has receiver `deadman` (do not
+print the URL):
+
+```bash
+ssh Master 'sudo -n kubectl --kubeconfig /etc/kubernetes/admin.conf -n monitoring exec alertmanager-prometheus-stack-kube-prom-alertmanager-0 -c alertmanager -- amtool config show' | grep -E 'deadman|hc-ping' | sed 's|https://[^ ]*|https://<redacted>|'
+```
+
+(d) In the healthchecks.io UI, confirm the check is receiving pings (status up).
+
+(e) **Drill (silence, do not stop AM):** in the Alertmanager UI, silence
+`alertname=Watchdog` for 15 minutes. The check should go **down** and page.
+Expire the silence; the next Watchdog cycle should mark it **up**. If the
+silence does not stop pings, AM is still notifying — check the silence
+matchers.
+
+Undo: PATCH the KV to drop `watchdog_url` only (never DELETE the whole secret —
+that would drop SMTP). Then revert the ExternalSecret route to `null`.

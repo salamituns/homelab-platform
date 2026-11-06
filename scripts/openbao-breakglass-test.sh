@@ -8,8 +8,8 @@
 #   2. SIGHUP does NOT reload the listener flag (why apply-config restarts);
 #   3. flag false opens the endpoints after a restart, and the legacy endpoint the bao
 #      CLI uses stays gated regardless (why the script speaks the new API);
-#   4. --dry-run of every subcommand (apply-config, root-run alertmanager, root-run oidc)
-#      contacts nothing and prompts for nothing;
+#   4. --dry-run of every subcommand (apply-config, root-run alertmanager, root-run oidc,
+#      root-run watchdog-url) contacts nothing and prompts for nothing;
 #   5. the full root-run alertmanager flow through the LOCAL shell override
 #      (BREAKGLASS_SSH="bash -c"): hidden-share prompts fed over stdin, the root token
 #      minted/decoded/used/revoked, the alertmanager policy, role and secret written,
@@ -21,6 +21,8 @@
 #   9. root-run oidc oauth2-proxy-prometheus: the 32-byte cookie secret is generated ON
 #      the "remote" side (it is never in the payload from the Mac) - proven by the key set;
 #   10. the root-run -- <cmd> passthrough works with BAO_TOKEN set;
+#   10b. root-run watchdog-url PATCHes only watchdog_url (SMTP keys kept), prints stored (N chars),
+#       never prints the URL; a bad prefix is rejected before minting;
 #   11. the written objects have the right shape (keys only, never values).
 #
 # Nothing touches sectools: the "remote" side runs on this Mac via BREAKGLASS_SSH.
@@ -125,6 +127,16 @@ feed_oidc() {   # writes the 2 hidden shares + the 2 hidden oidc prompts (throwa
   echo "$f"
 }
 
+# Prefix-valid throwaway ping URL for the local harness only. Not a real check.
+WATCHDOG_THROW='https://hc-ping.com/00000000-0000-0000-0000-000000000000'
+
+feed_watchdog() {  # 2 hidden shares + the ping URL (stdin, never argv)
+  local f; f=$(mktemp "$TD/answers.XXXXXX")
+  jq -r '.unseal_keys_b64[0,1]' "$TD/init.json" >"$f"
+  printf '%s\n' "$WATCHDOG_THROW" >>"$f"
+  echo "$f"
+}
+
 echo "== 1. flag TRUE (the production state before this change) blocks generate-root"
 start_server true
 bao operator init -key-shares=3 -key-threshold=2 -format=json >"$TD/init.json" 2>/dev/null
@@ -185,6 +197,12 @@ if grep -q "revocation" "$TD/dry3.out"; then
   ok "root-run oidc --dry-run prints the flow, prompted for nothing"
 else
   bad "root-run oidc --dry-run"; cat "$TD/dry3.out"
+fi
+"$SCRIPT" root-run --dry-run watchdog-url >"$TD/dry4.out" 2>&1
+if grep -q "revocation" "$TD/dry4.out"; then
+  ok "root-run watchdog-url --dry-run prints the flow, prompted for nothing"
+else
+  bad "root-run watchdog-url --dry-run"; cat "$TD/dry4.out"
 fi
 
 echo "== 5. root-run alertmanager through the local-shell override (the full flow)"
@@ -267,10 +285,62 @@ else
 fi
 grep -q "revocation verified" "$TD/run3.out" && ok "passthrough run revoked its token"
 
+echo "== 10b. root-run watchdog-url PATCHes only watchdog_url; bad prefix is rejected"
+Fbad=$(feed_shares)
+printf '%s\n' 'https://example.invalid/not-hc-ping' >>"$Fbad"
+if run_flow "$TD/run-wd-bad.out" root-run watchdog-url <"$Fbad"; then
+  bad "bad prefix should have been rejected"
+else
+  ok "bad prefix rejected (nonzero exit)"
+fi
+if grep -q "must start with https://hc-ping.com/" "$TD/run-wd-bad.out"; then
+  ok "bad prefix error names the required prefix"
+else
+  bad "bad prefix error missing"; cat "$TD/run-wd-bad.out"
+fi
+if grep -q "minting the root token" "$TD/run-wd-bad.out"; then
+  bad "bad prefix minted a root token (should die locally first)"
+else
+  ok "bad prefix died before minting"
+fi
+
+Fwd=$(feed_watchdog)
+if run_flow "$TD/run-wd.out" root-run watchdog-url <"$Fwd"; then
+  ok "root-run watchdog-url exited 0"
+else
+  bad "root-run watchdog-url failed"; cat "$TD/run-wd.out"; exit 1
+fi
+grep -q "stored (${#WATCHDOG_THROW} chars)" "$TD/run-wd.out" && ok "prints stored (N chars) only"
+grep -q "revocation verified" "$TD/run-wd.out" && ok "watchdog-url run revoked its token"
+if grep -qF "$WATCHDOG_THROW" "$TD/run-wd.out"; then
+  bad "THE PING URL WAS PRINTED INTO THE OUTPUT"
+else
+  ok "ping URL never printed in the output"
+fi
+# SMTP values must still be the ones written in step 5 (shape+presence, not printing them).
+BAO_TOKEN="$(jq -r .root_token "$TD/init.json")" bao read -format=json secret/data/monitoring/alertmanager \
+  | jq -e '.data.data.username == "alertuser"
+           and (.data.data | has("password") and has("from") and has("to") and has("watchdog_url"))
+           and (.data.data.watchdog_url | startswith("https://hc-ping.com/"))
+           and (.data.data.watchdog_url | length == '"${#WATCHDOG_THROW}"')' >/dev/null \
+  && ok "watchdog_url patched; SMTP username unchanged"
+
+echo "== 10c. root-run alertmanager still skips after watchdog_url exists"
+F7=$(feed_alert)
+if run_flow "$TD/run-am-after-wd.out" root-run alertmanager <"$F7"; then
+  ok "root-run alertmanager after watchdog-url exited 0"
+else
+  bad "alertmanager re-run after watchdog_url failed"; cat "$TD/run-am-after-wd.out"
+fi
+grep -q "already exists" "$TD/run-am-after-wd.out" && ok "alertmanager re-run still skips (does not wipe watchdog_url)"
+BAO_TOKEN="$(jq -r .root_token "$TD/init.json")" bao read -format=json secret/data/monitoring/alertmanager \
+  | jq -e '.data.data | has("watchdog_url")' >/dev/null \
+  && ok "watchdog_url still present after skipped alertmanager write"
+
 echo "== 11. the written objects have the right shape (keys only, never values)"
 BAO_TOKEN="$(jq -r .root_token "$TD/init.json")" bao read -format=json secret/data/monitoring/alertmanager \
-  | jq -e '.data.data | keys | sort == ["from","password","to","username"]' >/dev/null \
-  && ok "secret/data/monitoring/alertmanager has exactly the four expected keys"
+  | jq -e '.data.data | keys | sort == ["from","password","to","username","watchdog_url"]' >/dev/null \
+  && ok "secret/data/monitoring/alertmanager has SMTP keys plus watchdog_url"
 BAO_TOKEN="$(jq -r .root_token "$TD/init.json")" bao read -format=json auth/kubernetes/role/alertmanager \
   | jq -e '.data.bound_service_account_names == ["eso-alertmanager"] and .data.bound_service_account_namespaces == ["monitoring"] and .data.token_policies == ["alertmanager-read"]' >/dev/null \
   && ok "auth/kubernetes/role/alertmanager bound to monitoring/eso-alertmanager with alertmanager-read"

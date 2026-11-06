@@ -27,6 +27,8 @@ Review this list monthly. A credential that is not on this list should not exist
 | SSH key `root@tuns` (`/root/.ssh/id_rsa` on the hypervisor) | Root SSH from the hypervisor. Old key `fZPN...` was authorized on every legacy VM | `tuns` only | Never | Rotated 2026-10-24 (old key exposed, see [postmortem](postmortems/2026-10-24-hypervisor-key-exposure.md)). New key `WcgvLIyj...` must not be authorized on any guest or in Gitea |
 | Ansible Vault `group_vars/all/vault.yml` (legacy, on `tuns`) | Unknown; not reviewed | `tuns:~/ansible` | n/a | Review contents when the legacy project is retired |
 | Gmail app password for PVE SMTP endpoint `gmail` | Sends PVE warning/error notifications to the configured mailbox | Env `PVE_SMTP_PASSWORD` at apply time; on `tuns` in `/etc/pve/priv/notifications.cfg` (root-only pmxcfs) | Until Google rotation | When leaked, when Google revokes app passwords, or yearly |
+| Alertmanager SMTP (`username`, `password`, `from`, `to`) | Send alert emails via `smtp.gmail.com:465` | OpenBao `secret/data/monitoring/alertmanager` → ESO `monitoring/alertmanager-config-eso` | Until Google rotation | `scripts/openbao-breakglass.sh root-run alertmanager --overwrite` |
+| Alertmanager `watchdog_url` (healthchecks.io ping URL) | Dead-man's switch: Watchdog POSTs here so silence of the **cluster** pages the owner. A leak lets an attacker keep the check green while AM is down | OpenBao `secret/data/monitoring/alertmanager` property `watchdog_url` only (never git, never argv) | Until the check is rotated | `scripts/openbao-breakglass.sh root-run watchdog-url`; then rotate the ping UUID in healthchecks.io |
 
 ## Rules
 
