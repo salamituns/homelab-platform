@@ -324,6 +324,10 @@ memory and are ready to `qm start 107` the moment wn2 approaches eviction.
 | Shop | `https://belleshop.apps.home.arpa` | Frontend 200; `/healthz` and `/api/token` fail without MySQL. |
 | Gitea / OpenBao / PBS | VMs **122 / 120 / 123**, not on 107 | Must stay up. Abort if they flap. |
 
+Since #78/#81: Alertmanager runs 2 replicas (one per worker) and Watchdog pings
+healthchecks.io; a drill-5 repeat would page by email and the dead-man's switch
+would stay up (one AM still pings).
+
 Do **not** move Alertmanager off 107 as a pre-drill PR. That is an owner
 decision after the drill (email silence is itself a finding). Recorded here:
 **leave AM on workernode1.**

@@ -221,6 +221,34 @@ SMTP with a test critical alert.
 Gossip notification-log dedup: two AM replicas send **~1 ping per interval**, not
 two. One replica alone still pings (HA email is complementary, not a substitute).
 
+**Proven 5 Nov 2026 (CST).** Owner silenced `alertname="Watchdog"` in the
+Alertmanager UI (AM was not stopped). Check name: `homelab-watchdog`. Times
+below are local CST (UTC-6) = UTC 6 Nov 2026.
+
+| CST (5 Nov) | UTC (6 Nov) | Event | Source |
+|---|---|---|---|
+| 18:39 | 00:39 | Check `new -> up` (first ping after #81 rollout) | healthchecks event log |
+| 19:55 | 01:55 | Ping #52, last ping before silence | healthchecks log |
+| 19:55:41 | 01:55:41 | Silence starts (id 34d58af7, 15 m, comment "dead-man drill") | `amtool silence query --expired` |
+| 20:05:46 | 02:05:46 | Check `up -> down`; DOWN email received ("success signal did not arrive on time, grace time passed") | email + event log |
+| 20:10:41 | 02:10:41 | Silence ends by running out its 15 m (not expired manually) | amtool |
+| 20:11 | 02:11 | Ping #53; check `down -> up`; UP email received ("downtime lasted 5 minutes, 35 seconds") | email + event log |
+
+- Detection = **~10 min after last ping**, matching period 5 min + grace 5 min.
+- Time to a human = ~10 min from lab going silent; recovery mail ~30 s after the
+  silence ended.
+- Ping cadence ~every 1.5 min (healthchecks log alternates 1 and 2 min), well
+  inside the 5 min period. One ping per interval despite 2 AM replicas (dedup held).
+- Letting the silence expire proved AM resumes Watchdog pings on its own
+  (forgotten maintenance silence self-heals).
+- Data note: each ping body is Alertmanager's webhook JSON (~1.9 KB): alert
+  labels, annotations, `externalURL` (internal `*.apps.home.arpa` names). No
+  secrets. healthchecks stores the last body. Accepted: internal non-routable
+  names only. Option if ever unwanted: none in AM webhook (body is fixed);
+  would need a relay.
+- Does **not** prove the Gmail SMTP path (separate; one-email test on 5 Nov via
+  #80).
+
 **Rollout order (required).** ESO needs every listed property to render the
 Secret. If `watchdog_url` is missing, the next sync is `SecretSyncedError` and
 the **last-good Secret is kept** (email still works, Watchdog still on `null`
@@ -252,13 +280,16 @@ print the URL):
 ssh Master 'sudo -n kubectl --kubeconfig /etc/kubernetes/admin.conf -n monitoring exec alertmanager-prometheus-stack-kube-prom-alertmanager-0 -c alertmanager -- amtool config show --alertmanager.url=http://localhost:9093' | grep -E 'deadman|hc-ping' | sed 's|https://[^ ]*|https://<redacted>|'
 ```
 
-(d) In the healthchecks.io UI, confirm the check is receiving pings (status up).
+(d) In the healthchecks.io UI, confirm check `homelab-watchdog` is receiving
+pings (status up). Settings **must** be period **5 min**, grace **5 min**,
+email integration on. Defaults are 1 day / 1 hour and would hide a 14 min gap.
 
 (e) **Drill (silence, do not stop AM):** in the Alertmanager UI, silence
-`alertname=Watchdog` for 15 minutes. The check should go **down** and page.
-Expire the silence; the next Watchdog cycle should mark it **up**. If the
-silence does not stop pings, AM is still notifying — check the silence
-matchers.
+`alertname=Watchdog` **longer than 10 min** (use 15 m). DOWN email ~10 min
+after the last ping (period 5 + grace 5). Then either expire the silence or
+let it run out; UP email on the first ping back. Confirm the gap in the
+healthchecks event log for `homelab-watchdog`. If the silence does not stop
+pings, AM is still notifying — check the silence matchers.
 
 Undo: PATCH the KV to drop `watchdog_url` only (never DELETE the whole secret —
 that would drop SMTP). Then revert the ExternalSecret route to `null`.

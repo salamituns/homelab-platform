@@ -79,7 +79,9 @@ Owner decides; not implemented in this PR.
 - [x] Alerting co-located with the failure: Alertmanager **2 replicas + anti-affinity**
       (`fu-alertmanager-ha`) **and** an external dead-man's-switch (Watchdog →
       healthchecks.io, `fu-deadman-switch`). HA email still dies if both workers or
-      tuns/WAN die; the heartbeat is what pages then.
+      tuns/WAN die; the heartbeat is what pages then. Proven by silence drill 5 Nov
+      20:05 CST: DOWN email ~10 min after last ping, UP on resume (see
+      [monitoring runbook](../runbooks/monitoring.md)).
 - [x] Blackbox on one worker blinds SLO alerts. Options: `absent()` / `absent_over_time` on
       `probe_success`, or blackbox replicas spread across nodes. (Both shipped.)
 - [ ] Runbook: check **node Ready first**; do not trust `Running` on an unreachable node. Point
