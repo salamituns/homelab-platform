@@ -134,6 +134,7 @@ Carried over from Week 6 (kept at the level described in [ADR 0015](docs/adr/001
       it needs MySQL configuration and a restart)
 - [ ] Watch for the kube-network-policies release carrying PR #420 (denied-probe-tail noise,
       ADR 0015 section A)
+- [ ] Lynis on all nodes is unmanaged (base image, Jan 2026); decide: manage in Ansible or remove.
 
 ## Week 7: Observability + SLOs
 - [x] OIDC SSO for the admin UIs with Gitea as the provider ([ADR 0016](docs/adr/0016-oidc-sso-admin-uis-gitea.md)):

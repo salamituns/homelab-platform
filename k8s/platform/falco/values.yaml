@@ -62,14 +62,40 @@ tty: true
 customRules:
   homelab-exemptions.yaml: |-
     # Loaded after falco_rules.yaml (chart customRules land in /etc/falco/rules.d), so
-    # this override applies to the upstream macro. `condition: replace` is the 0.45
-    # override syntax (validated for real: falco -V with the exact live falco_rules.yaml
-    # of 2026-11-03 plus this file reports Ok; the same setup with a deliberately broken
-    # condition fails with LOAD_ERR_COMPILE_CONDITION, so the check is not vacuous).
+    # these overrides apply to the upstream macros. `condition: replace`/`append` is the
+    # 0.45 override syntax (the first macro was validated for real: falco -V with the
+    # exact live falco_rules.yaml of 2026-11-03 plus that override reports Ok; the same
+    # setup with a deliberately broken condition fails with LOAD_ERR_COMPILE_CONDITION,
+    # so the check is not vacuous). The Lynis macros below were validated the same way
+    # on 2026-11-06 with the live falco 0.45.2 binary (falco -V falco_rules.yaml plus
+    # this file: Ok; a broken aname condition: LOAD_ERR_COMPILE_CONDITION).
     - macro: user_known_contact_k8s_api_server_activities
       condition: (k8s.ns.name in ("argocd", "argo-rollouts", "cert-manager", "external-secrets", "falco", "kube-flannel", "kube-network-policies", "kube-system", "kyverno", "local-path-storage", "metallb-system", "monitoring", "nginx-gateway"))
       override:
         condition: replace
+    # WHY (Lynis nightly, 6 Nov 2026): lynis.timer -> lynis.service on each node
+    # (~00:00-00:20 CST) truncates /var/log/lynis.log and /var/log/lynis-report.dat
+    # (O_TRUNC) and Falco's Clear Log Activities pages every night. Upstream
+    # `allowed_clear_log_files` is `(never_true)`, so this override *replaces*
+    # the placeholder. Match the launch path (host, systemd parent, exact cron
+    # cmdline) and those two files only — never `proc.name = lynis` alone (an
+    # attacker can name a binary that). A hand-run lynis from a shell still
+    # alerts (parent is bash/sudo, not systemd).
+    - macro: allowed_clear_log_files
+      condition: (container.id = host and proc.name = lynis and proc.pname = systemd and proc.cmdline = "lynis /usr/sbin/lynis audit system --cronjob" and fd.name in (/var/log/lynis.log, /var/log/lynis-report.dat))
+      override:
+        condition: replace
+    # WHY (same nightly): lynis then cats/greps /etc/shadow, /etc/pam.conf,
+    # /etc/pam.d/common-auth via children whose parent is lynis. Upstream
+    # `user_read_sensitive_file_conditions` is `cmp_cp_by_passwd`, NOT
+    # never_true, so this override *appends* `or (...)` and keeps the stock
+    # content. Ancestor chain is lynis -> systemd, or an extra lynis subshell
+    # (aname[2]=lynis, aname[3]=systemd). Anything else reading /etc/shadow
+    # still alerts, including lynis from a shell.
+    - macro: user_read_sensitive_file_conditions
+      condition: or (container.id = host and proc.pname = lynis and proc.pcmdline = "lynis /usr/sbin/lynis audit system --cronjob" and (proc.aname[2] = systemd or (proc.aname[2] = lynis and proc.aname[3] = systemd)))
+      override:
+        condition: append
 
 # Sized for the 3-node lab (4 GB workers alongside Argo CD, Kyverno, and monitoring).
 resources:
