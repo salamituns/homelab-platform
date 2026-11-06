@@ -268,6 +268,10 @@
         pve_backup_remove_ok: "{{ (pve_backup_current.remove | default(1) | int) == 0 }}"
         pve_backup_notes_ok: "{{ pve_backup_current['notes-template'] | default('') == pve_backup_notes_template }}"
         pve_backup_no_prune: "{{ pve_backup_current['prune-backups'] is not defined }}"
+        pve_backup_fleecing_ok: >-
+          {{ ((pve_backup_current.fleecing | default({})).enabled | default(0) | int) == 1
+          and ((pve_backup_current.fleecing | default({})).storage | default(''))
+          == pve_backup_fleecing_storage }}
 
     - name: Combine daily-all backup job drift flags
       ansible.builtin.set_fact:
@@ -277,7 +281,7 @@
           and pve_backup_storage_ok and pve_backup_schedule_ok
           and pve_backup_notify_ok and pve_backup_enabled_ok
           and pve_backup_remove_ok and pve_backup_notes_ok
-          and pve_backup_no_prune) }}
+          and pve_backup_no_prune and pve_backup_fleecing_ok) }}
 
     - name: Ensure daily-all vzdump job to PBS
       ansible.builtin.command:
@@ -309,6 +313,8 @@
           - "0"
           - --notes-template
           - "{{ pve_backup_notes_template }}"
+          - --fleecing
+          - "enabled=1,storage={{ pve_backup_fleecing_storage }}"
           - --comment
           - Daily snapshot of all guests except forensic 101 and PBS 123
         pve_backup_argv_set:
@@ -333,6 +339,8 @@
           - "0"
           - --notes-template
           - "{{ pve_backup_notes_template }}"
+          - --fleecing
+          - "enabled=1,storage={{ pve_backup_fleecing_storage }}"
           - --comment
           - Daily snapshot of all guests except forensic 101 and PBS 123
       when:

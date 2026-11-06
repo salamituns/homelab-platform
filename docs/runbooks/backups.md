@@ -133,3 +133,35 @@ Notes:
 `daily-all` run by hand at 16:48: **TASK OK**, 15 VMs in about 1 h 45 min, 603 GiB logical stored as
 **113 GiB** (zero-skipping, compression, dedup). VMs cloned from template 109 reused 84-90% of their chunks.
 Throughput was 62-78 MiB/s wherever real data moved: VMs and the datastore share the same two disks.
+
+## 6. Fleecing (6 Nov 2026)
+
+**Cause.** Drill 5 (5 Nov) restarted VM 107 (workernode1). A QEMU restart drops the PBS
+dirty bitmap, so the next backup is full. 31 Oct–5 Nov VM 107 copied 1.8–7.3 GiB
+(`dirty-bitmap status: OK`); 6 Nov `dirty-bitmap status: created new`, 80 GiB read
+in 9 min 20 s (01:33:38–01:42:58 CST). 30 Oct was also `created new` (full). All VM
+disks and the PBS datastore (VM 123 disk-1, 500G) sit on one RAID volume (PERC H330,
+sda). Snapshot mode is copy-before-write: a guest write to a not-yet-copied block
+waits until the old block is sent to PBS. PBS on the same busy disks stalled guest
+writes; kube-state-metrics on wn1 went unscrapeable. Alerts 01:31–01:52 CST:
+`KubeNetworkPoliciesAgentUnavailable` (fired via its `absent()` branch; agents were
+fine), `TargetDown`, `KubeAPIErrorBudgetBurn`.
+
+**Fix.** Owner already set on tuns (PVE 9.1.2):
+`pvesh set /cluster/backup/daily-all --fleecing enabled=1,storage=local-lvm`.
+Old blocks go to a temporary thin image on `local-lvm`, so guest writes do not wait
+on PBS. The image is removed after each VM's backup. Ansible now tracks that as
+`pve_backup_fleecing_storage: local-lvm` in `host_vars/tuns.yml`.
+
+**Not fixed.** Shared RAID volume. A separate PBS disk is a future hardware
+decision.
+
+**Pending verification.** (1) Tonight's task log shows fleecing per VM.
+(2) The next backup after a VM restart (full) causes no TargetDown/KNP alert.
+
+On tuns, from a vzdump task log:
+
+```sh
+f=$(ls -t /var/log/pve/tasks/*/*vzdump* | head -1)   # newest vzdump task
+grep -E "archive|fleecing|dirty-bitmap|transferred" "$f"
+```

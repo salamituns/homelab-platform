@@ -58,3 +58,14 @@ client-side-encrypted sync to object storage (offsite). Until then baseline C1 s
   (add disabled, write the secret, then enable); a DNS record in git is not live until
   `playbooks/dns.yml` runs on `gateway`.
 - Open: stage 2 (second medium); client-side encryption (decide before stage 2, since a cloud copy needs it).
+
+## Update 6 Nov 2026
+
+`daily-all` now uses backup fleecing (`enabled=1,storage=local-lvm`, already applied on
+tuns; Ansible tracks it). A QEMU restart drops the PBS dirty bitmap, so the next
+backup of that VM is full. Snapshot copy-before-write then stalls guest writes while
+PBS and VM disks share one RAID volume (seen 6 Nov 01:31–01:52 CST: TargetDown /
+KNP `absent()` / API error-budget after workernode1's 80 GiB full backup). Fleecing
+parks dirty blocks on `local-lvm` for the duration of each VM so the guest does not
+wait on PBS. The shared-volume risk is unchanged: a separate PBS disk remains a
+hardware decision, and stage 2 (second medium) is still deferred.
