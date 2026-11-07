@@ -1,0 +1,18 @@
+# Distro package as installed with the Jan 2026 Ubuntu 24.04.3 base image
+# (live 2026-11-07: 3.0.9-1 on all three k8s nodes). Held so unattended-upgrades
+# cannot replace /usr/sbin/lynis and break the Falco exception (exact
+# ExecStart / dash / PID 1 cmdline in k8s/platform/falco/values.yaml).
+lynis_package: lynis=3.0.9-1
+lynis_hold_name: lynis
+
+lynis_textfile_dir: /var/lib/node_exporter/textfile
+lynis_textfile_path: "{{ lynis_textfile_dir }}/lynis.prom"
+lynis_report_path: /var/log/lynis-report.dat
+lynis_script_path: /usr/local/sbin/lynis-textfile
+
+# Local time (America/Chicago on these nodes). 23:30 + 15m jitter finishes
+# before the etcd snapshot timer at 00:45 America/Chicago and the PBS window
+# 01:30-02:30. Packaged timer was OnCalendar=daily + RandomizedDelaySec=1800
+# (~00:00-00:30), which can still be running at 00:45.
+lynis_oncalendar: "*-*-* 23:30:00"
+lynis_randomized_delay_sec: 900

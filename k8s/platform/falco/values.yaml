@@ -70,7 +70,8 @@ customRules:
       condition: (k8s.ns.name in ("argocd", "argo-rollouts", "cert-manager", "external-secrets", "falco", "kube-flannel", "kube-network-policies", "kube-system", "kyverno", "local-path-storage", "metallb-system", "monitoring", "nginx-gateway"))
       override:
         condition: replace
-    # WHY (Lynis nightly, 6 Nov 2026): lynis.timer -> lynis.service (~00:00-00:20 CST)
+    # WHY (Lynis nightly, 6 Nov 2026): lynis.timer -> lynis.service (23:30 CST + 15m
+    # jitter as of 7 Nov 2026; packaged default was ~00:00-00:20 CST)
     # truncates /var/log/lynis.log and lynis-report.dat (O_TRUNC) -> Clear Log
     # Activities. Upstream macro is `(never_true)`, so *replace*. Names and cmdlines
     # are user-settable, so also pin /usr/bin/dash (lynis is #!/bin/sh) and

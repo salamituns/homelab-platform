@@ -137,8 +137,9 @@ Carried over from Week 6 (kept at the level described in [ADR 0015](docs/adr/001
       it needs MySQL configuration and a restart)
 - [ ] Watch for the kube-network-policies release carrying PR #420 (denied-probe-tail noise,
       ADR 0015 section A)
-- [ ] Lynis on all nodes is unmanaged (base image, Jan 2026); decide: manage in Ansible or remove.
-      Falco exception is dash under PID 1 (`#83`, `#85`).
+- [x] Lynis on k8s nodes managed in Ansible (pin 3.0.9-1, timer 23:30 America/Chicago,
+      textfile metrics); owner apply pending ([lynis.md](docs/runbooks/lynis.md)).
+      Falco exception is unchanged (dash under PID 1, `#83`, `#85`).
 - [ ] Serve the Rollouts plugin from inside the lab (Nexus raw or initContainer) and drop the internet egress rule
       (`argo-rollouts-plugin-download-egress`; ADR 0013 update 7 Nov 2026)
 - [x] Pin kube-network-policies by digest (vendor install.yaml still tags `v1.1.1`; kustomize `newTag: v1.1.2` plus digest matching live imageID 2026-11-07)

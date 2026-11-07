@@ -1,0 +1,56 @@
+# Lynis textfile metrics from node-exporter (ansible/roles/lynis).
+# Warnings stay on the Alertmanager null receiver (UI only, monitoring.md).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: homelab-lynis-rules
+  namespace: monitoring
+  labels:
+    release: prometheus-stack
+spec:
+  groups:
+    - name: homelab.lynis
+      rules:
+        - alert: LynisReportStale
+          expr: |
+            (time() - lynis_report_timestamp_seconds) > 93600
+            or (
+              up{job="node-exporter"} == 1
+              unless on(instance) lynis_report_timestamp_seconds
+            )
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Lynis report on a node is older than 26h (or missing)"
+            description: >-
+              Node {{ $labels.instance }} has no fresh lynis_report_timestamp_seconds
+              (26h = 93600s). The timer is 23:30 America/Chicago. Check lynis.timer
+              and lynis-textfile.service. See docs/runbooks/lynis.md.
+            runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/lynis.md
+        - alert: LynisHardeningIndexDropped
+          expr: |
+            (max_over_time(lynis_hardening_index[7d]) - lynis_hardening_index) >= 3
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Lynis hardening index fell by 3 or more vs the 7-day max"
+            description: >-
+              {{ $labels.instance }} index is {{ $value }} below its 7-day max.
+              Raise the score via Ansible hardening, not by skipping tests.
+              See docs/runbooks/lynis.md.
+            runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/lynis.md
+        - alert: LynisWarningsPresent
+          expr: |
+            lynis_warnings > 0
+          for: 1d
+          labels:
+            severity: warning
+          annotations:
+            summary: "Lynis warnings have been > 0 for a day"
+            description: >-
+              {{ $labels.instance }} still has lynis_warnings > 0 after 24h.
+              Live baseline (7 Nov 2026) is one warning (PKGS-7392). UI only.
+              See docs/runbooks/lynis.md.
+            runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/lynis.md
