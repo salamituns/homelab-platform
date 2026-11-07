@@ -1,6 +1,6 @@
 # ADR 0019: Internal developer platform — hosting real apps from the lab
 
-- Status: **Proposed** (draft for owner review, 2026-11-07)
+- Status: **Accepted on merge** (owner answered the open questions 2026-11-07; see Rev B)
 - Date: 2026-11-07
 - Owner: owner
 - Last reviewed: 7 Nov 2026
@@ -11,6 +11,7 @@
 | Rev | Date | Change |
 |---|---|---|
 | A | 7 Nov 2026 | Initial proposal from the three app repos, the live cluster and the 7 Nov hardening state |
+| B | 7 Nov 2026 | Owner decisions: protexa prod on a managed host (lab = pipeline + staging; protexa is demo/pilot, no live customers); govgraph DB is Supabase Postgres (moved from Neon by the owner); move both Vercel-DNS domains to Cloudflare |
 
 ## Scope
 
@@ -48,7 +49,7 @@ Hostnames, tunnel credentials and per-app env values live in OpenBao and are ren
 - **Capacity**: `tuns` has ~13 GB RAM and ~3 TB thin pool free. The workers cannot take three more apps.
 - **The apps' runtime needs** (read from the repos, 7 Nov):
   - `personal-site`: static files; its proxy fetches a public GitHub-contributions API and caches it 6 h.
-  - `govgraph`: `next start` server; env `DATABASE_URL` (Neon Postgres, external), `CRON_SECRET`,
+  - `govgraph`: `next start` server; env `DATABASE_URL` (Postgres on **Supabase**, moved from Neon by the owner), `CRON_SECRET`,
     `NEXT_PUBLIC_POSTHOG_*`; daily `0 4 * * *` call to `/api/cron/refresh`.
   - `protexa`: static SPA build; all data goes browser → Supabase cloud. Brand chosen by `Host`.
     Handles **HIPAA** workloads for its customers.
@@ -77,7 +78,7 @@ Each app gets namespaces `<app>-staging` and `<app>-prod`, created from one Kust
   `homelab.arpa/exposure: public|internal`;
 - `ResourceQuota` + `LimitRange` (defaults so a pod without limits still gets sane ones);
 - NetworkPolicies: default-deny, DNS egress, ingress only from the gateway data plane that serves it,
-  per-app extra egress declared in the app file (e.g. `govgraph` → Postgres `:5432`);
+  per-app extra egress declared in the app file (e.g. `govgraph` → Supabase Postgres `:5432`/`:6543`);
 - `ExternalSecret`s: `nexus-pull` (from OpenBao, no more hand copies) and the app's own env secrets;
 - a `ServiceAccount` per app and a `RoleBinding` giving the app's developer group (Gitea OIDC group
   `<app>-dev`) read + `rollouts promote/abort` in its own namespaces only.
@@ -152,20 +153,24 @@ One host on a home connection. Targets: `personal-site` 99.0 % (Cloudflare serve
 the origin is down), `govgraph` 99.0 % with announced maintenance windows. Vercel stays configured
 but idle as the documented fallback for each app until its first 30 days on the lab are green.
 
-## Open questions for the owner (decide before Phase 1)
+## Owner decisions (7 Nov 2026)
 
-1. **protexa is a HIPAA product.** Recommendation: the lab runs protexa's **pipeline and a staging
-   environment behind Cloudflare Access**, but **production stays on a managed host** (Vercel Pro or
-   Cloudflare Pages, deployed by the same signed pipeline). Reason: a compromised home lab serving
-   protexa's JavaScript could exfiltrate customer PHI from browsers, and customers' BAAs/security
-   questionnaires will ask where the app is hosted. Does protexa have live customers today?
-2. **Secret in a browser bundle (protexa):** `VITE_AXXESS_API_KEY` is read in the frontend. Every
-   `VITE_*` variable is embedded in the public JavaScript. If that key grants access to an Axxess
-   tenant, it is exposed to anyone who loads the app today, independent of where it is hosted. It
-   should move behind a Supabase edge function. (Flagged here; fix belongs in the protexa repo.)
-3. `govgraph` database: keep Neon (recommended for now: managed backups, no new state in the lab) or
-   move to an in-cluster Postgres later?
-4. Move `kletraq` and `govgraph` DNS from Vercel to Cloudflare (needed for the tunnel)?
+1. **protexa production runs on a managed host** (Vercel Pro or Cloudflare Pages), deployed by the lab's
+   signed pipeline. The lab runs protexa's CI/CD and a **staging** environment behind Cloudflare Access.
+   protexa is demo/pilot today (no live customers), so staging may use demo data only, never real PHI.
+   Reason: a compromised home lab serving protexa's JavaScript could exfiltrate PHI from browsers, and
+   customers' BAAs and security reviews ask where the app is hosted.
+2. **govgraph's database is Supabase Postgres** (the owner moved it from Neon). Same reasoning as a managed
+   Neon: backups and patching stay with the provider, no new state in the lab. Because govgraph will run as
+   a long-lived container (not serverless), use the **session** connection (`:5432`), or the transaction
+   pooler (`:6543`) with `prepare: false` in `postgres.js`. Egress rule: Postgres ports only. The repo's
+   leftover `neon.ts` / `@neon/*` packages should be removed in the app repo once the move is confirmed.
+3. **Both Vercel-DNS domains (govgraph's and kletraq) move to Cloudflare DNS** before their cut-over phase
+   (owner step at the registrar).
+4. **Still open (protexa repo, not this platform):** `VITE_AXXESS_API_KEY` is read in the frontend, and every
+   `VITE_*` value is embedded in the public JavaScript. If it grants access to an Axxess tenant it is already
+   exposed wherever the app is hosted; it should move behind a Supabase edge function. Must be fixed before
+   protexa's staging goes behind the tunnel.
 
 ## Rollout plan (phases, each a gate)
 
@@ -173,8 +178,8 @@ but idle as the documented fallback for each app until its first 30 days on the 
 |---|---|---|
 | **0. Platform prerequisites** | `workernode3` (D2); `nexus-pull` via ESO everywhere (closes ROADMAP item); Nexus `platform` repo + per-app repos/users; tenant kit (D1); `apps` AppProject + ApplicationSet (D5); OpenBao per-app paths + roles (D6) | A dummy app onboarded to `demo-staging` with one PR each; cross-tenant secret read denied; cross-namespace traffic denied |
 | **1. personal-site** | static profile; staging behind Access; `edge-public` + `public-gateway` + tunnel (D7); outside uptime check; cut DNS from Vercel | Public URL served from the lab; admin hostnames unreachable through the tunnel (tested); WAF on; 7 days green |
-| **2. govgraph** | `next` profile; secrets from OpenBao; Neon egress; cron → `CronJob` with `CRON_SECRET`; DNS to Cloudflare | Page renders with live data; cron ran; SLO + logs per tenant; 7 days green |
-| **3. protexa** | per owner answer to Q1: staging (and prod only if approved) | Staging behind Access, both brands by host |
+| **2. govgraph** | `next` profile; secrets from OpenBao; Supabase Postgres egress (session `:5432`); cron → `CronJob` with `CRON_SECRET`; DNS to Cloudflare | Page renders with live data; cron ran; SLO + logs per tenant; 7 days green |
+| **3. protexa** | staging in the lab behind Access (demo data only); prod pipeline deploys to the managed host; `VITE_AXXESS_API_KEY` moved server-side first; kletraq DNS to Cloudflare | Staging behind Access, both brands by host; managed prod deployed from the signed pipeline |
 | **4. Platform drills** | tunnel down, apps node loss, per-tenant secret rotation, onboard a 4th app in < 1 h | Postmortems like Week 8 |
 
 ## Consequences
