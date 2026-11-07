@@ -162,8 +162,9 @@ decision.
 **First night with fleecing (7 Nov 2026).** Job TASK OK. Fleecing image attached and removed for
 every running VM (templates 109/110 are stop-mode, no fleecing). All incremental (wn1 3.9 GiB in
 78 s). No `TargetDown` / KNP / `KubeAPIErrorBudgetBurn` alerts 01:30–02:30 CST. The Argo Rollouts
-controller had restarted in the 01:00–02:17 CST backup window on 1, 2, 3, 4, 5 and 6 Nov
-(+4, +2, +4, +4, +2, +4; lease renewal "context deadline exceeded" to the API) and had **0
+controller had restarted around the 01:30 backup window on 1, 2, 3, 4, 5 and 6 Nov
+(+4, +2, +4, +4, +2, +4 from hourly `kube_pod_container_status_restarts_total`; last one logged
+lease renewal "context deadline exceeded" to the API) and had **0
 restarts on 7 Nov**. One night is not proof; the full-backup test after a QEMU restart is still
 pending.
 
