@@ -120,7 +120,8 @@ if [[ "${ns_count}" -lt 1 || "${secret_count}" -lt 1 ]]; then
   exit 1
 fi
 
-secret_key="$(etcdctl_q get /registry/secrets --prefix --keys-only | grep '/registry/secrets/' | head -1 | tr -d '\r')"
+secret_keys="$(etcdctl_q get /registry/secrets --prefix --keys-only)"
+secret_key="$(grep -m1 '/registry/secrets/' <<<"${secret_keys}" | tr -d '\r' || true)"
 # Prefix only; never print the value.
 if etcdctl_q get "${secret_key}" --print-value-only | python3 -c 'import sys; d=sys.stdin.buffer.read(20); sys.exit(0 if d.startswith(b"k8s:enc:secretbox") else 1)'; then
   echo "secretbox prefix: PASS (k8s:enc:secretbox on first secret; value not printed)"
