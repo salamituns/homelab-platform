@@ -69,7 +69,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-sudo -n mkdir -p -- "${workdir}"
+sudo -n install -d -m 0700 -- "${workdir}"
 sudo -n cp -a -- "${newest}" "${workdir}/etcd.db"
 sudo -n chmod 0600 -- "${workdir}/etcd.db"
 
