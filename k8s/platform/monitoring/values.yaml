@@ -158,6 +158,23 @@ kubeStateMetrics:
   enabled: true
 nodeExporter:
   enabled: true
+# Subchart prometheus-node-exporter (chart 4.56.1 under kube-prometheus-stack 88.3.0).
+# extraArgs is a list REPLACE: keep the chart's filesystem excludes (live on the
+# DaemonSet 2026-11-07) and add the textfile collector. Host dir is created by the
+# lynis Ansible role (and DirectoryOrCreate if the DS lands first). Same path is
+# the hook for an etcd backup .prom from package 3 — do not rename it.
+prometheus-node-exporter:
+  extraArgs:
+    - --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|run/containerd/.+|var/lib/docker/.+|var/lib/kubelet/.+)($|/)
+    - --collector.filesystem.fs-types-exclude=^(autofs|binfmt_misc|bpf|cgroup2?|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|iso9660|mqueue|nsfs|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|selinuxfs|squashfs|sysfs|tracefs|erofs)$
+    - --collector.textfile.directory=/host/textfile
+  extraHostVolumeMounts:
+    - name: textfile
+      hostPath: /var/lib/node_exporter/textfile
+      mountPath: /host/textfile
+      readOnly: true
+      type: DirectoryOrCreate
+      mountPropagation: HostToContainer
 prometheus:
   enabled: true
   prometheusSpec:

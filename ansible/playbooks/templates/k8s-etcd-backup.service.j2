@@ -1,0 +1,12 @@
+# Managed by Ansible (homelab-platform, playbook: k8s-etcd-backup.yml).
+[Unit]
+Description=Snapshot etcd and tar PKI plus encryption-config
+After=containerd.service
+Requires=containerd.service
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/local/sbin/k8s-etcd-backup.sh
+Nice=10
+PrivateTmp=true

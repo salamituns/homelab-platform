@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# Daily etcd snapshot + PKI/enc tarball. Installed by ansible/playbooks/k8s-etcd-backup.yml.
+# etcdctl lives only in the etcd image. crictl is not on Master (checked 2026-11-07);
+# k8s-upgrade.yml's crictl exec is the same static pod, reached here with ctr -n k8s.io.
+set -euo pipefail
+umask 077
+
+BACKUP_DIR="{{ etcd_backup_dir }}"
+KEEP_DAYS="{{ etcd_backup_keep_days }}"
+STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+SNAP_NAME="etcd-${STAMP}.db"
+HOST_SNAP="${BACKUP_DIR}/${SNAP_NAME}"
+HOST_TAR="${BACKUP_DIR}/etcd-${STAMP}-pki-enc.tgz"
+# Snapshot is written on the host bind of the live data dir, then moved out.
+LIVE_SNAP="/var/lib/etcd/${SNAP_NAME}"
+
+cleanup_live() {
+  rm -f -- "${LIVE_SNAP}"
+}
+trap cleanup_live EXIT
+
+mkdir -p -- "${BACKUP_DIR}"
+chmod 0700 -- "${BACKUP_DIR}"
+
+# Pick the RUNNING etcd container. Read each list fully first: piping into an
+# early-exiting awk/head makes ctr die of SIGPIPE, and pipefail turns that into
+# exit 141 (what the first run on 2026-11-07 hit). Exited etcd containers can
+# linger after a restart, so match the task state, not just the image.
+etcd_ids="$(ctr -n k8s.io containers ls -q 'labels."io.kubernetes.container.name"==etcd')"
+tasks="$(ctr -n k8s.io tasks ls)"
+cid=""
+for c in ${etcd_ids}; do
+  if awk -v c="${c}" '$1 == c && $3 == "RUNNING" { found = 1 } END { exit !found }' <<<"${tasks}"; then
+    cid="${c}"
+    break
+  fi
+done
+if [[ -z "${cid}" ]]; then
+  echo "k8s-etcd-backup: no running etcd container in k8s.io" >&2
+  exit 1
+fi
+
+exec_id="etcd-backup-${STAMP}-$$"
+etcd_exec() {
+  ctr -n k8s.io task exec --exec-id "${exec_id}-$RANDOM" "${cid}" "$@"
+}
+
+etcd_exec etcdctl \
+  --endpoints=https://127.0.0.1:2379 \
+  --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+  --cert=/etc/kubernetes/pki/etcd/server.crt \
+  --key=/etc/kubernetes/pki/etcd/server.key \
+  snapshot save "/var/lib/etcd/${SNAP_NAME}"
+
+etcd_exec etcdctl snapshot status "/var/lib/etcd/${SNAP_NAME}" -w table
+
+mv -- "${LIVE_SNAP}" "${HOST_SNAP}"
+trap - EXIT
+
+tar -C /etc/kubernetes -czf "${HOST_TAR}" pki enc/encryption-config.yaml
+chmod 0600 -- "${HOST_SNAP}" "${HOST_TAR}"
+
+find "${BACKUP_DIR}" -maxdepth 1 -type f \( -name 'etcd-*.db' -o -name 'etcd-*-pki-enc.tgz' \) -mtime +"${KEEP_DAYS}" -delete
+
+echo "k8s-etcd-backup: wrote ${HOST_SNAP} and ${HOST_TAR}"

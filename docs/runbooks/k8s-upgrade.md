@@ -58,6 +58,9 @@ kubectl top nodes
 
 ## Restore (if the control plane does not come back)
 
+Daily etcd snapshots (once the backup playbook is applied) and the non-destructive
+drill: [etcd-restore-drill.md](etcd-restore-drill.md).
+
 1. Restore VM 108 from the PBS backup taken before the run, or
 2. on the master: stop the static pods (`mv /etc/kubernetes/manifests /root/manifests.off`), restore
    `/etc/kubernetes` from `etc-kubernetes.tgz`, then `etcdutl snapshot restore etcd.db --data-dir /var/lib/etcd-restored`

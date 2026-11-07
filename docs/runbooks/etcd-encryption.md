@@ -217,9 +217,9 @@ contains plaintext Secrets and reads back fine while `identity: {}` is the secon
 
 `etcdctl` is not installed on the master (it lives in the etcd image), and during a restore the
 API server and the etcd pod are stopped, so `kubectl exec` is unavailable: run the restore through
-the etcd image already on the node, using containerd's `ctr`. **This procedure has not been
-drilled yet**; do a PBS-style drill (restore-drill pattern in [backups.md](backups.md)) before
-relying on it.
+the etcd image already on the node, using containerd's `ctr`. Drill it with
+[etcd-restore-drill.md](etcd-restore-drill.md) (Level 1 is safe on live Master; Level 2 is the
+PBS-style copy) before relying on a real restore.
 
 ```sh
 ssh tunsadmin@192.168.1.90

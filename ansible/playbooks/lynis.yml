@@ -1,0 +1,12 @@
+# Manage the distro Lynis package on the three Kubernetes nodes and export the
+# last report as a node-exporter textfile. Does not change lynis.service
+# ExecStart (Falco). Timer drop-in only. No custom.prf skips.
+# Usage (from ansible/):
+#   ansible-playbook playbooks/lynis.yml --check --diff
+#   ansible-playbook playbooks/lynis.yml
+- name: Manage Lynis on Kubernetes nodes
+  hosts: k8s
+  serial: 1
+  become: true
+  roles:
+    - lynis

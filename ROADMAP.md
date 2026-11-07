@@ -90,7 +90,9 @@ Carried over (kept at the level described in [ADR 0014](docs/adr/0014-secrets-an
 - [ ] Old PBS backups keep plaintext Secrets until retention expires (about three months), and values that do not
       rotate stay valid in them
 - [ ] MySQL datadir recreation does not recreate the rotation accounts
-- [ ] etcd restore is not drilled yet
+- [ ] etcd restore drill (Level 1 script + Level 2 PBS-to-new-VMID); owner has not run it yet
+      ([etcd-restore-drill.md](docs/runbooks/etcd-restore-drill.md))
+- [ ] scheduled etcd snapshots (`ansible/playbooks/k8s-etcd-backup.yml`, 00:45 America/Chicago (CST/CDT); owner apply)
 - [x] NetworkPolicy and NodePorts (Week 6) — done 2026-11-02/03; NodePorts 30080/30081 removed
       (belleshop-deploy #25)
 - [ ] Confirm Jenkins holds no copied `admin.conf`
@@ -135,12 +137,13 @@ Carried over from Week 6 (kept at the level described in [ADR 0015](docs/adr/001
       it needs MySQL configuration and a restart)
 - [ ] Watch for the kube-network-policies release carrying PR #420 (denied-probe-tail noise,
       ADR 0015 section A)
-- [ ] Lynis on all nodes is unmanaged (base image, Jan 2026); decide: manage in Ansible or remove.
-      Falco exception is dash under PID 1 (`#83`, `#85`).
+- [x] Lynis on k8s nodes managed in Ansible (pin 3.0.9-1, timer 23:30 America/Chicago,
+      textfile metrics); owner apply pending ([lynis.md](docs/runbooks/lynis.md)).
+      Falco exception is unchanged (dash under PID 1, `#83`, `#85`).
 - [ ] Serve the Rollouts plugin from inside the lab: git uses initContainer + `file://` and drops
       `argo-rollouts-plugin-download-egress`; owner must push the belleshop image and copy
       `nexus-pull` before sync ([runbook](docs/runbooks/argo-rollouts-plugin.md); ADR 0013)
-- [ ] Pin kube-network-policies by digest (vendor install.yaml still tags `v1.1.1`; kustomize `newTag: v1.1.2`)
+- [x] Pin kube-network-policies by digest (vendor install.yaml still tags `v1.1.1`; kustomize `newTag: v1.1.2` plus digest matching live imageID 2026-11-07)
 
 ## Week 7: Observability + SLOs
 - [x] OIDC SSO for the admin UIs with Gitea as the provider ([ADR 0016](docs/adr/0016-oidc-sso-admin-uis-gitea.md)):

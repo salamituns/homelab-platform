@@ -1,0 +1,85 @@
+# Keep the packaged lynis.service ExecStart byte-for-byte. Falco only exempts
+# `lynis /usr/sbin/lynis audit system --cronjob` under dash / PID 1.
+- name: Install the pinned Lynis distro package
+  ansible.builtin.apt:
+    name: "{{ lynis_package }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Hold Lynis so unattended-upgrades cannot replace the binary
+  ansible.builtin.dpkg_selections:
+    name: "{{ lynis_hold_name }}"
+    selection: hold
+  ignore_errors: "{{ ansible_check_mode }}"
+
+- name: Textfile directory for node-exporter
+  ansible.builtin.file:
+    path: "{{ lynis_textfile_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install the Lynis textfile exporter script
+  ansible.builtin.copy:
+    src: lynis-textfile.sh
+    dest: "{{ lynis_script_path }}"
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Lynis timer drop-in directory
+  ansible.builtin.file:
+    path: /etc/systemd/system/lynis.timer.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Drop-in to move lynis.timer off the etcd snapshot window
+  ansible.builtin.template:
+    src: schedule.conf.j2
+    dest: /etc/systemd/system/lynis.timer.d/schedule.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart lynis timer
+
+- name: Lynis service drop-in directory
+  ansible.builtin.file:
+    path: /etc/systemd/system/lynis.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Drop-in so a successful audit exports the textfile
+  ansible.builtin.template:
+    src: on-success.conf.j2
+    dest: /etc/systemd/system/lynis.service.d/textfile.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+
+- name: Install lynis-textfile.service
+  ansible.builtin.template:
+    src: lynis-textfile.service.j2
+    dest: /etc/systemd/system/lynis-textfile.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+
+- name: Enable the packaged lynis.timer
+  ansible.builtin.systemd_service:
+    name: lynis.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+  ignore_errors: "{{ ansible_check_mode }}"

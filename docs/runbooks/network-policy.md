@@ -23,7 +23,10 @@ Design facts that decide everything below:
   Expect a few such lines; they are noise, not outages, until the next release.
 - **Image pin:** vendor file `kube-network-policies-install-v1.1.2.yaml` still references image
   `registry.k8s.io/networking/kube-network-policies:v1.1.1` (upstream install.yaml lag).
-  Kustomize overlays `newTag: v1.1.2`. There is **no digest pin** (ROADMAP follow-up).
+  Kustomize overlays `newTag: v1.1.2` plus digest
+  `sha256:c671f98e444825d57c590c92da1b5e66070917c4d3dff1f9279775e6b73254fe` (live imageID
+  2026-11-07). The rendered image is `:v1.1.2@sha256:…`; the DaemonSet rolls on apply even
+  though the bytes on disk already match.
 
 ## Order of operations
 

@@ -100,10 +100,12 @@ WATCH event; Viewers can only look.
    `manifests/`) is what includes the ConfigMaps. After sync, Grafana folder **Homelab**
    shows the dashboard. Sidecar log: `kubectl -n monitoring logs deploy/prometheus-stack-grafana -c grafana-sc-dashboard`.
 
-Dashboards in this repo: **BelleShop overview** (`uid: belleshop-overview`) and
-**BelleShop SLO** (`uid: belleshop-slo`). SLO probe panels are empty until the
-blackbox Probe CRs scrape. Do not duplicate golden-signals here; see
-[`belleshop-slo.md`](belleshop-slo.md) for the scale-to-zero proof.
+Dashboards in this repo: **BelleShop overview** (`uid: belleshop-overview`),
+**BelleShop SLO** (`uid: belleshop-slo`), and **Lynis** (`uid: lynis-hardening`).
+SLO probe panels are empty until the blackbox Probe CRs scrape. Lynis panels are
+empty until the Ansible role has written `/var/lib/node_exporter/textfile/lynis.prom`
+and the node-exporter textfile collector is synced. Do not duplicate golden-signals
+here; see [`belleshop-slo.md`](belleshop-slo.md) for the scale-to-zero proof.
 
 ## Week 8 chaos alerts (ADR 0018)
 

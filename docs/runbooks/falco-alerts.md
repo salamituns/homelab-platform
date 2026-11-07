@@ -192,8 +192,10 @@ emails/day to about 1/day for the same activity.
 ### Lynis nightly audit (6 Nov 2026)
 
 Lynis 3.0.9-1 is on master, workernode1, and workernode2 from the 24 Jan 2026 base
-image. No Ansible role manages it. systemd `lynis.timer` runs
-`lynis audit system --cronjob` ~00:00–00:20 CST; Falco Warning-paged it every
+image. Ansible role `lynis` now pins that package (owner apply pending;
+[`lynis.md`](lynis.md)). systemd `lynis.timer` is dropped-in to **23:30
+America/Chicago** + 15m jitter so it finishes before the etcd snapshot at 00:45
+and PBS 01:30–02:30. Packaged default was ~00:00–00:30 CST. Falco Warning-paged it every
 night (6 events at 06:04Z on workernode1: Clear Log Activities ×2, Read sensitive
 file untrusted ×4).
 
@@ -207,8 +209,8 @@ Two overrides in `homelab-exemptions.yaml`:
 
 Match is **how it was launched**, not `proc.name = lynis` alone. Still alerts:
 anything else reading `/etc/shadow` (or those PAM files), and lynis run by hand
-from a shell (parent would be bash/sudo). Lynis itself is unmanaged drift —
-open item: manage in Ansible or remove.
+from a shell (parent would be bash/sudo). Lynis itself is managed in Ansible
+(role `lynis`; ExecStart unchanged so this exception still matches).
 
 Hardening (6 Nov, after last night's workernode2 events): the interpreter is
 pinned to `/usr/bin/dash` (`proc.exepath` / `proc.pexepath` / `proc.aexepath[2]`)
@@ -230,7 +232,7 @@ fails with `LOAD_ERR_COMPILE_CONDITION`. `proc.pcmdline` is not printed in the
 alert output, so its exact value is inferred (a forked subshell keeps lynis' argv).
 If it ever does not match, the exception simply does not apply and the alerts
 keep coming: noisy, never blind. Proof is the next nightly run: no Lynis events
-in `kubectl -n falco logs -l app.kubernetes.io/name=falco -c falco` after ~00:20 CST.
+in `kubectl -n falco logs -l app.kubernetes.io/name=falco -c falco` after ~23:45 CST.
 
 ---
 
