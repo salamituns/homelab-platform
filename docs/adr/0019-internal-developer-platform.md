@@ -11,6 +11,7 @@
 | Rev | Date | Change |
 |---|---|---|
 | A | 7 Nov 2026 | Initial proposal from the three app repos, the live cluster and the 7 Nov hardening state |
+| C | 7 Nov 2026 | Owner asked for more than Jenkins: D3/D4 become three CI engines (GitHub Actions, Gitea Actions, Jenkins), one CD path; public-repo runner rule added |
 | B | 7 Nov 2026 | Owner decisions: protexa prod on a managed host (lab = pipeline + staging; protexa is demo/pilot, no live customers); govgraph DB is Supabase Postgres (moved from Neon by the owner); move both Vercel-DNS domains to Cloudflare |
 
 ## Scope
@@ -96,20 +97,37 @@ Argo CD or Prometheus, and a platform incident cannot evict an app. Leaves ~5 GB
 
 ### D3. Source of truth for app code stays on GitHub
 
-Developers keep pushing to GitHub. Gitea holds a **pull mirror** of each app repo (read-only, token
-with `contents:read`). Jenkins builds from the Gitea mirror, so CI never needs GitHub credentials and
-the platform keeps working if GitHub is slow. (Verify in Phase 0 whether mirror syncs fire webhooks;
-otherwise Jenkins polls the mirror every 5 min.)
+Developers keep pushing to GitHub. `personal-site` and `govgraph` are **public** repos; `protexa` is private
+(and already runs GitHub Actions: tests, Snyk, Supabase sync). Gitea keeps a read-only **pull mirror** of each
+repo for the in-lab engines, so the lab never needs GitHub write credentials and keeps building if GitHub is slow.
 
-### D4. CI: one pipeline template, per-app registry identity
+**Runner rule:** never attach a runner inside the lab to a public GitHub repo. Anyone can fork a public repo
+and open a pull request, and a lab runner would execute that code inside the home network. Public repos build
+on GitHub-hosted runners, or in the lab only from the private Gitea mirror (fork PRs never reach it).
 
-- `ci/templates/Jenkinsfile.app`: the BelleShop pipeline generalised (gitleaks, Trivy fs, tests,
-  SonarQube gate, build, Trivy image, SBOM, push, Cosign sign + attest, promote). Apps choose a build
-  profile: `static` (nginx-unprivileged image serving `dist/`), `next` (Next.js standalone),
-  `vite-spa`.
-- Nexus: one hosted repo **per app** (`allow_once`), one push user per app, `k8s-pull` reads all app
-  repos. A new hosted repo `platform` takes platform-owned images (the Rollouts plugin moves there).
-- Kyverno `verify-images` extends from `belleshop/*` to every app repo with the same Cosign key.
+### D4. CI: three engines, one contract, one CD path
+
+The owner wants hands-on experience beyond Jenkins, so each first tenant uses a different CI engine. All three
+meet the same **contract**: run the shared gates (`ci/gates/*.sh`: gitleaks, Trivy fs/image, SonarQube where
+applicable, Syft SBOM), push an image by digest, sign it and attach the SBOM attestation, and hand over to the
+same promotion + Argo CD path (D5). "CI anywhere, CD in one place."
+
+| App | Engine | Runs on | Signing | Registry | Why |
+|---|---|---|---|---|---|
+| `personal-site` | **GitHub Actions** | GitHub-hosted runners | **keyless Cosign** (GitHub OIDC → Sigstore Fulcio cert, Rekor log) | GHCR, pulled into the lab through the Nexus `ghcr` proxy | public repo; the most common CI; learn keyless/OIDC signing |
+| `govgraph` | **Gitea Actions** (GitHub Actions-compatible YAML) | new in-lab runner VM, isolated like `ci-agent` | Cosign, lab key | Nexus | same YAML skills, fully private; triggered by mirror sync |
+| `protexa` | **Jenkins** (`ci/templates/Jenkinsfile.app`) | `ci-agent` | Cosign, lab key | Nexus | enterprise-style Groovy; private repo |
+
+- Build profiles shared by all engines: `static` (nginx-unprivileged serving `dist/`), `next` (Next.js
+  standalone), `vite-spa`.
+- **Promotion for GitHub Actions builds is pull-based:** GitHub's runners cannot (and must not) reach the lab.
+  A lab-side job (Gitea Actions in `apps-deploy`) finds the newest image built from `main`, runs
+  `cosign verify` pinned to the expected workflow identity (issuer `token.actions.githubusercontent.com`,
+  subject = the repo's release workflow on `main`), and only then opens the staging PR. The lab trusts nothing
+  it did not verify.
+- Kyverno `verify-images` gains two trust roots: the lab key (Nexus images) and the keyless identity above
+  (GHCR images). Nexus: one hosted repo **per app** (`allow_once`) and one push user per app; `k8s-pull` reads
+  all app repos and the `ghcr` proxy; a new hosted repo `platform` takes platform-owned images.
 
 ### D5. Deploy: one apps-deploy repo, Argo CD ApplicationSet
 
@@ -176,7 +194,7 @@ but idle as the documented fallback for each app until its first 30 days on the 
 
 | Phase | Work | Gate (evidence) |
 |---|---|---|
-| **0. Platform prerequisites** | `workernode3` (D2); `nexus-pull` via ESO everywhere (closes ROADMAP item); Nexus `platform` repo + per-app repos/users; tenant kit (D1); `apps` AppProject + ApplicationSet (D5); OpenBao per-app paths + roles (D6) | A dummy app onboarded to `demo-staging` with one PR each; cross-tenant secret read denied; cross-namespace traffic denied |
+| **0. Platform prerequisites** | `workernode3` (D2); Gitea Actions runner VM (D4); `nexus-pull` via ESO everywhere (closes ROADMAP item); Nexus `platform` repo + per-app repos/users; tenant kit (D1); `apps` AppProject + ApplicationSet (D5); OpenBao per-app paths + roles (D6) | A dummy app onboarded to `demo-staging` with one PR each; cross-tenant secret read denied; cross-namespace traffic denied |
 | **1. personal-site** | static profile; staging behind Access; `edge-public` + `public-gateway` + tunnel (D7); outside uptime check; cut DNS from Vercel | Public URL served from the lab; admin hostnames unreachable through the tunnel (tested); WAF on; 7 days green |
 | **2. govgraph** | `next` profile; secrets from OpenBao; Supabase Postgres egress (session `:5432`); cron → `CronJob` with `CRON_SECRET`; DNS to Cloudflare | Page renders with live data; cron ran; SLO + logs per tenant; 7 days green |
 | **3. protexa** | staging in the lab behind Access (demo data only); prod pipeline deploys to the managed host; `VITE_AXXESS_API_KEY` moved server-side first; kletraq DNS to Cloudflare | Staging behind Access, both brands by host; managed prod deployed from the signed pipeline |
