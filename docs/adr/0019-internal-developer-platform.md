@@ -31,7 +31,7 @@ the apex of the Gitea domain. Apps are named by ID only:
 | App ID | Repo (GitHub, private/public as today) | Kind |
 |---|---|---|
 | `personal-site` | the owner's personal website | static HTML/CSS/JS + one cached proxy function |
-| `govgraph` | ng-gov-graph | Next.js 16 server-rendered, Postgres (Neon cloud), daily cron |
+| `govgraph` | ng-gov-graph | Next.js 16 server-rendered, Postgres (Supabase cloud), daily cron |
 | `protexa` | Protexa AI Shield (two brands by hostname) | Vite SPA; backend is Supabase cloud (~60 edge functions) |
 
 Hostnames, tunnel credentials and per-app env values live in OpenBao and are rendered by ESO.
