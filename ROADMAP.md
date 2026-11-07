@@ -193,3 +193,14 @@ Carried over from Week 6 (kept at the level described in [ADR 0015](docs/adr/001
 - [x] One postmortem per incident in `docs/postmortems/` from
       [TEMPLATE.md](docs/postmortems/TEMPLATE.md) (detect / mitigate / recover)
 - **Proof:** five postmortems. This is what senior interviews ask about.
+
+## Phase 2: internal developer platform (proposed, [ADR 0019](docs/adr/0019-internal-developer-platform.md))
+Host real apps (`personal-site`, `govgraph`, `protexa`) as tenants. Public access through a Cloudflare
+Tunnel to an apps-only gateway; admin plane stays private. Each phase ends at a gate with evidence.
+- [ ] Owner answers ADR 0019 open questions (protexa prod hosting, `VITE_AXXESS_API_KEY`, govgraph DB, DNS moves)
+- [ ] Phase 0: `workernode3` apps pool; `nexus-pull` via ESO; Nexus `platform` + per-app repos/users;
+      tenant kit; `apps` AppProject + ApplicationSet; OpenBao per-app paths/roles; dummy app onboarded
+- [ ] Phase 1: `personal-site` live via `edge-public` + `public-gateway` + tunnel; admin hosts unreachable via tunnel (tested)
+- [ ] Phase 2: `govgraph` live (secrets from OpenBao, Neon egress, cron as CronJob)
+- [ ] Phase 3: `protexa` staging behind Cloudflare Access (prod per owner decision)
+- [ ] Phase 4: drills — tunnel down, apps node loss, per-tenant secret rotation, 4th app onboarded in < 1 h
