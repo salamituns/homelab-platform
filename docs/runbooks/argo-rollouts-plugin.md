@@ -67,19 +67,23 @@ print(json.dumps(s))
 ### 2. Build and push the plugin image (`allow_once`: first tag wins)
 
 One command from the Mac (repo root). It works on `ci-agent` in a root-only temp dir with its own
-`DOCKER_CONFIG`, downloads the release and checks `sha256` before anything else, builds as `ci-pull`
-(the busybox base comes through the `dockerhub` proxy), pushes as `ci-push`, prints the registry digest,
+`DOCKER_CONFIG`, downloads the release and checks `sha256` before anything else, builds (busybox
+pinned by digest straight from Docker Hub, like BelleShop's bases: `ci-pull` may read only the `ghcr`
+proxy and `dockerhub` belongs to `k8s-pull`), pushes as `ci-push`, prints the registry digest,
 logs out and deletes the temp dir. Passwords go from `/etc/nexus/secrets/*` on `nexus` to
 `docker login --password-stdin` on `ci-agent` over ssh stdin: never argv, never your terminal.
 If the tag already exists it does not try to overwrite it.
 
 ```sh
-scripts/rollouts-plugin-image.sh --dry-run   # download + sha256 + plan; no login, no push
+scripts/rollouts-plugin-image.sh --dry-run     # download + sha256 + plan; no login, no push
+scripts/rollouts-plugin-image.sh --build-only  # + build and run it exactly like the initContainer; no push
 scripts/rollouts-plugin-image.sh
 ```
 
-Dry-run verified 2026-11-07 on ci-agent (`sha256sum: OK`, exit 0, no temp dir left). The login,
-build and push path needs the registry credentials, so its first real run is the owner's.
+Verified 2026-11-07 on ci-agent: `--dry-run` and `--build-only` pass (binary `sha256sum: OK`, copied by
+uid 65534 under a read-only root into the emptyDir as `-r-xr-xr-x`, temp dir and image removed). Only the
+`ci-push` login and push need the registry credential, so that part's first run is the owner's. The first
+owner build hit 403 on the `dockerhub` proxy (ci-pull cannot read it), which is why the base comes from Docker Hub.
 Optional follow-up: put the printed digest on `images[].digest` in `k8s/platform/argo-rollouts/kustomization.yaml`.
 
 ### 3. Merge / sync, then confirm no GitHub fetch

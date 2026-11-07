@@ -6,7 +6,9 @@
 # (--password-stdin), never argv, never this terminal, deleted with the temp dir.
 #
 #   scripts/rollouts-plugin-image.sh --dry-run   # download + sha256 + plan, no login, no push
-#   scripts/rollouts-plugin-image.sh             # build as ci-pull, push as ci-push
+#   scripts/rollouts-plugin-image.sh --build-only # + build (no credentials), then clean up
+#   scripts/rollouts-plugin-image.sh --build-only # + build without credentials, re-verify, clean up
+#   scripts/rollouts-plugin-image.sh             # build, push as ci-push
 set -euo pipefail
 
 CI_AGENT="tunsadmin@192.168.1.93"
@@ -18,15 +20,20 @@ SHA="1904ca787d33107c140521899d61fff030ee75d99908bd175fca5a4647759061"
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 DOCKERFILE="${HERE}/k8s/platform/argo-rollouts/plugin-image/Dockerfile"
 
-DRY_RUN=false
-[[ "${1:-}" == "--dry-run" ]] && DRY_RUN=true
+MODE=push
+case "${1:-}" in
+  --dry-run) MODE=dry ;;
+  --build-only) MODE=build ;;
+  "") ;;
+  *) echo "usage: $0 [--dry-run|--build-only]" >&2; exit 2 ;;
+esac
 
 [[ -r "${DOCKERFILE}" ]] || { echo "missing ${DOCKERFILE}" >&2; exit 1; }
 
 # -n: these ssh calls must never read this script's stdin.
 work="$(ssh -n "${CI_AGENT}" 'sudo -n mktemp -d /tmp/rollouts-plugin.XXXXXX')"
 cleanup() {
-  ssh -n "${CI_AGENT}" "sudo -n env DOCKER_CONFIG='${work}/docker' docker logout '${REGISTRY}' >/dev/null 2>&1 || true; sudo -n rm -rf -- '${work}'"
+  ssh -n "${CI_AGENT}" "sudo -n env DOCKER_CONFIG='${work}/docker' docker logout '${REGISTRY}' >/dev/null 2>&1 || true; sudo -n docker image rm -f '${IMAGE}' >/dev/null 2>&1 || true; sudo -n rm -rf -- '${work}'"
 }
 trap cleanup EXIT
 echo "ci-agent workdir: ${work} (0700, removed on exit)"
@@ -39,8 +46,20 @@ ssh -n "${CI_AGENT}" "sudo -n bash -c \"set -euo pipefail; cd '${work}'
   echo '${SHA}  gatewayapi-plugin-linux-amd64' | sha256sum -c
   install -d -m 0700 '${work}/docker'\""
 
-if [[ "${DRY_RUN}" == "true" ]]; then
-  echo "DRY-RUN: would log in as ci-pull, build ${IMAGE}, log in as ci-push, push (allow_once), print digest"
+if [[ "${MODE}" == "dry" ]]; then
+  echo "DRY-RUN: would build ${IMAGE} (busybox from Docker Hub by digest), log in as ci-push, push (allow_once), print digest"
+  exit 0
+fi
+
+build() {
+  ssh -n "${CI_AGENT}" "sudo -n env DOCKER_CONFIG='${work}/docker' docker build --pull -q -t '${IMAGE}' '${work}'"
+  # Same as the Kubernetes initContainer: uid 65534, read-only root, emptyDir target.
+  ssh -n "${CI_AGENT}" "sudo -n docker run --rm --user 65534 --read-only --tmpfs /home/argo-rollouts/plugin-bin:mode=1777 --entrypoint /bin/sh '${IMAGE}' -c 'echo ${SHA}  /plugin/gatewayapi-plugin-linux-amd64 | sha256sum -c && cp /plugin/gatewayapi-plugin-linux-amd64 /home/argo-rollouts/plugin-bin/ && ls -l /home/argo-rollouts/plugin-bin/ && test -x /home/argo-rollouts/plugin-bin/gatewayapi-plugin-linux-amd64 && echo copied-and-executable'"
+}
+
+if [[ "${MODE}" == "build" ]]; then
+  build
+  echo "BUILD-ONLY: image built and its binary re-verified; nothing pushed (image removed on exit)"
   exit 0
 fi
 
@@ -50,13 +69,13 @@ login() { # $1 = nexus service user
   echo "logged in as $1 (temp DOCKER_CONFIG)"
 }
 
-login ci-pull
+# ci-push may read and write belleshop only; the base image needs no registry login.
+login ci-push
 # allow_once: if the tag already exists, never try to overwrite it.
 if ssh -n "${CI_AGENT}" "sudo -n env DOCKER_CONFIG='${work}/docker' docker manifest inspect '${IMAGE}' >/dev/null 2>&1"; then
   echo "${IMAGE} already exists in Nexus; not rebuilding (allow_once)."
 else
-  ssh -n "${CI_AGENT}" "sudo -n env DOCKER_CONFIG='${work}/docker' docker build --pull -q -t '${IMAGE}' '${work}'"
-  login ci-push
+  build
   ssh -n "${CI_AGENT}" "sudo -n env DOCKER_CONFIG='${work}/docker' docker push -q '${IMAGE}'"
 fi
 
