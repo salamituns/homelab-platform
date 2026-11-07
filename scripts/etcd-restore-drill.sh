@@ -88,7 +88,10 @@ sudo -n ctr -n k8s.io run --rm --net-host \
     --initial-advertise-peer-urls http://127.0.0.1:12380 \
     --data-dir /drill/restored </dev/null
 
-sudo -n ctr -n k8s.io run -d --net-host \
+# --log-uri: a detached task's stdout/stderr would be FIFOs with no reader once ctr
+# exits; Go programs die of SIGPIPE on the first log write (owner run 7 Nov: never
+# healthy). A file keeps etcd alive and gives us its log.
+sudo -n ctr -n k8s.io run -d --net-host --log-uri "file://${workdir}/etcd.log" \
   --mount "type=bind,src=${workdir},dst=/drill,options=rbind" \
   "${image}" "${container}" \
   etcd --name drill \
@@ -109,6 +112,10 @@ for i in $(seq 1 30); do
 done
 if [[ "${ok}" -ne 1 ]]; then
   echo "throwaway etcd did not become healthy on 127.0.0.1:12379" >&2
+  task_state="$(sudo -n ctr -n k8s.io tasks ls 2>/dev/null </dev/null || true)"
+  awk -v c="${container}" '$1 == c { print "task: " $0 }' <<<"${task_state}" >&2
+  echo "--- last 30 lines of etcd.log ---" >&2
+  sudo -n tail -n 30 -- "${workdir}/etcd.log" >&2 || true
   exit 1
 fi
 
