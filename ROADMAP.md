@@ -90,7 +90,9 @@ Carried over (kept at the level described in [ADR 0014](docs/adr/0014-secrets-an
 - [ ] Old PBS backups keep plaintext Secrets until retention expires (about three months), and values that do not
       rotate stay valid in them
 - [ ] MySQL datadir recreation does not recreate the rotation accounts
-- [ ] etcd restore is not drilled yet
+- [ ] etcd restore drill (Level 1 script + Level 2 PBS-to-new-VMID); owner has not run it yet
+      ([etcd-restore-drill.md](docs/runbooks/etcd-restore-drill.md))
+- [ ] scheduled etcd snapshots (`ansible/playbooks/k8s-etcd-backup.yml`, 00:45 America/Chicago (CST/CDT); owner apply)
 - [x] NetworkPolicy and NodePorts (Week 6) — done 2026-11-02/03; NodePorts 30080/30081 removed
       (belleshop-deploy #25)
 - [ ] Confirm Jenkins holds no copied `admin.conf`
