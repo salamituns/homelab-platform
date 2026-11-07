@@ -43,8 +43,11 @@ set -euo pipefail
 dry=$1
 workdir="/tmp/etcd-restore-drill-$$"
 container="etcd-restore-drill-$$"
-image="$(awk '/image:/{print $2; exit}' /etc/kubernetes/manifests/etcd.yaml)"
-newest="$(sudo -n ls -1t /var/backups/etcd/etcd-*.db 2>/dev/null | head -1 || true)"
+image="$(sudo -n awk '/image:/{print $2; exit}' /etc/kubernetes/manifests/etcd.yaml)"
+# The glob must expand as root: /var/backups/etcd is 0700, so a non-root shell
+# would pass a literal etcd-*.db to sudo ls and find nothing.
+snaps="$(sudo -n find /var/backups/etcd -maxdepth 1 -type f -name 'etcd-*.db' -printf '%T@ %p\n' 2>/dev/null || true)"
+newest="$(sort -rn <<<"${snaps}" | awk 'NR == 1 { print $2 }')"
 
 echo "Image:    ${image}"
 echo "Snapshot: ${newest:-NONE}"
@@ -93,8 +96,8 @@ sudo -n ctr -n k8s.io run -d --net-host \
     --advertise-peer-urls http://127.0.0.1:12380
 
 ok=0
-for _ in $(seq 1 30); do
-  if sudo -n ctr -n k8s.io task exec --exec-id "wait-$$" "${container}" \
+for i in $(seq 1 30); do
+  if sudo -n ctr -n k8s.io task exec --exec-id "wait-$$-${i}" "${container}" \
       etcdctl --endpoints=http://127.0.0.1:12379 endpoint health >/dev/null 2>&1; then
     ok=1
     break
@@ -122,8 +125,9 @@ fi
 
 secret_keys="$(etcdctl_q get /registry/secrets --prefix --keys-only)"
 secret_key="$(grep -m1 '/registry/secrets/' <<<"${secret_keys}" | tr -d '\r' || true)"
-# Prefix only; never print the value.
-if etcdctl_q get "${secret_key}" --print-value-only | python3 -c 'import sys; d=sys.stdin.buffer.read(20); sys.exit(0 if d.startswith(b"k8s:enc:secretbox") else 1)'; then
+# Prefix only; never print the value. Read all of stdin so ctr never gets SIGPIPE
+# (pipefail would turn that into a false FAIL).
+if etcdctl_q get "${secret_key}" --print-value-only | python3 -c 'import sys; d=sys.stdin.buffer.read(); sys.exit(0 if d.startswith(b"k8s:enc:secretbox") else 1)'; then
   echo "secretbox prefix: PASS (k8s:enc:secretbox on first secret; value not printed)"
 else
   echo "secretbox prefix: FAIL (first secret value is not k8s:enc:secretbox…)" >&2
