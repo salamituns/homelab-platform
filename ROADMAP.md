@@ -139,11 +139,14 @@ Carried over from Week 6 (kept at the level described in [ADR 0015](docs/adr/001
 - [ ] Watch for the kube-network-policies release carrying PR #420 (denied-probe-tail noise,
       ADR 0015 section A)
 - [x] Lynis on k8s nodes managed in Ansible (pin 3.0.9-1, timer 23:30 America/Chicago,
-      textfile metrics); owner apply pending ([lynis.md](docs/runbooks/lynis.md)).
+      textfile metrics); applied 2026-11-07: index Master 64, WorkerNode1 64, WorkerNode2 69 ([lynis.md](docs/runbooks/lynis.md)).
       Falco exception is unchanged (dash under PID 1, `#83`, `#85`).
-- [ ] Serve the Rollouts plugin from inside the lab: git uses initContainer + `file://` and drops
-      `argo-rollouts-plugin-download-egress`; owner must push the belleshop image and copy
-      `nexus-pull` before sync ([runbook](docs/runbooks/argo-rollouts-plugin.md); ADR 0013)
+- [x] Serve the Rollouts plugin from inside the lab (done 2026-11-07, `#89`): image pushed 12:21 CST,
+      initContainer verified + copied, controller log "Copied plugin from …/plugin-bin/…", egress policy
+      `argo-rollouts-plugin-download-egress` gone, BelleShop `backend` Rollout Healthy ([runbook](docs/runbooks/argo-rollouts-plugin.md))
+- [ ] Clear Lynis `PKGS-7392` on all nodes (pending Ubuntu security updates; drain, upgrade, reboot one node at a time)
+- [ ] Manage `nexus-pull` from OpenBao via ExternalSecrets (today hand-copied into `dev`, `kyverno`, `argo-rollouts`;
+      every onboarded app namespace will need it)
 - [x] Pin kube-network-policies by digest (vendor install.yaml still tags `v1.1.1`; kustomize `newTag: v1.1.2` plus digest matching live imageID 2026-11-07)
 
 ## Week 7: Observability + SLOs
