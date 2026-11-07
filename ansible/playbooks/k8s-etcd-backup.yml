@@ -2,7 +2,7 @@
 # Writes /var/backups/etcd/etcd-<UTC>.db plus a 0600 tarball of pki and
 # encryption-config.yaml. A snapshot without that key and PKI cannot decrypt
 # secretbox Secrets. PBS still takes the whole VM; this is the application-level
-# copy. Timer is 00:45 UTC so it does not overlap the 01:00-02:30 PBS window.
+# copy. Timer is 00:45 America/Chicago (host time): after Lynis, before the 01:30 PBS job, so that night's PBS copy of Master carries a fresh snapshot.
 # node-exporter textfile collector is not enabled (live args have no
 # --collector.textfile.directory); no Prometheus metric is wired. systemd
 # failed units on Master are the operator signal until that collector exists.
@@ -18,7 +18,7 @@
   vars:
     etcd_backup_dir: /var/backups/etcd
     etcd_backup_keep_days: 7
-    etcd_backup_oncalendar: "*-*-* 00:45:00 UTC"
+    etcd_backup_oncalendar: "*-*-* 00:45:00 America/Chicago"
   tasks:
     - name: Snapshot directory, root only (holds etcd DB and the encryption key)
       ansible.builtin.file:

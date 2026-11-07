@@ -1,7 +1,7 @@
 # Runbook: etcd snapshot restore drill
 
 Scheduled snapshots: [`ansible/playbooks/k8s-etcd-backup.yml`](../../ansible/playbooks/k8s-etcd-backup.yml)
-(timer `00:45 UTC`, `/var/backups/etcd`, 7 days, mode `0700`/`0600`). Apply that playbook
+(timer `00:45 America/Chicago (CST/CDT)`, `/var/backups/etcd`, 7 days, mode `0700`/`0600`). Apply that playbook
 before Level 1, or there is nothing to restore. Whole-VM copies remain PBS
 ([backups.md](backups.md)); a snapshot without `/etc/kubernetes/pki` and
 `enc/encryption-config.yaml` cannot decrypt secretbox Secrets.

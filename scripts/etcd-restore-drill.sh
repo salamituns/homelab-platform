@@ -52,7 +52,7 @@ echo "Workdir:  ${workdir}"
 echo "Listen:   http://127.0.0.1:12379 (peer 12380)"
 
 if [[ -z "${newest}" ]]; then
-  echo "No snapshot in /var/backups/etcd. Apply ansible/playbooks/k8s-etcd-backup.yml, then either wait for 00:45 UTC or: sudo systemctl start k8s-etcd-backup.service" >&2
+  echo "No snapshot in /var/backups/etcd. Apply ansible/playbooks/k8s-etcd-backup.yml, then either wait for 00:45 America/Chicago (CST/CDT) or: sudo systemctl start k8s-etcd-backup.service" >&2
   exit 1
 fi
 
