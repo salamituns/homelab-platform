@@ -1,0 +1,12 @@
+# Managed by Ansible (role: lynis). Runs after a successful packaged lynis.service.
+[Unit]
+Description=Export Lynis report as node-exporter textfile
+After=lynis.service
+Documentation=file:///usr/local/sbin/lynis-textfile
+
+[Service]
+Type=oneshot
+User=root
+ExecStart={{ lynis_script_path }}
+Nice=19
+PrivateTmp=true

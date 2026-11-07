@@ -1,0 +1,106 @@
+# promtool test rules for Lynis textfile alerts.
+# time() starts at unix 0 in these tests.
+rule_files:
+  - homelab-lynis.rules.yaml
+
+evaluation_interval: 1h
+
+tests:
+  - name: fresh report does not fire stale
+    interval: 1h
+    input_series:
+      - series: 'lynis_report_timestamp_seconds{instance="192.168.1.90:9100",job="node-exporter"}'
+        values: "0x30"
+      - series: 'up{job="node-exporter",instance="192.168.1.90:9100"}'
+        values: "1x30"
+    alert_rule_test:
+      - eval_time: 25h
+        alertname: LynisReportStale
+        exp_alerts: []
+
+  - name: report older than 26h warns after 15m
+    interval: 1h
+    input_series:
+      - series: 'lynis_report_timestamp_seconds{instance="192.168.1.90:9100",job="node-exporter"}'
+        values: "0x40"
+      - series: 'up{job="node-exporter",instance="192.168.1.90:9100"}'
+        values: "1x40"
+    alert_rule_test:
+      - eval_time: 26h
+        alertname: LynisReportStale
+        exp_alerts: []
+      - eval_time: 28h
+        alertname: LynisReportStale
+        exp_alerts:
+          - exp_labels:
+              alertname: LynisReportStale
+              instance: "192.168.1.90:9100"
+              job: node-exporter
+              severity: warning
+            exp_annotations:
+              summary: "Lynis report on a node is older than 26h (or missing)"
+              description: "Node 192.168.1.90:9100 has no fresh lynis_report_timestamp_seconds (26h = 93600s). The timer is 23:30 America/Chicago. Check lynis.timer and lynis-textfile.service. See docs/runbooks/lynis.md."
+              runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/lynis.md
+
+  - name: exporter up without a report is stale
+    interval: 1h
+    input_series:
+      - series: 'up{job="node-exporter",instance="192.168.1.89:9100"}'
+        values: "1x5"
+    alert_rule_test:
+      - eval_time: 2h
+        alertname: LynisReportStale
+        exp_alerts:
+          - exp_labels:
+              alertname: LynisReportStale
+              instance: "192.168.1.89:9100"
+              job: node-exporter
+              severity: warning
+            exp_annotations:
+              summary: "Lynis report on a node is older than 26h (or missing)"
+              description: "Node 192.168.1.89:9100 has no fresh lynis_report_timestamp_seconds (26h = 93600s). The timer is 23:30 America/Chicago. Check lynis.timer and lynis-textfile.service. See docs/runbooks/lynis.md."
+              runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/lynis.md
+
+  - name: three-point drop vs 7d max warns after 1h
+    interval: 1h
+    input_series:
+      - series: 'lynis_hardening_index{instance="192.168.1.90:9100",job="node-exporter"}'
+        values: "64x20 60x10"
+    alert_rule_test:
+      - eval_time: 20h
+        alertname: LynisHardeningIndexDropped
+        exp_alerts: []
+      - eval_time: 22h
+        alertname: LynisHardeningIndexDropped
+        exp_alerts:
+          - exp_labels:
+              alertname: LynisHardeningIndexDropped
+              instance: "192.168.1.90:9100"
+              job: node-exporter
+              severity: warning
+            exp_annotations:
+              summary: "Lynis hardening index fell by 3 or more vs the 7-day max"
+              description: "192.168.1.90:9100 index is 4 below its 7-day max. Raise the score via Ansible hardening, not by skipping tests. See docs/runbooks/lynis.md."
+              runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/lynis.md
+
+  - name: warnings > 0 for a day
+    interval: 1h
+    input_series:
+      - series: 'lynis_warnings{instance="192.168.1.90:9100",job="node-exporter"}'
+        values: "1x30"
+    alert_rule_test:
+      - eval_time: 23h
+        alertname: LynisWarningsPresent
+        exp_alerts: []
+      - eval_time: 26h
+        alertname: LynisWarningsPresent
+        exp_alerts:
+          - exp_labels:
+              alertname: LynisWarningsPresent
+              instance: "192.168.1.90:9100"
+              job: node-exporter
+              severity: warning
+            exp_annotations:
+              summary: "Lynis warnings have been > 0 for a day"
+              description: "192.168.1.90:9100 still has lynis_warnings > 0 after 24h. Live baseline (7 Nov 2026) is one warning (PKGS-7392). UI only. See docs/runbooks/lynis.md."
+              runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/lynis.md

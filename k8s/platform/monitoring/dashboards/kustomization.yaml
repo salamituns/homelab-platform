@@ -20,3 +20,6 @@ configMapGenerator:
   - name: grafana-dashboard-belleshop-slo
     files:
       - belleshop-slo.json
+  - name: grafana-dashboard-lynis
+    files:
+      - lynis.json

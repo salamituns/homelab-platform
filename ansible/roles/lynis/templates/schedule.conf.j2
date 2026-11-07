@@ -1,0 +1,6 @@
+# Managed by Ansible (role: lynis). Drop-in for the packaged lynis.timer only.
+# Does not change lynis.service ExecStart (Falco exception).
+[Timer]
+OnCalendar=
+OnCalendar={{ lynis_oncalendar }}
+RandomizedDelaySec={{ lynis_randomized_delay_sec }}
