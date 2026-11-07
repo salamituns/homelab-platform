@@ -21,6 +21,9 @@ Design facts that decide everything below:
   fixed after v1.1.2 by [#420](https://github.com/kubernetes-sigs/kube-network-policies/pull/420) —
   tail packets of node-to-pod HTTPS probes can log DENY verdicts while the probes still pass.
   Expect a few such lines; they are noise, not outages, until the next release.
+- **Image pin:** vendor file `kube-network-policies-install-v1.1.2.yaml` still references image
+  `registry.k8s.io/networking/kube-network-policies:v1.1.1` (upstream install.yaml lag).
+  Kustomize overlays `newTag: v1.1.2`. There is **no digest pin** (ROADMAP follow-up).
 
 ## Order of operations
 

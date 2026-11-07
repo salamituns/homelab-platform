@@ -219,3 +219,11 @@ supports this through the official traffic-router plugin
 | 3. HTTPRoutes | Platform routes done (b144699): argocd/grafana/rollouts give 9/9 identical status codes on `.240` and `.244`. Namespace labels live in the no-prune `cluster-config` app. BelleShop routes: belleshop-deploy #8, all 15 checks identical. Known difference: ingress-nginx matched `/api` case-insensitively; HTTPRoute does not (`/API/...` goes to the frontend) |
 | 4. Canary on the Gateway API plugin | Done 2026-10-31 (belleshop-deploy #9, #11): first canary stepped `belleshop-api` 90/10 → 50/50 → 100/0, AnalysisRun Successful |
 | 5. Cutover to `.240`, remove ingress-nginx | Done 2026-10-31 09:05 (homelab-platform #1, #2; belleshop-deploy #12): `.240` moved to `homelab-gateway-nginx` 1 s after the ingress-nginx Service was deleted; a probe at 2/s saw 1 failed request in 600. `scripts/route-smoke.sh 192.168.1.240` matches the pre-cutover baseline 15/15. No ingress-nginx objects remain |
+
+## Update 7 Nov 2026
+
+The decision table above still says the Gateway API plugin is loaded via initContainer with **no runtime internet download**. That is not how the cluster is wired.
+
+Live `k8s/platform/argo-rollouts/kustomization.yaml` sets `trafficRouterPlugins` `location` to the GitHub release URL for `v0.17.0` (`gatewayapi-plugin-linux-amd64`) with `sha256` pin `1904ca787d33107c140521899d61fff030ee75d99908bd175fca5a4647759061`. The controller **downloads the binary at start** and refuses it unless the digest matches. NetworkPolicy `argo-rollouts-plugin-download-egress` allows `:443` to `0.0.0.0/0` for that fetch.
+
+Open follow-up (ROADMAP): serve the plugin from inside the lab (Nexus raw or initContainer) and drop that internet egress rule.

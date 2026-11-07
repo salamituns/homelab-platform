@@ -9,7 +9,7 @@ node-loss drill. One node at a time. Expected time: about 10 minutes per node.
 |---|---|
 | master (108) | `kubectl` and Argo CD syncs stop for 1-2 minutes; running apps keep serving |
 | workernode2 (102) | Prometheus is down: its local-path PV lives on this node |
-| workernode1 (107) | BelleShop MySQL and Alertmanager are down: their local-path PVs live on this node |
+| workernode1 (107) | BelleShop MySQL and Loki (`loki-0`, 10 Gi local-path) are down. Alertmanager email survives: 2 replicas since `#78` (`alertmanager-0` on this node, `alertmanager-1` on workernode2, live 7 Nov 2026) |
 
 local-path volumes are a folder on one node's disk, so those pods cannot move; they wait as Pending until
 the node is back. No PodDisruptionBudgets exist, so the drain never waits for anything.

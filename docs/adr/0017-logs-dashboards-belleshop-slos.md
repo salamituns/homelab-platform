@@ -275,3 +275,11 @@ cap. After the Loki PVC binds, `kubectl get pvc,pv` plus `df` on the chosen work
    holds Prometheus or MySQL.
 4. Exact Alloy metrics port and Loki chart values (`singleBinary.replicas: 1`, gateway enabled or Grafana
    talking to the backend Service) — pin from `helm show values` at rollout, not from this document.
+
+## Update 7 Nov 2026
+
+Do not rewrite the decision above. Live follow-ups after this ADR:
+
+- Watchdog no longer routes to `null`. It pings healthchecks.io via Alertmanager receiver `deadman` (`#81`; URL only in OpenBao `watchdog_url`). Silence drill 5 Nov 2026 CST: DOWN ~10 min (period 5 + grace 5), UP when the silence ended ([`docs/runbooks/monitoring.md`](../runbooks/monitoring.md)).
+- Alertmanager HA (`#78`): 2 replicas, hard `podAntiAffinity` on hostname, gossip `:9094`.
+- `BelleShopSloProbeAbsent` plus blackbox **2 replicas** (`#79`/`#80`) after drill 5 vanished the probe series when workernode1 went down.
