@@ -64,31 +64,23 @@ print(json.dumps(s))
 ' | ssh Master 'sudo -n kubectl --kubeconfig /etc/kubernetes/admin.conf apply -f -'
 ```
 
-### 2. Build and push the plugin image (`allow_once` — first tag wins)
+### 2. Build and push the plugin image (`allow_once`: first tag wins)
 
-On a host that can push as `ci-push` (usually `ci-agent`) and pull `busybox` through
-`registry.home.arpa`. Do **not** overwrite the tag; hosted `belleshop` is `allow_once`.
+One command from the Mac (repo root). It works on `ci-agent` in a root-only temp dir with its own
+`DOCKER_CONFIG`, downloads the release and checks `sha256` before anything else, builds as `ci-pull`
+(the busybox base comes through the `dockerhub` proxy), pushes as `ci-push`, prints the registry digest,
+logs out and deletes the temp dir. Passwords go from `/etc/nexus/secrets/*` on `nexus` to
+`docker login --password-stdin` on `ci-agent` over ssh stdin: never argv, never your terminal.
+If the tag already exists it does not try to overwrite it.
 
 ```sh
-umask 077
-WORKDIR=$(mktemp -d)
-cd "$WORKDIR"
-# GitHub download: owner machine / ci-agent, not from a controller pod.
-curl -fsSL -o gatewayapi-plugin-linux-amd64 \
-  https://github.com/argoproj-labs/rollouts-plugin-trafficrouter-gatewayapi/releases/download/v0.17.0/gatewayapi-plugin-linux-amd64
-echo "1904ca787d33107c140521899d61fff030ee75d99908bd175fca5a4647759061  gatewayapi-plugin-linux-amd64" | sha256sum -c
-cp /path/to/homelab-platform/k8s/platform/argo-rollouts/plugin-image/Dockerfile .
-docker build --pull -t registry.home.arpa/belleshop/rollouts-gatewayapi-plugin:v0.17.0 .
-docker push registry.home.arpa/belleshop/rollouts-gatewayapi-plugin:v0.17.0
-docker image inspect --format '{{index .RepoDigests 0}}' \
-  registry.home.arpa/belleshop/rollouts-gatewayapi-plugin:v0.17.0
-# Prefer the Nexus repository digest (same lesson as BelleShop: not always RepoDigests[0]).
-rm -rf "$WORKDIR"
+scripts/rollouts-plugin-image.sh --dry-run   # download + sha256 + plan; no login, no push
+scripts/rollouts-plugin-image.sh
 ```
 
-Optional follow-up: put that `sha256:…` on `images[].digest` in
-`k8s/platform/argo-rollouts/kustomization.yaml` so the tag cannot move (it cannot anyway
-under `allow_once`, but a digest pin matches the rest of the platform).
+Dry-run verified 2026-11-07 on ci-agent (`sha256sum: OK`, exit 0, no temp dir left). The login,
+build and push path needs the registry credentials, so its first real run is the owner's.
+Optional follow-up: put the printed digest on `images[].digest` in `k8s/platform/argo-rollouts/kustomization.yaml`.
 
 ### 3. Merge / sync, then confirm no GitHub fetch
 
