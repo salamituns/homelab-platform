@@ -116,3 +116,18 @@ or delete it; nothing else uses it.
 - Exact CWD of `quay.io/argoproj/argo-rollouts:v1.9.1`. Relative `plugin-bin` is mounted at
   `/home/argo-rollouts/plugin-bin`, so the absolute `file:///` path is the safe choice.
 - `RepoDigests[0]` vs Nexus repo digest: copy the digest from the Nexus UI if they differ.
+
+## Recorded rollout 2026-11-07
+
+| Step | Result |
+|---|---|
+| `nexus-pull` copied to `argo-rollouts` | 12:01 CST (owner) |
+| Image push (`scripts/rollouts-plugin-image.sh`) | `PUT …/manifests/v0.17.0` 201 at 12:21:40 CST (Nexus request log) |
+| Argo CD sync | `argo-rollouts` Synced/Healthy at `c6bf90d` |
+| initContainer | exit 0 (sha256 OK, copied) |
+| Controller | `Copied plugin from /home/argo-rollouts/plugin-bin/gatewayapi-plugin-linux-amd64` |
+| Egress | `argo-rollouts-plugin-download-egress`: NotFound |
+| BelleShop | Rollout `backend` Healthy 2/2, 0 controller errors in 5 min |
+
+First owner build failed with 403 on the `dockerhub` proxy (`ci-pull` reads `ghcr` only); fixed by pulling the
+pinned busybox straight from Docker Hub.
