@@ -1,0 +1,12 @@
+# Managed by Ansible (homelab-platform, playbook: k8s-etcd-backup.yml).
+# 00:45 UTC is before the PBS daily-all window (01:00-02:30).
+[Unit]
+Description=Daily etcd snapshot timer
+
+[Timer]
+OnCalendar={{ etcd_backup_oncalendar }}
+Persistent=true
+Unit=k8s-etcd-backup.service
+
+[Install]
+WantedBy=timers.target
