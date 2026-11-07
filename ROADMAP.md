@@ -123,9 +123,9 @@ HTTP(S) to lab services for about 40 minutes
 
 Carried over from Week 6 (kept at the level described in [ADR 0015](docs/adr/0015-network-policy-and-platform-hardening.md) section G and its runbooks):
 - [x] OIDC/SSO for the admin UIs moved into Week 7 as the designed first item ([ADR 0016](docs/adr/0016-oidc-sso-admin-uis-gitea.md); design only, rollout pending)
-- [ ] Remove the stale dnsmasq on `tuns` (legacy `homelab.local` config listening on 10.2.6.181,
-      superseded by ADR 0004, now also cut off by the host firewall): `scripts/pve-dnsmasq-retire.sh`,
-      owner-run with `--dry-run`
+- [x] Remove the stale dnsmasq on `tuns` (legacy `homelab.local` config listening on 10.2.6.181,
+      superseded by ADR 0004): stopped 3 Nov 2026 (`scripts/pve-dnsmasq-retire.sh`); verified 7 Nov 2026
+      `systemctl is-active dnsmasq` = inactive, `is-enabled` = disabled on tuns
 - [ ] Renew the Proxmox UI certificate by **2028-11-02** (825-day leaf; `docs/runbooks/proxmox-ui-cert.md`)
 - [ ] iDRAC, without racadm: set the IP range filter to the Mac (`192.168.1.121/32`) in the web UI,
       and check the licence level (Virtual Console needs Enterprise; Serial over LAN is already enabled)
@@ -136,6 +136,10 @@ Carried over from Week 6 (kept at the level described in [ADR 0015](docs/adr/001
 - [ ] Watch for the kube-network-policies release carrying PR #420 (denied-probe-tail noise,
       ADR 0015 section A)
 - [ ] Lynis on all nodes is unmanaged (base image, Jan 2026); decide: manage in Ansible or remove.
+      Falco exception is dash under PID 1 (`#83`, `#85`).
+- [ ] Serve the Rollouts plugin from inside the lab (Nexus raw or initContainer) and drop the internet egress rule
+      (`argo-rollouts-plugin-download-egress`; ADR 0013 update 7 Nov 2026)
+- [ ] Pin kube-network-policies by digest (vendor install.yaml still tags `v1.1.1`; kustomize `newTag: v1.1.2`)
 
 ## Week 7: Observability + SLOs
 - [x] OIDC SSO for the admin UIs with Gitea as the provider ([ADR 0016](docs/adr/0016-oidc-sso-admin-uis-gitea.md)):

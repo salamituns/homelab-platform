@@ -75,3 +75,7 @@ Survey of the cluster on 2026-10-30, before choosing tools:
 | Third-party images through Nexus | Done 2026-10-31: `dockerhub` proxy repo; Caddy routes `registry.home.arpa/v2/library/*` to it, so one name, CA and pull secret still cover everything. mysql pinned to the digest it already ran (`7dcddc01…`), dump taken first, 76 rows intact. Audit failures left: three scaled-to-zero ReplicaSets from before signing (rollback history, ages out) |
 | Enforce + proof | Done 2026-10-31: all five policies `Deny` (11c5a9e). Proof ([evidence](../evidence/week-04-admission.txt)): an unsigned image from our own repo, `nginx:latest`, and a signed image without limits are denied; a signed, digest-pinned image with limits is admitted; an unlabelled namespace is untouched |
 | Pod Security `enforce: restricted` on `dev` | Done 2026-10-31 (belleshop-deploy PR #5). A privileged pod with our signed image is refused: the pod spec is checked, not only the image |
+
+## Update 7 Nov 2026
+
+The decision table says “CPU/memory requests and limits on every container.” Policy `require-requests-limits` (`k8s/platform/kyverno-policies/require-requests-limits.yaml`) requires non-zero **CPU request**, **memory request**, and **memory limit**. It does **not** require a CPU limit. The policy was not changed.

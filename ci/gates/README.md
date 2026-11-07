@@ -47,8 +47,9 @@ export COSIGN_KEY=... COSIGN_PASSWORD=...
 /opt/ci-gates/sign.sh "${IMAGE_REF}@sha256:${DIGEST}"
 ```
 
-SonarQube is **not** a script here: Jenkins `withSonarQubeEnv('sonarqube')` +
-`waitForQualityGate abortPipeline: true`.
+SonarQube is **not** a script here. There is no Jenkins `waitForQualityGate` stage and no
+SonarQube webhook (SSRF guard rejects RFC1918 targets, and a webhook could be forged).
+The scanner waits on the gate itself: `-Dsonar.qualitygate.wait=true` (ADR 0011).
 
 ## Exceptions (`.trivyignore.yaml`)
 

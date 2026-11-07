@@ -463,3 +463,7 @@ control-plane-to-data-plane port (covered by the intra-namespace allow); macOS n
 the security note and BetterTLS; where Terraform is run from (its provider credentials are outside the repo, so the
 Mac is assumed from the repo comments); falco chart resource values may drift from the defaults cited — pin at
 implementation along with image digests.
+
+## Update 7 Nov 2026
+
+The appendix table still lists webhook ingress **9443** for `external-secrets` and `cert-manager`. Live Services and pods (and the matching runbooks) use container port **10250** for those two webhooks; Kyverno remains **9443**. Rollout step 3 already recorded this correction; the appendix was not rewritten.
