@@ -99,7 +99,8 @@ sudo -n ctr -n k8s.io run -d --net-host --log-uri "file://${workdir}/etcd.log" \
     --listen-client-urls http://127.0.0.1:12379 \
     --advertise-client-urls http://127.0.0.1:12379 \
     --listen-peer-urls http://127.0.0.1:12380 \
-    --advertise-peer-urls http://127.0.0.1:12380 </dev/null
+    --initial-advertise-peer-urls http://127.0.0.1:12380 \
+    --initial-cluster drill=http://127.0.0.1:12380 </dev/null
 
 ok=0
 for i in $(seq 1 30); do

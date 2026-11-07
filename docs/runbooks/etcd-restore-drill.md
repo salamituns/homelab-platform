@@ -49,6 +49,23 @@ is removed even on failure.
 If it fails: the live control plane is unchanged. Inspect `ctr -n k8s.io tasks ls` for a
 leftover `etcd-restore-drill-*` and `rm -rf /tmp/etcd-restore-drill-*` as root.
 
+### Recorded run 2026-11-07 (Level 1)
+
+| Item | Result |
+|---|---|
+| Snapshot | `/var/backups/etcd/etcd-20261107T172851Z.db` (26 MB, first nightly-job snapshot, taken 11:28 CST) |
+| Restore | `etcdutl snapshot restore` OK, member re-created on `127.0.0.1:12380` |
+| Throwaway etcd | healthy on `127.0.0.1:12379` |
+| Contents | 17 namespaces, 42 Secrets: **equal to the live cluster** at the same time |
+| Encryption | first Secret starts `k8s:enc:secretbox` (value not printed) |
+| Cleanup | no drill containers, no `/tmp/etcd-restore-drill-*`, no listeners on 12379/12380 |
+| Result | **PASS** |
+
+Bugs found only by running it (PRs #91–#95): SIGPIPE under `pipefail` (`ctr | awk exit`), root-only
+manifest and 0700 backup dir read without root (glob expanded by the non-root shell), `ctr run` eating the
+script from `ssh … bash -s` stdin, and `--advertise-peer-urls` (the etcd flag is
+`--initial-advertise-peer-urls`). The `--log-uri` diagnostics from #94 are what exposed the last one.
+
 ## Level 2 — owner, optional, new VMID (NIC down)
 
 Mirrors [backups.md](backups.md) restore-drill: restore VM **108** to an **unused** VMID
