@@ -139,7 +139,7 @@ Carried over from Week 6 (kept at the level described in [ADR 0015](docs/adr/001
       Falco exception is dash under PID 1 (`#83`, `#85`).
 - [ ] Serve the Rollouts plugin from inside the lab (Nexus raw or initContainer) and drop the internet egress rule
       (`argo-rollouts-plugin-download-egress`; ADR 0013 update 7 Nov 2026)
-- [ ] Pin kube-network-policies by digest (vendor install.yaml still tags `v1.1.1`; kustomize `newTag: v1.1.2`)
+- [x] Pin kube-network-policies by digest (vendor install.yaml still tags `v1.1.1`; kustomize `newTag: v1.1.2` plus digest matching live imageID 2026-11-07)
 
 ## Week 7: Observability + SLOs
 - [x] OIDC SSO for the admin UIs with Gitea as the provider ([ADR 0016](docs/adr/0016-oidc-sso-admin-uis-gitea.md)):

@@ -3,10 +3,13 @@
 # namespace: upstream writes kube-system, but kube-system is exempt from every default-deny
 # in the ADR and should not gain a policy-relevant workload.
 #
-# The image tag is pinned to v1.1.2: the v1.1.2 release tag still ships an install.yaml
-# referencing image v1.1.1 (upstream manifest lag; the v1.1.2 image exists in registry.k8s.io,
-# verified 2026-11-02). v1.1.2 is what the ADR chose; the #420 probe-tail fix is in neither
-# and is expected in the next release, so the #417 denial-log noise is accepted until then.
+# The image tag is pinned to v1.1.2 and by digest: the v1.1.2 release tag still ships an
+# install.yaml referencing image v1.1.1 (upstream manifest lag; the v1.1.2 image exists in
+# registry.k8s.io, verified 2026-11-02). Digest
+# sha256:c671f98e444825d57c590c92da1b5e66070917c4d3dff1f9279775e6b73254fe is the live
+# imageID on all three agent pods (2026-11-07). v1.1.2 is what the ADR chose; the #420
+# probe-tail fix is in neither and is expected in the next release, so the #417 denial-log
+# noise is accepted until then.
 #
 # Flags stay at the upstream defaults on purpose (ADR 0015 A): --fail-open defaults true, so
 # a crash or deletion stops enforcement instead of blackholing traffic (rollback = delete the
@@ -21,3 +24,4 @@ images:
   # see header: the tagged manifest lags the release by one image tag
   - name: registry.k8s.io/networking/kube-network-policies
     newTag: v1.1.2
+    digest: sha256:c671f98e444825d57c590c92da1b5e66070917c4d3dff1f9279775e6b73254fe
