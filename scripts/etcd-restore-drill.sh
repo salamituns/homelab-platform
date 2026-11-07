@@ -76,6 +76,9 @@ sudo -n install -d -m 0700 -- "${workdir}"
 sudo -n cp -a -- "${newest}" "${workdir}/etcd.db"
 sudo -n chmod 0600 -- "${workdir}/etcd.db"
 
+# Every ctr call gets </dev/null: this script arrives on bash's stdin (ssh ... bash -s),
+# and an attached `ctr run` would read the rest of the script and end the drill silently
+# (owner run 7 Nov: stopped right after "restored snapshot", exit 0, no RESULT).
 sudo -n ctr -n k8s.io run --rm --net-host \
   --mount "type=bind,src=${workdir},dst=/drill,options=rbind" \
   "${image}" "${container}-restore" \
@@ -83,7 +86,7 @@ sudo -n ctr -n k8s.io run --rm --net-host \
     --name drill \
     --initial-cluster drill=http://127.0.0.1:12380 \
     --initial-advertise-peer-urls http://127.0.0.1:12380 \
-    --data-dir /drill/restored
+    --data-dir /drill/restored </dev/null
 
 sudo -n ctr -n k8s.io run -d --net-host \
   --mount "type=bind,src=${workdir},dst=/drill,options=rbind" \
@@ -93,12 +96,12 @@ sudo -n ctr -n k8s.io run -d --net-host \
     --listen-client-urls http://127.0.0.1:12379 \
     --advertise-client-urls http://127.0.0.1:12379 \
     --listen-peer-urls http://127.0.0.1:12380 \
-    --advertise-peer-urls http://127.0.0.1:12380
+    --advertise-peer-urls http://127.0.0.1:12380 </dev/null
 
 ok=0
 for i in $(seq 1 30); do
   if sudo -n ctr -n k8s.io task exec --exec-id "wait-$$-${i}" "${container}" \
-      etcdctl --endpoints=http://127.0.0.1:12379 endpoint health >/dev/null 2>&1; then
+      etcdctl --endpoints=http://127.0.0.1:12379 endpoint health </dev/null >/dev/null 2>&1; then
     ok=1
     break
   fi
@@ -111,7 +114,7 @@ fi
 
 etcdctl_q() {
   sudo -n ctr -n k8s.io task exec --exec-id "q-$RANDOM" "${container}" \
-    etcdctl --endpoints=http://127.0.0.1:12379 "$@"
+    etcdctl --endpoints=http://127.0.0.1:12379 "$@" </dev/null
 }
 
 ns_count="$(etcdctl_q get /registry/namespaces --prefix --keys-only | grep -c '/registry/namespaces/' || true)"
