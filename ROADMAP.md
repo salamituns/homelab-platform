@@ -141,8 +141,9 @@ Carried over from Week 6 (kept at the level described in [ADR 0015](docs/adr/001
 - [x] Lynis on k8s nodes managed in Ansible (pin 3.0.9-1, timer 23:30 America/Chicago,
       textfile metrics); owner apply pending ([lynis.md](docs/runbooks/lynis.md)).
       Falco exception is unchanged (dash under PID 1, `#83`, `#85`).
-- [ ] Serve the Rollouts plugin from inside the lab (Nexus raw or initContainer) and drop the internet egress rule
-      (`argo-rollouts-plugin-download-egress`; ADR 0013 update 7 Nov 2026)
+- [ ] Serve the Rollouts plugin from inside the lab: git uses initContainer + `file://` and drops
+      `argo-rollouts-plugin-download-egress`; owner must push the belleshop image and copy
+      `nexus-pull` before sync ([runbook](docs/runbooks/argo-rollouts-plugin.md); ADR 0013)
 - [x] Pin kube-network-policies by digest (vendor install.yaml still tags `v1.1.1`; kustomize `newTag: v1.1.2` plus digest matching live imageID 2026-11-07)
 
 ## Week 7: Observability + SLOs

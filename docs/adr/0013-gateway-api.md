@@ -227,3 +227,14 @@ The decision table above still says the Gateway API plugin is loaded via initCon
 Live `k8s/platform/argo-rollouts/kustomization.yaml` sets `trafficRouterPlugins` `location` to the GitHub release URL for `v0.17.0` (`gatewayapi-plugin-linux-amd64`) with `sha256` pin `1904ca787d33107c140521899d61fff030ee75d99908bd175fca5a4647759061`. The controller **downloads the binary at start** and refuses it unless the digest matches. NetworkPolicy `argo-rollouts-plugin-download-egress` allows `:443` to `0.0.0.0/0` for that fetch.
 
 Open follow-up (ROADMAP): serve the plugin from inside the lab (Nexus raw or initContainer) and drop that internet egress rule.
+
+## Update 7 Nov 2026 (plugin in-lab)
+
+Git now matches the decision table: initContainer, `location: file://…`, no GitHub fetch.
+
+**Choice: (a) initContainer from `registry.home.arpa/belleshop/rollouts-gatewayapi-plugin`, not (b) Nexus raw + egress `.87/32`.**
+
+- Image pull uses kubelet + containerd `certs.d` (already trusts Caddy). Design (b) would HTTPS-fetch from the controller process, which does **not** trust that CA (Kyverno does via `values.yaml` `global.caCertificates`; this namespace is not Kyverno-enforced).
+- `k8s-pull` may read `belleshop` and `dockerhub` only; Caddy routes `/v2/library/*` and `/v2/aquasecurity/*`, not `/v2/argoproj-labs/*`. The upstream GHCR plugin image cannot be pulled as-is.
+- v1.9.1 `DownloadPlugins` SHA-256-checks http(s) only. file:// still keeps a check: the initContainer runs `sha256sum -c` on `1904ca787d33107c140521899d61fff030ee75d99908bd175fca5a4647759061` before copying into `plugin-bin`.
+- Result: NetworkPolicy `argo-rollouts-plugin-download-egress` is deleted (not narrowed). Owner must push the image and copy `nexus-pull` first — [`docs/runbooks/argo-rollouts-plugin.md`](../runbooks/argo-rollouts-plugin.md).
