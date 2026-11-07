@@ -22,7 +22,19 @@ trap cleanup_live EXIT
 mkdir -p -- "${BACKUP_DIR}"
 chmod 0700 -- "${BACKUP_DIR}"
 
-cid="$(ctr -n k8s.io containers ls | awk '/registry\.k8s\.io\/etcd:/{print $1; exit}')"
+# Pick the RUNNING etcd container. Read each list fully first: piping into an
+# early-exiting awk/head makes ctr die of SIGPIPE, and pipefail turns that into
+# exit 141 (what the first run on 2026-11-07 hit). Exited etcd containers can
+# linger after a restart, so match the task state, not just the image.
+etcd_ids="$(ctr -n k8s.io containers ls -q 'labels."io.kubernetes.container.name"==etcd')"
+tasks="$(ctr -n k8s.io tasks ls)"
+cid=""
+for c in ${etcd_ids}; do
+  if awk -v c="${c}" '$1 == c && $3 == "RUNNING" { found = 1 } END { exit !found }' <<<"${tasks}"; then
+    cid="${c}"
+    break
+  fi
+done
 if [[ -z "${cid}" ]]; then
   echo "k8s-etcd-backup: no running etcd container in k8s.io" >&2
   exit 1
