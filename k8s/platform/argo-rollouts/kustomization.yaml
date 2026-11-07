@@ -9,10 +9,16 @@ resources:
   - rollouts-redirect.yaml    # http -> https for the same host (ADR 0015 B)
   - netpol-allow.yaml   # allow flows (ADR 0015 A appendix, round 2); never inert with the agent live
   - netpol-default-deny.yaml   # default-deny ingress+egress (ADR 0015 A, round 2)
+# Plugin image is owner-pushed to belleshop (k8s-pull cannot read the ghcr proxy).
+# Add digest: after the first push (runbook). Tag v0.17.0 is allow_once.
+images:
+  - name: registry.home.arpa/belleshop/rollouts-gatewayapi-plugin
+    newTag: v0.17.0
 patches:
-  # Gateway API traffic router for canaries (ADR 0013). The controller downloads the binary at start and refuses it
-  # unless the SHA-256 matches (verified 2026-10-31 against our own download and the GitHub release digest).
-  # Permissions on HTTPRoutes are a Role in the namespace that owns the route (belleshop-deploy), not a ClusterRole.
+  # Gateway API traffic router for canaries (ADR 0013). file:// so the controller never
+  # fetches GitHub. v1.9.1 only SHA-256-checks http(s); the initContainer sha256sum -c is
+  # the enforced check (same digest as the GitHub release). HTTPRoute RBAC lives in
+  # belleshop-deploy, not here.
   - target:
       kind: ConfigMap
       name: argo-rollouts-config
@@ -22,7 +28,7 @@ patches:
         value:
           trafficRouterPlugins: |-
             - name: "argoproj-labs/gatewayAPI"
-              location: "https://github.com/argoproj-labs/rollouts-plugin-trafficrouter-gatewayapi/releases/download/v0.17.0/gatewayapi-plugin-linux-amd64"
+              location: "file:///home/argo-rollouts/plugin-bin/gatewayapi-plugin-linux-amd64"
               sha256: "1904ca787d33107c140521899d61fff030ee75d99908bd175fca5a4647759061"
   # Plugins load at start: changing this value restarts the controller through Argo CD when the plugin changes.
   - target:
@@ -32,4 +38,35 @@ patches:
       - op: add
         path: /spec/template/metadata/annotations
         value:
-          homelab.arpa/traffic-router-plugins: gatewayapi-v0.17.0
+          homelab.arpa/traffic-router-plugins: gatewayapi-v0.17.0-file
+      - op: add
+        path: /spec/template/spec/imagePullSecrets
+        value:
+          - name: nexus-pull
+      - op: add
+        path: /spec/template/spec/initContainers
+        value:
+          - name: copy-gatewayapi-plugin
+            image: registry.home.arpa/belleshop/rollouts-gatewayapi-plugin:v0.17.0
+            imagePullPolicy: IfNotPresent
+            command: ["/bin/sh", "-c"]
+            args:
+              - echo "1904ca787d33107c140521899d61fff030ee75d99908bd175fca5a4647759061  /plugin/gatewayapi-plugin-linux-amd64" | sha256sum -c && cp /plugin/gatewayapi-plugin-linux-amd64 /home/argo-rollouts/plugin-bin/gatewayapi-plugin-linux-amd64
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop: ["ALL"]
+              readOnlyRootFilesystem: true
+              runAsNonRoot: true
+              runAsUser: 65534
+              seccompProfile:
+                type: RuntimeDefault
+            resources:
+              requests:
+                cpu: 10m
+                memory: 16Mi
+              limits:
+                memory: 32Mi
+            volumeMounts:
+              - name: plugin-bin
+                mountPath: /home/argo-rollouts/plugin-bin

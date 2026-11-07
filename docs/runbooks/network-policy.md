@@ -192,7 +192,8 @@ lesson from the brief: a file that exists but is not listed never deploys).
 Flows (live evidence in the file header): DNS + API for the controller and dashboard;
 dashboard 3100 from the Gateway; controller -> Prometheus 9090 for canary analysis. The
 controller's 8090 metrics port has no ServiceMonitor, so nothing scrapes it and no ingress
-rule exists for it.
+rule exists for it. The GitHub plugin download egress (`:443` to `0.0.0.0/0`) is gone: the
+binary is copied from an in-lab image ([argo-rollouts-plugin.md](argo-rollouts-plugin.md)).
 
 Watch after sync:
 
