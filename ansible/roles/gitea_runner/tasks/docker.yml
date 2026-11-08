@@ -1,0 +1,85 @@
+# Pinned Docker CE like roles/ci_agent (ADR 0011): the engine is what isolates untrusted
+# job containers, so it must not float (held against unattended-upgrades).
+
+- name: Download Docker apt signing key
+  ansible.builtin.get_url:
+    url: "{{ gitea_runner_docker_apt_key_url }}"
+    dest: "{{ gitea_runner_docker_apt_key_dest }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Add Docker official apt repository
+  ansible.builtin.deb822_repository:
+    name: docker
+    types: deb
+    uris: https://download.docker.com/linux/ubuntu
+    suites: "{{ ansible_facts['distribution_release'] }}"
+    components:
+      - stable
+    architectures:
+      - amd64
+    signed_by: "{{ gitea_runner_docker_apt_key_dest }}"
+    state: present
+
+# Same as ci-agent: the legacy .list next to the new .sources makes apt see one repo twice.
+- name: Remove the legacy Docker apt .list after switching to deb822
+  ansible.builtin.file:
+    path: /etc/apt/sources.list.d/docker.list
+    state: absent
+
+# Lesson from the workernode3 join (runbooks/k8s-add-node.md, bug 2): a repo added a moment
+# ago needs a real refresh before a pinned install - no cache_valid_time, or the cache
+# cloud-init just wrote hides the new repo and the exact version is "not found".
+- name: Install pinned Docker CE packages (always refresh the apt cache)
+  ansible.builtin.apt:
+    name: "{{ gitea_runner_docker_packages }}"
+    state: present
+    update_cache: true
+
+- name: Hold Docker CE packages at the pinned versions
+  ansible.builtin.dpkg_selections:
+    name: "{{ item }}"
+    selection: hold
+  loop: "{{ gitea_runner_docker_hold }}"
+  ignore_errors: "{{ ansible_check_mode }}"
+
+- name: Ensure the runner system group exists
+  ansible.builtin.group:
+    name: "{{ gitea_runner_group }}"
+    system: true
+    state: present
+
+# Members of `docker` reach the root-privileged daemon socket. That is exactly the point of
+# a dedicated build VM (same reasoning as ci-agent, ADR 0011): a job that reaches Docker
+# cannot also reach any controller or cluster credential, because none live here.
+- name: Ensure the runner system user exists and is in the docker group
+  ansible.builtin.user:
+    name: "{{ gitea_runner_user }}"
+    group: "{{ gitea_runner_group }}"
+    groups: docker
+    append: true
+    system: true
+    shell: /usr/sbin/nologin
+    home: "{{ gitea_runner_home }}"
+    create_home: true
+    state: present
+  ignore_errors: "{{ ansible_check_mode }}"
+
+- name: Create the runner work and job directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ gitea_runner_user }}"
+    group: "{{ gitea_runner_group }}"
+    mode: "0750"
+  loop:
+    - "{{ gitea_runner_home }}"
+    - "{{ gitea_runner_home }}/work"
+
+- name: Enable and start docker (unix socket only; no published ports)
+  ansible.builtin.systemd_service:
+    name: docker
+    state: started
+    enabled: true
+  ignore_errors: "{{ ansible_check_mode }}"

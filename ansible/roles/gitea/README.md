@@ -20,7 +20,7 @@ Deploys and hardens the rebuilt Gitea server on `gitea` (`192.168.1.97`, VMID 12
    - Terminates TLS for `gitea.home.arpa` (plus any temporary SANs in `gitea_extra_names`) using `tls internal` and proxies to `127.0.0.1:3000`.
    - Fetches Caddy's local root CA certificate (`/var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt`) to `ansible/files/ca/gitea-caddy-root.crt` on the controller.
 5. **Firewall (`tasks/firewall.yml`):**
-   - Allows `443/tcp` in UFW from the five named lab clients (`master`, `workernode1`, `workernode2`, `gateway`, `mac`). Port `3000` is never opened.
+   - Allows `443/tcp` in UFW from the named lab clients (`gitea_https_clients`: the k8s nodes, `gateway`, the Mac, `jenkins`, `ci-agent`, `gitea-runner`). Port `3000` is never opened.
 6. **Backup (`tasks/backup.yml`):**
    - Configures `gitea-backup.timer` (daily systemd timer) to run `gitea dump` as `git` into `/var/backups/gitea`, keeping the 7 most recent archives.
 
@@ -36,7 +36,7 @@ Deploys and hardens the rebuilt Gitea server on `gitea` (`192.168.1.97`, VMID 12
 | `gitea_http_port` | `3000` | Loopback HTTP port behind Caddy |
 | `gitea_admin_user` | `tunsgit` | Initial admin username |
 | `gitea_admin_email` | `admin@home.arpa` | Initial admin email |
-| `gitea_https_clients` | 5 `{name, ip}` entries | Clients allowed to reach `443/tcp` through UFW |
+| `gitea_https_clients` | 8 `{name, ip}` entries | Clients allowed to reach `443/tcp` through UFW |
 | `gitea_backup_dir` | `/var/backups/gitea` | Local directory for daily `gitea dump` archives |
 | `gitea_backup_keep` | `7` | Number of daily dump archives to retain |
 | `gitea_ca_fetch_dest` | `.../files/ca/gitea-caddy-root.crt` | Controller destination for Caddy's local root CA |

@@ -1,0 +1,124 @@
+# The pinned runner binary, its config, one-time registration against Gitea, and the service.
+
+- name: Download the pinned Gitea Runner binary (SHA-256 from the release checksums.txt)
+  ansible.builtin.get_url:
+    url: "{{ gitea_runner_download_url }}"
+    dest: "{{ gitea_runner_binary_path }}"
+    checksum: "sha256:{{ gitea_runner_sha256 }}"
+    owner: root
+    group: root
+    mode: "0755"
+  notify: Restart gitea-runner
+
+- name: Create the config directory
+  ansible.builtin.file:
+    path: "{{ gitea_runner_config_dir }}"
+    state: directory
+    owner: root
+    group: "{{ gitea_runner_group }}"
+    mode: "0750"
+
+- name: Deploy the runner config
+  ansible.builtin.template:
+    src: config.yaml.j2
+    dest: "{{ gitea_runner_config_path }}"
+    owner: root
+    group: "{{ gitea_runner_group }}"
+    mode: "0640"
+  notify: Restart gitea-runner
+
+# Registration state: the .runner file the daemon reads (runner.file in the config).
+- name: Check whether the runner is already registered
+  ansible.builtin.stat:
+    path: "{{ gitea_runner_home }}/.runner"
+  register: gitea_runner_registered
+
+# The owner places the registration token here by hand (runbook gitea-actions.md):
+# 0600, owned by the runner user. Nothing in this repo ever creates or prints it.
+- name: Check whether the owner has placed the registration token
+  ansible.builtin.stat:
+    path: "{{ gitea_runner_token_path }}"
+  register: gitea_runner_token
+
+# The token reaches the binary through --token-file, so it never appears in argv (world
+# readable via ps) and never enters Ansible's memory or logs. Runs as the runner user so
+# the .runner credential it writes is owned by the service account. no_log: a registration
+# failure output is redacted by design; the runbook covers manual debugging.
+- name: Register the runner with Gitea (token from file, never argv)
+  ansible.builtin.command:
+    argv:
+      - "{{ gitea_runner_binary_path }}"
+      - register
+      - --no-interactive
+      - --config
+      - "{{ gitea_runner_config_path }}"
+      - --instance
+      - "{{ gitea_runner_instance_url }}"
+      - --name
+      - "{{ gitea_runner_name }}"
+      - --token-file
+      - "{{ gitea_runner_token_path }}"
+  become: true
+  become_user: "{{ gitea_runner_user }}"
+  environment:
+    HOME: "{{ gitea_runner_home }}"
+  when:
+    - not ansible_check_mode
+    - not gitea_runner_registered.stat.exists
+    - gitea_runner_token.stat.exists
+  register: gitea_runner_register_result
+  changed_when: true
+  no_log: true
+
+# The registration token can register any number of runners: it must not outlive its use.
+- name: Shred the registration token after a successful registration
+  ansible.builtin.command:
+    argv:
+      - shred
+      - -u
+      - "{{ gitea_runner_token_path }}"
+  when:
+    - not ansible_check_mode
+    - not gitea_runner_registered.stat.exists
+    - gitea_runner_token.stat.exists
+    - gitea_runner_register_result.rc == 0
+  changed_when: true
+
+- name: The runner is not registered and no token is waiting (owner step pending)
+  ansible.builtin.debug:
+    msg: >-
+      Not registering: no {{ gitea_runner_token_path }}. Owner step: create a registration
+      token in the Gitea admin UI, place it at {{ gitea_runner_token_path }} (0600, owner
+      {{ gitea_runner_user }}), then re-run this playbook. See runbooks/gitea-actions.md.
+  when:
+    - not gitea_runner_registered.stat.exists
+    - not gitea_runner_token.stat.exists
+
+# The registration file is a secret: it is what lets its holder accept jobs as this runner.
+- name: Tighten the registration file ownership (registered only)
+  ansible.builtin.file:
+    path: "{{ gitea_runner_home }}/.runner"
+    state: file
+    owner: "{{ gitea_runner_user }}"
+    group: "{{ gitea_runner_group }}"
+    mode: "0600"
+  when:
+    - not ansible_check_mode
+    - gitea_runner_registered.stat.exists or gitea_runner_register_result.rc | default(1) == 0
+
+- name: Deploy gitea-runner.service
+  ansible.builtin.template:
+    src: gitea-runner.service.j2
+    dest: /etc/systemd/system/gitea-runner.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart gitea-runner
+
+- name: Enable and start gitea-runner
+  ansible.builtin.systemd_service:
+    name: gitea-runner
+    state: started
+    enabled: true
+    daemon_reload: true
+  ignore_errors: "{{ ansible_check_mode }}"
