@@ -18,6 +18,15 @@ subjects:
   - kind: ServiceAccount
     name: eso-oidc
     namespace: monitoring
+  - kind: ServiceAccount
+    name: eso-nexus-pull
+    namespace: dev
+  - kind: ServiceAccount
+    name: eso-nexus-pull
+    namespace: kyverno
+  - kind: ServiceAccount
+    name: eso-nexus-pull
+    namespace: argo-rollouts
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole

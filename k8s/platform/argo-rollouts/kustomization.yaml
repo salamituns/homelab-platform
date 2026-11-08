@@ -9,6 +9,9 @@ resources:
   - rollouts-redirect.yaml    # http -> https for the same host (ADR 0015 B)
   - netpol-allow.yaml   # allow flows (ADR 0015 A appendix, round 2); never inert with the agent live
   - netpol-default-deny.yaml   # default-deny ingress+egress (ADR 0015 A, round 2)
+  - eso-nexus-pull-sa.yaml
+  - secretstore-openbao-nexus-pull.yaml
+  - externalsecret-nexus-pull.yaml
 # Plugin image is owner-pushed to belleshop (k8s-pull cannot read the ghcr proxy).
 # Add digest: after the first push (runbook). Tag v0.17.0 is allow_once.
 images:

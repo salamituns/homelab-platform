@@ -1,0 +1,12 @@
+# Dedicated identity for External Secrets Operator when reading `secret/data/platform/nexus-pull`
+# into `kyverno/nexus-pull` (ADR 0012, ADR 0019 Phase 0).
+# No workload Pod runs as this account: ESO's controller in namespace external-secrets
+# requests a short-lived TokenRequest JWT for it when syncing SecretStore/openbao-nexus-pull,
+# and OpenBao's auth/kubernetes/role/nexus-pull-kyverno accepts ONLY kyverno/eso-nexus-pull.
+# Bound to system:auth-delegator in k8s/platform/cluster-config/eso-tokenreview.yaml.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: eso-nexus-pull
+  namespace: kyverno
+automountServiceAccountToken: false
