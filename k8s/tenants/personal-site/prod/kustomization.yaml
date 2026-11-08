@@ -1,5 +1,5 @@
 # Personal-site tenant (ADR 0019 D4): the static site the GHCR->lab promoter deploys.
-# Exposure public, not the kit default internal: package C fronts it with an HTTPRoute.
+# Exposure public, not the kit default internal: the public-ingress component lets public-gateway reach it; the HTTPRoute lives in apps-deploy.
 # Promotion to prod is a human PR in apps-deploy (staging digest copied to the prod overlay).
 # OpenBao role tenant-personal-site-prod and group personal-site-dev are owner steps
 # (docs/runbooks/tenant-onboarding.md).
@@ -8,6 +8,7 @@ kind: Kustomization
 namespace: personal-site-prod
 components:
   - ../../_kit/base
+  - ../../_kit/public-ingress   # admits public-gateway-nginx on 8080 (edge-public.md)
 patches:
   - target:
       version: v1
