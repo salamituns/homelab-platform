@@ -92,6 +92,19 @@ customRules:
       override:
         condition: append
 
+# Default chart tolerations cover master/control-plane only. The apps-pool
+# worker is tainted homelab.arpa/pool=apps:NoSchedule (ADR 0019 D2); Falco must
+# still run there. MetalLB speaker does NOT get this taint (admin VIP).
+tolerations:
+  - effect: NoSchedule
+    key: node-role.kubernetes.io/master
+  - effect: NoSchedule
+    key: node-role.kubernetes.io/control-plane
+  - effect: NoSchedule
+    key: homelab.arpa/pool
+    operator: Equal
+    value: apps
+
 # Sized for the 3-node lab (4 GB workers alongside Argo CD, Kyverno, and monitoring).
 resources:
   requests:

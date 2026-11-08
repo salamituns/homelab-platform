@@ -203,7 +203,9 @@ Host real apps (`personal-site`, `govgraph`, `protexa`) as tenants. Public acces
 Tunnel to an apps-only gateway; admin plane stays private. Each phase ends at a gate with evidence.
 - [x] Owner decisions 2026-11-07: protexa prod on a managed host (lab = pipeline + staging), govgraph DB on Supabase, both Vercel-DNS domains to Cloudflare
 - [ ] protexa repo: move `VITE_AXXESS_API_KEY` server-side (Supabase edge function) before protexa staging is exposed
-- [ ] Phase 0: `workernode3` apps pool; `nexus-pull` via ESO; Nexus `platform` + per-app repos/users;
+- [x] Phase 0 worker: `workernode3` Terraform + `k8s-join.yml` in git (owner apply pending,
+      [k8s-add-node.md](docs/runbooks/k8s-add-node.md); ADR 0019 D2)
+- [ ] Phase 0: `nexus-pull` via ESO; Nexus `platform` + per-app repos/users;
       tenant kit; `apps` AppProject + ApplicationSet; OpenBao per-app paths/roles; dummy app onboarded
 - [ ] Phase 1: `personal-site` live via `edge-public` + `public-gateway` + tunnel; admin hosts unreachable via tunnel (tested)
 - [ ] Phase 2: `govgraph` live (secrets from OpenBao, Supabase Postgres egress, cron as CronJob)

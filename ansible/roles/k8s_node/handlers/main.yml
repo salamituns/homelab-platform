@@ -1,0 +1,18 @@
+- name: Load k8s kernel modules
+  ansible.builtin.command: modprobe "{{ item }}"
+  loop:
+    - overlay
+    - br_netfilter
+  changed_when: true
+  ignore_errors: "{{ ansible_check_mode }}"
+
+- name: Apply k8s sysctl
+  ansible.builtin.command: sysctl --system
+  changed_when: true
+  ignore_errors: "{{ ansible_check_mode }}"
+
+- name: Restart containerd
+  ansible.builtin.systemd_service:
+    name: containerd
+    state: restarted
+  ignore_errors: "{{ ansible_check_mode }}"

@@ -1,0 +1,5 @@
+# Managed by Ansible (role: k8s_node). Must sort after 99-security-hardening.conf
+# (sysctl_hardening sets net.ipv4.ip_forward=0; this file wins as k8s.conf).
+net.bridge.bridge-nf-call-iptables  = 1
+net.bridge.bridge-nf-call-ip6tables = 1
+net.ipv4.ip_forward                 = 1

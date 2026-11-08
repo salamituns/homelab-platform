@@ -1,0 +1,134 @@
+# Join an apps-pool worker (ADR 0019 D2). Does not change lynis.service ExecStart.
+# Usage (from ansible/):
+#   ansible-playbook playbooks/k8s-join.yml --limit WorkerNode3 --check --diff
+#   ansible-playbook playbooks/k8s-join.yml --limit WorkerNode3
+# Hosts are k8s_apps_workers so a run without --limit cannot taint platform workers.
+# Runbook: docs/runbooks/k8s-add-node.md
+- name: Prepare and join an apps-pool Kubernetes worker
+  hosts: k8s_apps_workers
+  serial: 1
+  become: true
+  vars:
+    k8s_join_api: "192.168.1.90:6443"
+    k8s_join_taint_key: homelab.arpa/pool
+    k8s_join_taint_value: apps
+    k8s_join_taint_effect: NoSchedule
+    k8s_join_node_label: homelab.arpa/pool=apps
+    k8s_join_config: /root/kubeadm-join.yaml
+    k8s_join_approve_script: "{{ playbook_dir }}/../../scripts/approve-kubelet-serving-csrs.py"
+  roles:
+    - baseline
+    - lab_ca_trust
+    - static_ip
+    - k8s_node
+  tasks:
+    - name: Flush k8s_node handlers so containerd is up before certs.d
+      ansible.builtin.meta: flush_handlers
+
+    - name: Trust the lab registry in containerd
+      ansible.builtin.include_role:
+        name: containerd_registry
+
+    - name: Already joined this cluster
+      ansible.builtin.stat:
+        path: /etc/kubernetes/kubelet.conf
+      register: k8s_join_kubelet_conf
+
+    - name: Join with a short-lived token
+      when:
+        - not ansible_check_mode
+        - not k8s_join_kubelet_conf.stat.exists
+      block:
+        - name: Create a 15-minute join token on the control plane
+          ansible.builtin.command:
+            argv:
+              - kubeadm
+              - token
+              - create
+              - --ttl
+              - 15m
+              - --print-join-command
+          delegate_to: Master
+          become: true
+          environment:
+            KUBECONFIG: /etc/kubernetes/admin.conf
+          register: k8s_join_print
+          changed_when: true
+          no_log: true
+
+        - name: Parse token and CA hash from the join command
+          ansible.builtin.set_fact:
+            k8s_join_token: "{{ k8s_join_print.stdout | regex_search('--token\\s+(\\S+)', '\\1') }}"
+            k8s_join_ca_hash: "{{ k8s_join_print.stdout | regex_search('--discovery-token-ca-cert-hash\\s+(\\S+)', '\\1') }}"
+          no_log: true
+
+        - name: Write a 0600 JoinConfiguration on the new node
+          ansible.builtin.template:
+            src: k8s-join.yaml.j2
+            dest: "{{ k8s_join_config }}"
+            owner: root
+            group: root
+            mode: "0600"
+          no_log: true
+
+        - name: Join the cluster with the apps-pool taint and label
+          ansible.builtin.command:
+            argv:
+              - kubeadm
+              - join
+              - --config
+              - "{{ k8s_join_config }}"
+          changed_when: true
+          no_log: true
+      always:
+        - name: Remove the join configuration
+          ansible.builtin.file:
+            path: "{{ k8s_join_config }}"
+            state: absent
+          when: not ansible_check_mode
+
+    - name: Wait until the API server lists this node
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --kubeconfig
+          - /etc/kubernetes/admin.conf
+          - get
+          - node
+          - "{{ inventory_hostname | lower }}"
+      delegate_to: Master
+      become: true
+      register: k8s_join_node
+      retries: 30
+      delay: 5
+      until: k8s_join_node.rc == 0
+      changed_when: false
+      when: not ansible_check_mode
+
+    - name: Wait for the kubelet to request a serving certificate
+      ansible.builtin.pause:
+        seconds: 20
+      when: not ansible_check_mode
+
+    - name: Approve kubelet-serving CSRs for the new node
+      ansible.builtin.command:
+        argv: "{{ [k8s_join_approve_script] + (['--dry-run'] if ansible_check_mode else []) }}"
+      args:
+        chdir: "{{ playbook_dir }}/../.."
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      check_mode: false
+
+    - name: Wait for the kubelet serving certificate on disk
+      ansible.builtin.stat:
+        path: /var/lib/kubelet/pki/kubelet-server-current.pem
+      register: k8s_join_serving_pem
+      retries: 18
+      delay: 10
+      until: k8s_join_serving_pem.stat.exists | default(false)
+      when: not ansible_check_mode
+
+    - name: Manage Lynis on the new node
+      ansible.builtin.include_role:
+        name: lynis
