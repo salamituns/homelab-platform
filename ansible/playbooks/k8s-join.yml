@@ -58,8 +58,10 @@
 
         - name: Parse token and CA hash from the join command
           ansible.builtin.set_fact:
-            k8s_join_token: "{{ k8s_join_print.stdout | regex_search('--token\\s+(\\S+)', '\\1') }}"
-            k8s_join_ca_hash: "{{ k8s_join_print.stdout | regex_search('--discovery-token-ca-cert-hash\\s+(\\S+)', '\\1') }}"
+            # regex_search with a capture-group argument returns a LIST; `first` makes it the string.
+            # Without it the JoinConfiguration got token: "['…']" and discovery failed (7 Nov 2026).
+            k8s_join_token: "{{ k8s_join_print.stdout | regex_search('--token\\s+(\\S+)', '\\1') | first }}"
+            k8s_join_ca_hash: "{{ k8s_join_print.stdout | regex_search('--discovery-token-ca-cert-hash\\s+(\\S+)', '\\1') | first }}"
           no_log: true
 
         - name: Write a 0600 JoinConfiguration on the new node
@@ -78,8 +80,19 @@
               - join
               - --config
               - "{{ k8s_join_config }}"
+          register: k8s_join_result
           changed_when: true
+          failed_when: false
           no_log: true
+
+        # no_log hides the token but also hid the error on the first run. Show kubeadm's output with the
+        # bootstrap token redacted, then fail.
+        - name: Fail with kubeadm's output (token redacted) if the join failed
+          ansible.builtin.fail:
+            msg: >-
+              {{ ((k8s_join_result.stdout | default('')) ~ '\n' ~ (k8s_join_result.stderr | default('')))
+                 | regex_replace('[a-z0-9]{6}\\.[a-z0-9]{16}', '<redacted-token>') }}
+          when: k8s_join_result.rc | default(0) != 0
       always:
         - name: Remove the join configuration
           ansible.builtin.file:
@@ -110,13 +123,17 @@
         seconds: 20
       when: not ansible_check_mode
 
+    # Runs ON Master with admin.conf: approving CSRs needs cluster-admin, and the Mac's daily kubectl
+    # cert is deliberately least-privilege (first WorkerNode3 run, 7 Nov 2026, failed on the Mac).
+    # The script module copies the repo script over and runs it there; it still checks name + IP.
     - name: Approve kubelet-serving CSRs for the new node
-      ansible.builtin.command:
-        argv: "{{ [k8s_join_approve_script] + (['--dry-run'] if ansible_check_mode else []) }}"
-      args:
-        chdir: "{{ playbook_dir }}/../.."
-      delegate_to: localhost
-      become: false
+      ansible.builtin.script:
+        cmd: "{{ k8s_join_approve_script }}{{ ' --dry-run' if ansible_check_mode else '' }}"
+        executable: python3
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      delegate_to: Master
+      become: true
       changed_when: false
       check_mode: false
 
