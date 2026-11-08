@@ -144,7 +144,11 @@ Carried over from Week 6 (kept at the level described in [ADR 0015](docs/adr/001
 - [x] Serve the Rollouts plugin from inside the lab (done 2026-11-07, `#89`): image pushed 12:21 CST,
       initContainer verified + copied, controller log "Copied plugin from …/plugin-bin/…", egress policy
       `argo-rollouts-plugin-download-egress` gone, BelleShop `backend` Rollout Healthy ([runbook](docs/runbooks/argo-rollouts-plugin.md))
-- [ ] Clear Lynis `PKGS-7392` on all nodes (pending Ubuntu security updates; drain, upgrade, reboot one node at a time)
+- [x] Clear Lynis `PKGS-7392` (done 2026-11-07): the one "security update" was `libdrm-amdgpu1`, not installed on
+      Master/WorkerNode1 but pulled in by a newer `fwupd` in a full upgrade, with its candidate in `noble-security`.
+      Installed the fixed version (no reboot); index Master 64→69, WorkerNode1 64→69, warnings 0 on all nodes
+- [ ] Rolling OS patch cycle for the k8s nodes (~110–130 pending non-security updates, kernel 6.8.0-149):
+      Ansible, serial 1, drain → upgrade → reboot → uncordon; hold `containerd.io`, `kubernetes-cni` and k8s packages
 - [ ] Manage `nexus-pull` from OpenBao via ExternalSecrets (today hand-copied into `dev`, `kyverno`, `argo-rollouts`;
       every onboarded app namespace will need it)
 - [x] Pin kube-network-policies by digest (vendor install.yaml still tags `v1.1.1`; kustomize `newTag: v1.1.2` plus digest matching live imageID 2026-11-07)
