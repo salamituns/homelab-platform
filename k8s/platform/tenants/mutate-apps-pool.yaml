@@ -1,5 +1,5 @@
 # Backstop for ADR 0019 D2: tenant pods (namespace label homelab.arpa/tenant) land on
-# workernode3. JSONPatch appends the taint toleration and sets the nodeSelector key
+# workernode3. Mutates Pods at CREATE only, never workload templates (no Argo drift). JSONPatch appends the taint toleration and sets the nodeSelector key
 # even when spec.nodeSelector is missing. CRD storage version: policies.kyverno.io/v1beta1
 # (checked live 7 Nov 2026).
 apiVersion: policies.kyverno.io/v1beta1
@@ -23,15 +23,12 @@ spec:
       enabled: false
     mutateExisting:
       enabled: false
+  # Pods only, CREATE only (review 7 Nov 2026). Autogen would also mutate Deployment/Rollout templates that
+  # Argo CD owns: Argo applies them without the toleration, Kyverno adds it back, and the app sits OutOfSync
+  # with selfHeal fighting Kyverno. UPDATE would append a duplicate toleration on every pod update.
   autogen:
     podControllers:
-      controllers:
-        - deployments
-        - statefulsets
-        - jobs
-        - replicasets
-        - cronjobs
-        - rollouts.v1alpha1.argoproj.io
+      controllers: []
   matchConstraints:
     namespaceSelector:
       matchExpressions:
@@ -40,7 +37,7 @@ spec:
     resourceRules:
       - apiGroups: [""]
         apiVersions: ["v1"]
-        operations: ["CREATE", "UPDATE"]
+        operations: ["CREATE"]
         resources: ["pods"]
   mutations:
     - patchType: JSONPatch
@@ -63,7 +60,9 @@ spec:
                 }
               ]
           ) + (
-            has(object.spec.tolerations)
+            has(object.spec.tolerations) && object.spec.tolerations.exists(t, has(t.key) && t.key == "homelab.arpa/pool")
+            ? []
+            : has(object.spec.tolerations)
             ? [
                 JSONPatch{
                   op: "add",
