@@ -14,7 +14,7 @@
 #   5. crane copy into the per-app Nexus repo PRESERVING the digest
 #   6. sign + attest that digest with the LAB key (gates/sign.sh)
 #   7. open a PR in apps-deploy pinning the digest in the staging overlay
-#      (digest already pinned = nothing to do; production is a human PR)
+#      (digest already pinned = stop before 5, nothing written; production is a human PR)
 #
 # --dry-run stops after step 4: verify only, no copy, no sign, no PR.
 #
@@ -138,19 +138,8 @@ DEST_REF="${DEST_IMAGE}@${DIGEST}"
 [[ -f "${COSIGN_KEY}" ]] || ci_die "COSIGN_KEY is not a file: ${COSIGN_KEY}"
 [[ -n "${COSIGN_PASSWORD:-}" ]] || ci_die "COSIGN_PASSWORD is unset"
 
-# 5. Copy digest-preserving. Auth for registry.home.arpa comes from the docker login
-#    the Jenkinsfile did (crane reads ~/.docker/config.json); GHCR stays anonymous.
-ci_log "promote: crane copy -> ${DEST_REF}"
-crane copy "${SOURCE_REF}" "${DEST_IMAGE}" || ci_die "crane copy failed"
-COPIED="$(crane digest "${DEST_REF}")" || ci_die "cannot read back ${DEST_REF}"
-[[ "${COPIED}" == "${DIGEST}" ]] || ci_die "digest changed in transit: ${COPIED}"
-
-# 6. SBOM of the copy, then lab-key signature + SPDX attestation (gates/sign.sh).
-syft scan "${DEST_REF}" -o "spdx-json=${REPORT_DIR}/sbom.spdx.json" || ci_die "syft failed"
-"${GATES_DIR}/sign.sh" "${DEST_REF}" || ci_die "sign.sh failed"
-ci_log "promote: lab key signature + SPDX attestation on ${DEST_REF}"
-
-# 7. PR pinning the digest in the staging overlay. Same Gitea pattern as gates/promote.sh:
+# 7. Find out whether this digest is already promoted (staging overlay on main, or an
+#    open promote branch), then copy + sign (5, 6) and PR the pin. Same Gitea pattern as gates/promote.sh:
 #    owner derived from GIT_URL (never in git), token via GIT_ASKPASS and curl -K stdin,
 #    kustomize edit via the pinned container, 409/422 tolerated.
 PROMOTE_TOKEN="$(printf '%s' "${GITEA_PROMOTE_TOKEN-}" | tr -d '\r\n')"
@@ -212,7 +201,7 @@ git_auth() {
 
 overlay_digest() {
 	# Current digest the overlay pins for IMAGE_NAME ("" when it pins nothing).
-	python3 - "${IMAGE_NAME}" "${OVERLAY_DIR}/kustomization.yaml" <<'PY'
+	python3 - "${IMAGE_NAME}" "${1:-${OVERLAY_DIR}/kustomization.yaml}" <<'PY'
 import sys
 
 want, path = sys.argv[1], sys.argv[2]
@@ -254,6 +243,15 @@ rm -rf "${DEPLOY_REPO}"
 git_auth clone "${PROMOTE_REMOTE}" "${DEPLOY_REPO}" || ci_die "cannot clone ${DEPLOY_REPO}"
 cd "${DEPLOY_REPO}" || ci_die "clone did not create ${DEPLOY_REPO}"
 
+# Promoted already = main's staging overlay pins this digest: stop before writing anything.
+main_overlay="$(mktemp "${TMPDIR:-/tmp}/promote-main-overlay.XXXXXX")"
+tmpfiles+=("${main_overlay}")
+git show "origin/main:${OVERLAY_DIR}/kustomization.yaml" >"${main_overlay}" || ci_die "no ${OVERLAY_DIR} on main"
+if [[ "$(overlay_digest "${main_overlay}")" == "${DIGEST}" ]]; then
+	ci_log "promote: staging overlay on main already pins ${DIGEST}; nothing to do"
+	exit 0
+fi
+
 if ! git_auth fetch origin "+refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}"; then
 	ci_log "promote: no existing ${BRANCH} on remote"
 fi
@@ -264,21 +262,32 @@ else
 fi
 
 if [[ "$(overlay_digest)" == "${DIGEST}" ]]; then
-	ci_log "promote: staging overlay already pins ${DIGEST}; nothing to do"
-	exit 0
+	# An earlier run copied, signed and pushed this branch; it may have died before the
+	# PR call. Skip the writes and fall through to "make sure the PR exists".
+	ci_log "promote: ${BRANCH} already pins ${DIGEST}; checking its PR"
+else
+	# 5. Only reached for a digest not yet promoted, so a finished promotion is not
+	#    re-copied and re-signed every 15 minutes (each run would append another
+	#    signature + attestation in Nexus). Copy digest-preserving. Auth for
+	#    registry.home.arpa comes from the docker login the Jenkinsfile did (crane
+	#    reads ~/.docker/config.json); GHCR stays anonymous.
+	ci_log "promote: crane copy -> ${DEST_REF}"
+	crane copy "${SOURCE_REF}" "${DEST_IMAGE}" || ci_die "crane copy failed"
+	COPIED="$(crane digest "${DEST_REF}")" || ci_die "cannot read back ${DEST_REF}"
+	[[ "${COPIED}" == "${DIGEST}" ]] || ci_die "digest changed in transit: ${COPIED}"
+
+	# 6. SBOM of the copy, then lab-key signature + SPDX attestation (gates/sign.sh).
+	syft scan "${DEST_REF}" -o "spdx-json=${REPORT_DIR}/sbom.spdx.json" || ci_die "syft failed"
+	"${GATES_DIR}/sign.sh" "${DEST_REF}" || ci_die "sign.sh failed"
+	ci_log "promote: lab key signature + SPDX attestation on ${DEST_REF}"
+
+	run_kustomize "${IMAGE_NAME}=${DEST_REF}"
+	git add "${OVERLAY_DIR}/kustomization.yaml"
+	git diff --cached --quiet && ci_die "kustomize wrote no change, but the overlay did not pin ${DIGEST}"
+	git -c user.name=ci-promote -c user.email=ci-promote@home.arpa \
+		commit -m "promote personal-site ${short}" || ci_die "git commit failed"
+	git_auth push -u origin "${BRANCH}" || ci_die "git push failed"
 fi
-
-run_kustomize "${IMAGE_NAME}=${DEST_REF}"
-
-git add "${OVERLAY_DIR}/kustomization.yaml"
-if git diff --cached --quiet; then
-	ci_log "promote: kustomize wrote no change; nothing to do"
-	exit 0
-fi
-
-git -c user.name=ci-promote -c user.email=ci-promote@home.arpa \
-	commit -m "promote personal-site ${short}" || ci_die "git commit failed"
-git_auth push -u origin "${BRANCH}" || ci_die "git push failed"
 
 pulls_body="$(mktemp "${TMPDIR:-/tmp}/promote-pulls.XXXXXX")"
 tmpfiles+=("${pulls_body}")
