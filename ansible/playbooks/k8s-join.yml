@@ -10,6 +10,8 @@
   become: true
   vars:
     k8s_join_api: "192.168.1.90:6443"
+    # Minimum Ubuntu 6.8 kernel ABI for Falco least-privileged eBPF (the fleet ran 147 on 7 Nov 2026).
+    k8s_join_min_kernel_abi: 147
     k8s_join_taint_key: homelab.arpa/pool
     k8s_join_taint_value: apps
     k8s_join_taint_effect: NoSchedule
@@ -33,6 +35,45 @@
       ansible.builtin.stat:
         path: /etc/kubernetes/kubelet.conf
       register: k8s_join_kubelet_conf
+
+    # Kernel for Falco, only BEFORE the first join. The Ubuntu 24.04 cloud image boots 6.8.0-88, which with
+    # Ubuntu's perf_event_paranoid=4 refuses perf_event_open to Falco's least-privileged modern_ebpf probe
+    # (CAP_PERFMON): Falco CrashLoopBackOff on WorkerNode3, 7 Nov 2026. Never on a joined node: rebooting a
+    # worker needs cordon/drain (patch cycle), and unattended-upgrades creates reboot-required on its own.
+    - name: Current kernel before the node joins
+      when: not k8s_join_kubelet_conf.stat.exists
+      block:
+        - name: Upgrade the kernel metapackage
+          ansible.builtin.apt:
+            name: linux-generic
+            state: latest  # noqa: package-latest
+            update_cache: true
+          ignore_errors: "{{ ansible_check_mode }}"
+
+        - name: Is a reboot pending
+          ansible.builtin.stat:
+            path: /var/run/reboot-required
+          register: k8s_join_reboot_required
+
+        - name: Reboot into the current kernel (not joined yet, nothing to drain)
+          ansible.builtin.reboot:
+            reboot_timeout: 600
+          when:
+            - k8s_join_reboot_required.stat.exists
+            - not ansible_check_mode
+
+        - name: Refresh kernel facts after a possible reboot
+          ansible.builtin.setup:
+            filter: ansible_kernel
+
+        - name: Kernel ABI is new enough for least-privileged Falco eBPF
+          ansible.builtin.assert:
+            that:
+              - k8s_join_kernel_abi | int >= k8s_join_min_kernel_abi
+            fail_msg: "Kernel {{ ansible_facts['kernel'] }} is older than ABI {{ k8s_join_min_kernel_abi }}; Falco modern_ebpf would crash-loop."
+          vars:
+            k8s_join_kernel_abi: "{{ ansible_facts['kernel'] | regex_search('^\\d+\\.\\d+\\.\\d+-(\\d+)', '\\1') | default(['0'], true) | first }}"
+          when: not ansible_check_mode
 
     - name: Join with a short-lived token
       when:
@@ -58,8 +99,19 @@
 
         - name: Parse token and CA hash from the join command
           ansible.builtin.set_fact:
-            k8s_join_token: "{{ k8s_join_print.stdout | regex_search('--token\\s+(\\S+)', '\\1') }}"
-            k8s_join_ca_hash: "{{ k8s_join_print.stdout | regex_search('--discovery-token-ca-cert-hash\\s+(\\S+)', '\\1') }}"
+            # regex_search with a capture-group argument returns a LIST; `first` makes it the string.
+            # Without it the JoinConfiguration got token: "['…']" and discovery failed (7 Nov 2026).
+            k8s_join_token: "{{ k8s_join_print.stdout | regex_search('--token\\s+(\\S+)', '\\1') | default([''], true) | first }}"
+            k8s_join_ca_hash: "{{ k8s_join_print.stdout | regex_search('--discovery-token-ca-cert-hash\\s+(\\S+)', '\\1') | default([''], true) | first }}"
+          no_log: true
+
+        - name: The join command parsed into a token and a CA hash
+          ansible.builtin.assert:
+            that:
+              - k8s_join_token | length > 0
+              - k8s_join_ca_hash is match('sha256:')
+            fail_msg: "Could not parse kubeadm print-join-command output (format change?). Token not shown."
+            quiet: true
           no_log: true
 
         - name: Write a 0600 JoinConfiguration on the new node
@@ -78,8 +130,20 @@
               - join
               - --config
               - "{{ k8s_join_config }}"
+          register: k8s_join_result
           changed_when: true
+          failed_when: false
           no_log: true
+
+        # no_log hides the token but also hid the error on the first run. Show kubeadm's output with the
+        # bootstrap token redacted, then fail.
+        - name: Fail with kubeadm's output (token redacted) if the join failed
+          ansible.builtin.fail:
+            msg: >-
+              {{ ((k8s_join_result.stdout | default('')) ~ '\n' ~ (k8s_join_result.stderr | default('')))
+                 | replace(k8s_join_token, '<redacted-token>')
+                 | regex_replace('[a-z0-9]{6}\\.[a-z0-9]{16}', '<redacted-token>') }}
+          when: k8s_join_result.rc | default(0) != 0
       always:
         - name: Remove the join configuration
           ansible.builtin.file:
@@ -110,13 +174,17 @@
         seconds: 20
       when: not ansible_check_mode
 
+    # Runs ON Master with admin.conf: approving CSRs needs cluster-admin, and the Mac's daily kubectl
+    # cert is deliberately least-privilege (first WorkerNode3 run, 7 Nov 2026, failed on the Mac).
+    # The script module copies the repo script over and runs it there; it still checks name + IP.
     - name: Approve kubelet-serving CSRs for the new node
-      ansible.builtin.command:
-        argv: "{{ [k8s_join_approve_script] + (['--dry-run'] if ansible_check_mode else []) }}"
-      args:
-        chdir: "{{ playbook_dir }}/../.."
-      delegate_to: localhost
-      become: false
+      ansible.builtin.script:
+        cmd: "{{ k8s_join_approve_script | quote }}{{ ' --dry-run' if ansible_check_mode else '' }}"
+        executable: python3
+      environment:
+        KUBECONFIG: /etc/kubernetes/admin.conf
+      delegate_to: Master
+      become: true
       changed_when: false
       check_mode: false
 
