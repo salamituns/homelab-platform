@@ -6,7 +6,7 @@ Previously, `nexus-pull` was copied by hand into `dev`, `kyverno`, and `argo-rol
 
 1. Loading the `k8s-pull` password from `nexus` (`/etc/nexus/secrets/k8s-pull`) into OpenBao KV v2 at `secret/platform/nexus-pull`.
 2. Safe owner cut-over of the existing hand-made `nexus-pull` Secrets in `dev`, `kyverno`, and `argo-rollouts` to External Secrets Operator (ESO).
-3. Onboarding a tenant `<app>-<env>` with `scripts/openbao-tenant.sh` and the Kustomize component `k8s/tenants/_kit/secrets/`.
+3. Onboarding a tenant `<app>-<env>` with `scripts/openbao-breakglass.sh root-run tenant` and the Kustomize component `k8s/tenants/_kit/secrets/`.
 
 ---
 
@@ -30,30 +30,23 @@ Do Step 1 and Step 2 **before** merging/syncing the Git manifests so OpenBao hol
 
 ### Step 1. Load `secret/platform/nexus-pull` and create the `nexus-pull-*` roles in OpenBao
 
-`scripts/openbao-load-nexus-pull.sh` defaults to `--dry-run`. First inspect the plan (no SSH or OpenBao calls):
+There is no standing admin token (the root token was revoked 2026-11-02, [openbao.md](openbao.md) §6).
+Admin writes go through `scripts/openbao-breakglass.sh root-run`: it prompts for 2 unseal shares
+(hidden), mints a root token ON sectools, runs the step there, then revokes it and verifies the
+revocation. The token never reaches the Mac. It runs for real unless you pass `--dry-run`.
 
 ```sh
-./scripts/openbao-load-nexus-pull.sh
+scripts/openbao-breakglass.sh root-run nexus-pull --dry-run   # plan only; prompts for nothing
+scripts/openbao-breakglass.sh root-run nexus-pull             # 2 hidden share prompts, then the run
 ```
 
-Then run with `--apply` and a short-lived OpenBao token (see [`docs/runbooks/openbao.md`](openbao.md) §6 for minting a token; never store the token in a file or pass it on argv):
+Proven 2026-11-07 by `scripts/openbao-breakglass-test.sh` against a throwaway OpenBao (70 passed):
+password never printed, re-run skips an existing secret, token revoked and verified revoked.
 
-```sh
-export BAO_ADDR=https://bao.home.arpa
-export BAO_CACERT=ansible/files/ca/sectools-caddy-root.crt
-read -rs BAO_TOKEN; export BAO_TOKEN
-
-./scripts/openbao-load-nexus-pull.sh --apply
-
-# Revoke your short-lived token when done:
-bao token revoke -self
-unset BAO_TOKEN
-```
-
-What `--apply` does:
+What the run does:
 - Writes ACL policy `nexus-pull-read` (read-only on `secret/data/platform/nexus-pull`).
 - Writes Kubernetes auth roles `nexus-pull-dev`, `nexus-pull-kyverno`, and `nexus-pull-argo-rollouts` (bound to `eso-nexus-pull` in each namespace, TTL `1h`).
-- Reads `/etc/nexus/secrets/k8s-pull` from `tunsadmin@192.168.1.87` over SSH stdout into `jq -Rs` and `POST /v1/secret/data/platform/nexus-pull` over stdin (`--data-binary @-`). Skips writing if `secret/platform/nexus-pull` already exists unless `--overwrite` is passed.
+- Reads `/etc/nexus/secrets/k8s-pull` from `tunsadmin@192.168.1.87` over ssh into a local variable, then sends it to sectools inside the root-run payload over ssh stdin (never argv, never printed) and writes `secret/platform/nexus-pull` (`username`, `password`). Skips writing if it already exists unless `--overwrite` is passed.
 
 ### Step 2. Back up the existing hand-made `nexus-pull` Secrets
 
@@ -169,24 +162,17 @@ rm -rf "$BK"
 
 ### 1. Create the OpenBao policy and Kubernetes auth role
 
-`scripts/openbao-tenant.sh <app> <env>` validates `<app>` and `<env>` against `^[a-z0-9-]+$` and defaults to `--dry-run`:
+`scripts/openbao-breakglass.sh root-run tenant <app> <env>` validates `<app>` and `<env>` against
+`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$` and uses the same break-glass flow (2 hidden shares, token minted
+and revoked on sectools, never on the Mac). It runs for real unless you pass `--dry-run`:
 
 ```sh
-./scripts/openbao-tenant.sh govgraph staging
+scripts/openbao-breakglass.sh root-run tenant demo staging --dry-run
+scripts/openbao-breakglass.sh root-run tenant demo staging
 ```
 
-Execute with `--apply` and a short-lived OpenBao token:
-
-```sh
-export BAO_ADDR=https://bao.home.arpa
-export BAO_CACERT=ansible/files/ca/sectools-caddy-root.crt
-read -rs BAO_TOKEN; export BAO_TOKEN
-
-./scripts/openbao-tenant.sh govgraph staging --apply
-
-bao token revoke -self
-unset BAO_TOKEN
-```
+Least privilege proven by the harness: a token carrying only `tenant-demo-staging` can read
+`secret/apps/demo/staging/*`, and gets 403 on another tenant's path and on platform secrets.
 
 This creates:
 - Policy `tenant-<app>-<env>` granting `read` on `secret/data/apps/<app>/<env>/*` and `secret/data/platform/nexus-pull` only.
