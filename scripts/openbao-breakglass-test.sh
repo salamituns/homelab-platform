@@ -358,6 +358,53 @@ BAO_TOKEN="$(jq -r .root_token "$TD/init.json")" bao read -format=json auth/kube
 BAO_TOKEN="$(jq -r .root_token "$TD/init.json")" bao policy read oidc-read >/dev/null \
   && ok "policy oidc-read exists"
 
+echo "== 12. root-run nexus-pull and root-run tenant (ADR 0019 Phase 0)"
+feed_shares() { local f; f=$(mktemp "$TD/answers.XXXXXX"); jq -r '.unseal_keys_b64[0,1]' "$TD/init.json" >"$f"; echo "$f"; }
+FAKE_PW="harness-fake-pull-pw-$RANDOM$RANDOM"
+export BREAKGLASS_NEXUS_PULL_CMD="printf %s $FAKE_PW"
+F12=$(feed_shares)
+if run_flow "$TD/run-np.out" root-run nexus-pull <"$F12"; then ok "root-run nexus-pull exited 0"; else bad "root-run nexus-pull failed"; cat "$TD/run-np.out"; fi
+unset BREAKGLASS_NEXUS_PULL_CMD
+grep -q "nexus-pull setup complete" "$TD/run-np.out" && ok "nexus-pull policy, roles and secret written"
+grep -q "revocation verified" "$TD/run-np.out" && ok "nexus-pull run revoked its token"
+if grep -qF "$FAKE_PW" "$TD/run-np.out"; then bad "THE PULL PASSWORD LEAKED INTO THE OUTPUT"; else ok "pull password never printed"; fi
+F13=$(feed_shares)
+export BREAKGLASS_NEXUS_PULL_CMD="printf %s different-value"
+run_flow "$TD/run-np2.out" root-run nexus-pull <"$F13" || true
+unset BREAKGLASS_NEXUS_PULL_CMD
+if grep -q "already exists" "$TD/run-np2.out"; then ok "nexus-pull re-run skips the existing secret (no --overwrite)"; else bad "nexus-pull re-run did not skip"; cat "$TD/run-np2.out"; fi
+F14=$(feed_shares)
+if run_flow "$TD/run-tn.out" root-run tenant demo staging <"$F14"; then ok "root-run tenant demo staging exited 0"; else bad "root-run tenant failed"; cat "$TD/run-tn.out"; fi
+grep -q "revocation verified" "$TD/run-tn.out" && ok "tenant run revoked its token"
+if run_flow "$TD/run-tn-bad.out" root-run tenant 'Demo;rm' staging </dev/null; then bad "bad tenant name accepted"; else ok "bad tenant name rejected locally"; fi
+RT="$(jq -r .root_token "$TD/init.json")"
+if BAO_TOKEN="$RT" bao read -format=json secret/data/platform/nexus-pull \
+  | jq -e --arg pw "$FAKE_PW" '.data.data | (keys == ["password","username"]) and .username == "k8s-pull" and .password == $pw' >/dev/null; then
+  ok "secret/platform/nexus-pull holds k8s-pull + the FIRST password (re-run did not overwrite)"
+else
+  bad "secret/platform/nexus-pull shape or value wrong"
+fi
+for NS in dev kyverno argo-rollouts; do
+  BAO_TOKEN="$RT" bao read -format=json "auth/kubernetes/role/nexus-pull-$NS" \
+    | jq -e --arg ns "$NS" '.data.bound_service_account_names == ["eso-nexus-pull"] and .data.bound_service_account_namespaces == [$ns] and .data.token_policies == ["nexus-pull-read"]' >/dev/null \
+    && ok "role nexus-pull-$NS bound to $NS/eso-nexus-pull with nexus-pull-read"
+done
+BAO_TOKEN="$RT" bao policy read nexus-pull-read | grep -q 'secret/data/platform/nexus-pull' && ok "policy nexus-pull-read grants the pull credential path"
+[[ "$(BAO_TOKEN="$RT" bao policy read nexus-pull-read | grep -c '^path')" == 1 ]] && ok "policy nexus-pull-read has exactly one path"
+BAO_TOKEN="$RT" bao read -format=json auth/kubernetes/role/tenant-demo-staging \
+  | jq -e '.data.bound_service_account_names == ["eso"] and .data.bound_service_account_namespaces == ["demo-staging"] and .data.token_policies == ["tenant-demo-staging"]' >/dev/null \
+  && ok "role tenant-demo-staging bound to demo-staging/eso with tenant-demo-staging"
+TP="$(BAO_TOKEN="$RT" bao policy read tenant-demo-staging)"
+grep -q 'secret/data/apps/demo/staging/\*' <<<"$TP" && grep -q 'secret/data/platform/nexus-pull' <<<"$TP" \
+  && [[ "$(grep -c '^path' <<<"$TP")" == 2 ]] && ok "policy tenant-demo-staging grants exactly its own path + the pull credential"
+# Least privilege, proven with a token carrying ONLY the tenant policy:
+TT="$(BAO_TOKEN="$RT" bao token create -policy=tenant-demo-staging -ttl=5m -field=token)"
+BAO_TOKEN="$RT" bao kv put secret/apps/demo/staging/web k=v >/dev/null && BAO_TOKEN="$RT" bao kv put secret/apps/other/staging/web k=v >/dev/null
+BAO_TOKEN="$TT" bao kv get secret/apps/demo/staging/web >/dev/null 2>&1 && ok "tenant token CAN read its own path"
+if BAO_TOKEN="$TT" bao kv get secret/apps/other/staging/web >/dev/null 2>&1; then bad "TENANT TOKEN READ ANOTHER TENANT'S SECRET"; else ok "tenant token CANNOT read another tenant's path (403)"; fi
+if BAO_TOKEN="$TT" bao kv get secret/monitoring/alertmanager >/dev/null 2>&1; then bad "TENANT TOKEN READ A PLATFORM SECRET"; else ok "tenant token CANNOT read platform secrets"; fi
+unset RT TT TP
+
 echo ""
 echo "result: $PASS passed, $FAIL failed"
 if [[ "$FAIL" != 0 ]]; then exit 1; fi
