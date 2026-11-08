@@ -89,13 +89,17 @@
     update_cache: true
     cache_valid_time: 3600
 
-- name: Ensure containerd loads conf.d drop-ins
-  ansible.builtin.lineinfile:
-    path: /etc/containerd/config.toml
-    regexp: "^imports ="
-    line: "imports = ['/etc/containerd/conf.d/*.toml']"
+# Own the whole main config: the package default disables the CRI plugin (disabled_plugins = ["cri"]),
+# and appending an imports line would leave CRI off. backup: keeps the packaged file for comparison.
+- name: Containerd main config (CRI enabled, conf.d imports)
+  ansible.builtin.template:
+    src: containerd-config.toml.j2
+    dest: /etc/containerd/config.toml
+    owner: root
+    group: root
+    mode: "0644"
+    backup: true
   notify: Restart containerd
-  ignore_errors: "{{ ansible_check_mode }}"
 
 - name: Containerd drop-in directory
   ansible.builtin.file:
