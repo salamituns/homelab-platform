@@ -86,8 +86,12 @@
   ansible.builtin.apt:
     name: "{{ k8s_node_containerd_pkg }}"
     state: present
+    # Always refresh: cache_valid_time hid a just-added repo when cloud-init had updated apt within the hour
+    # (WorkerNode3, 7 Nov 2026); refreshing only when a repo task changed misses a repo added by an
+    # earlier, interrupted run.
     update_cache: true
-    cache_valid_time: 3600
+  # In --check the repos are only pretend-added, so the package cannot be found yet.
+  ignore_errors: "{{ ansible_check_mode }}"
 
 # Own the whole main config: the package default disables the CRI plugin (disabled_plugins = ["cri"]),
 # and appending an imports line would leave CRI off. backup: keeps the packaged file for comparison.
@@ -130,7 +134,7 @@
     name: "{{ k8s_node_packages }}"
     state: present
     update_cache: true
-    cache_valid_time: 3600
+  ignore_errors: "{{ ansible_check_mode }}"
 
 - name: Hold kube packages and containerd.io so they cannot float
   ansible.builtin.dpkg_selections:

@@ -114,6 +114,19 @@ harmless without a node that carries the taint.
 | containerd.io | `2.2.1-1~ubuntu.24.04~noble` (held) | Live workers; 2.4.x is what ci-agent runs |
 | runc | 1.3.4 (ships inside containerd.io) | Not a separate apt package on the workers |
 | kubelet, kubeadm, kubectl | `1.33.13-1.1` (held) | Cluster version |
-| kubernetes-cni | `1.2.0-2.1` (held) | Live workers; hold so it cannot float |
+| kubernetes-cni | `1.6.0-1.1` (held) | Only version in the pkgs.k8s.io v1.33 repo; older nodes drifted (1.5.1 / 1.2.0) |
 
 Do not change `lynis.service` `ExecStart`. The `lynis` role already keeps it.
+
+## First real run (WorkerNode3, 7 Nov 2026): one bug caught in review, five that no dry-run caught
+
+| # | Symptom | Cause | Fix |
+|---|---|---|---|
+| 1 | (caught in review) | `containerd.io` package ships `disabled_plugins = ["cri"]` | role owns `/etc/containerd/config.toml` |
+| 2 | `No package matching 'containerd.io'` | repo added, but `cache_valid_time: 3600` skipped the refresh (cloud-init had just updated apt) | pinned installs always refresh apt (no `cache_valid_time`) |
+| 3 | `no available installation candidate for kubernetes-cni=1.2.0-2.1` | pin copied from WorkerNode2, which got it from an older minor's repo; v1.33 repo has only 1.6.0 | pin `1.6.0-1.1`. Fleet drift (1.5.1 / 1.2.0) goes to the patch cycle |
+| 4 | join failed, output hidden | `regex_search(..., '\1')` returns a **list**: config had `token: "['…']"` | `\| first`; on failure the play now prints kubeadm's output with the token redacted |
+| 5 | CSR approval failed on the Mac | approving CSRs needs cluster-admin; the Mac's kubectl is least-privilege | script runs on Master with `admin.conf` (`ansible.builtin.script`) |
+| 6 | Falco CrashLoopBackOff on the new node | cloud image kernel 6.8.0-88 refuses `perf_event_open` to least-privileged eBPF (CAP_PERFMON) | join playbook upgrades `linux-generic`, reboots and asserts kernel ABI >= 147, **only before the first join** (never reboots a joined worker) |
+
+Proven: stale-cache case reproduced on purpose (repos removed, cache refreshed) and the fixed role passed; full play `failed=0`; node Ready with taint/label, serving CSR issued, Falco/Alloy/node-exporter/kube-network-policies running, no MetalLB speaker; re-run idempotent.
