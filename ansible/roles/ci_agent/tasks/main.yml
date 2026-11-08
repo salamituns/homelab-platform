@@ -10,6 +10,9 @@
 - name: Install paved-road gate scripts to /opt/ci-gates
   ansible.builtin.import_tasks: gates.yml
 
+- name: Install promoter scripts to /opt/ci-gates (side by side with the gates)
+  ansible.builtin.import_tasks: promoters.yml
+
 - name: Trust the Nexus registry CA when the controller already has it
   ansible.builtin.import_tasks: registry.yml
 

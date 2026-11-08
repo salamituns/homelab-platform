@@ -10,9 +10,10 @@ ci_agent_jar_dir: /usr/local/lib/jenkins-agent
 ci_agent_jar_path: /usr/local/lib/jenkins-agent/agent.jar
 ci_agent_java_package: openjdk-21-jre-headless
 
-# Paved-road scripts from this repo (ci/gates/*.sh), not generated on the host.
+# Paved-road scripts from this repo (ci/gates/*.sh + ci/promoters/*.sh), not generated on the host.
 ci_agent_gates_src: "{{ playbook_dir }}/../../ci/gates"   # playbooks/ -> ansible/ -> repo root
 ci_agent_gates_dest: /opt/ci-gates
+ci_agent_promoters_src: "{{ playbook_dir }}/../../ci/promoters"
 
 # Docker CE 29.9.2 + containerd 2.4.2-3 from download.docker.com noble/stable
 # (pool listing 2026-10-29). Held so unattended-upgrades cannot float the engine.
@@ -49,6 +50,13 @@ ci_agent_cosign_version: "3.1.4"
 ci_agent_cosign_sha256: "424e2c97d0b45fd7a6b608a87f090f35633f4c23ece5f092d48bba11aaf4bbfa"
 ci_agent_cosign_rel: https://github.com/sigstore/cosign/releases/download
 ci_agent_cosign_url: "{{ ci_agent_cosign_rel }}/v{{ ci_agent_cosign_version }}/cosign-linux-amd64"
+
+# crane from go-containerregistry: digest-preserving copies between registries
+# (GHCR -> Nexus promoter). Checksum from that release's checksums.txt (checked 2026-11-08).
+ci_agent_crane_version: "0.22.1"
+ci_agent_crane_sha256: "0ab7a1d6932a213aed964ce97666c3077fe691c8606413674a8b3e0b9ec4cda0"
+ci_agent_crane_rel: https://github.com/google/go-containerregistry/releases/download
+ci_agent_crane_url: "{{ ci_agent_crane_rel }}/v{{ ci_agent_crane_version }}/go-containerregistry_Linux_x86_64.tar.gz"
 
 ci_agent_gitleaks_version: "8.30.1"
 ci_agent_gitleaks_sha256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"

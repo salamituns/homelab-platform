@@ -7,3 +7,5 @@ resources:
   - eso-tokenreview-tenants.yaml
   - mutate-apps-pool.yaml
   - ../../tenants/demo/staging
+  - ../../tenants/personal-site/staging
+  - ../../tenants/personal-site/prod

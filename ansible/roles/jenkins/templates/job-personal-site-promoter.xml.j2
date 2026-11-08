@@ -1,0 +1,39 @@
+<?xml version='1.1' encoding='UTF-8'?>
+<!-- Managed by Ansible (homelab-platform, role: jenkins, tasks/job.yml). Edits in the UI are overwritten on the next run. -->
+<flow-definition plugin="workflow-job">
+  <description>GHCR -&gt; lab promoter for personal-site (ADR 0019 D4): every 15 min pulls the image GitHub Actions
+    published, verifies the keyless signature and SPDX attestation, re-scans with Trivy, copies the digest into
+    Nexus, re-signs with the lab Cosign key, and opens a staging PR in apps-deploy. The GitHub source repo name
+    comes from the personal-site-source-repo credential and is never echoed to the build log.</description>
+  <keepDependencies>false</keepDependencies>
+  <properties/>
+  <definition class="org.jenkinsci.plugins.workflow.cps.CpsScmFlowDefinition" plugin="workflow-cps">
+    <scm class="hudson.plugins.git.GitSCM" plugin="git">
+      <configVersion>2</configVersion>
+      <userRemoteConfigs>
+        <hudson.plugins.git.UserRemoteConfig>
+          <url>{{ jenkins_platform_repo_url }}</url>
+          <!-- giteaAccessToken credentials implement StandardUsernameCredentials, so plain GitSCM accepts them. -->
+          <credentialsId>gitea-jenkins</credentialsId>
+        </hudson.plugins.git.UserRemoteConfig>
+      </userRemoteConfigs>
+      <branches>
+        <hudson.plugins.git.BranchSpec>
+          <name>*/main</name>
+        </hudson.plugins.git.BranchSpec>
+      </branches>
+      <doGenerateSubmoduleConfigurations>false</doGenerateSubmoduleConfigurations>
+      <submoduleCfg class="empty-list"/>
+      <extensions/>
+    </scm>
+    <scriptPath>{{ jenkins_personal_site_script_path }}</scriptPath>
+    <lightweight>true</lightweight>
+  </definition>
+  <triggers>
+    <hudson.triggers.TimerTrigger>
+      <spec>H/15 * * * *</spec>
+    </hudson.triggers.TimerTrigger>
+  </triggers>
+  <disabled>false</disabled>
+  <resumeBlocked>false</resumeBlocked>
+</flow-definition>

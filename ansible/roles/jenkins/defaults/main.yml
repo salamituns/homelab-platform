@@ -65,6 +65,20 @@ jenkins_gitea_token_src: "{{ jenkins_private_dir }}/gitea-jenkins.token"
 jenkins_gitea_promote_user: ci-promote
 jenkins_gitea_promote_token_src: "{{ jenkins_private_dir }}/gitea-ci-promote.token"
 
+# GHCR -> lab promoter job for personal-site (ADR 0019 D4): every 15 min it pulls the
+# GHCR image GitHub Actions signed, re-verifies + re-scans + copies it into Nexus,
+# re-signs with the lab key, and opens a staging PR in apps-deploy. The Jenkinsfile
+# comes from this repo (ci/promoters/), so the job only needs the gitea-jenkins
+# credential to check it out.
+jenkins_platform_repo_url: "{{ jenkins_gitea_url }}/tunsgit/homelab-platform.git"
+jenkins_personal_site_script_path: ci/promoters/personal-site.Jenkinsfile
+# "<owner>/<repo>" of the personal site on GitHub. The repo name contains the site's
+# public domain, so it is owner-provided via gitignored private/ and never in git.
+jenkins_personal_site_source_repo_src: "{{ jenkins_private_dir }}/personal-site-source-repo"
+# Push identity scoped to the personal-site Nexus repo only (created by the nexus role).
+jenkins_nexus_push_personal_site_user: push-personal-site
+jenkins_nexus_push_personal_site_src: /etc/nexus/secrets/push-personal-site
+
 # Top-level plugins plus required deps from the LTS update center (core 2.580.2).
 # job-dsl removed 2026-10-31: the BelleShop job is created through the REST API (tasks/job.yml),
 # not JCasC `jobs:`, and no pinned plugin needs job-dsl (checked update-center.actual.json

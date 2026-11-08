@@ -9,6 +9,12 @@ subjects:
   - kind: ServiceAccount
     name: eso
     namespace: demo-staging
+  - kind: ServiceAccount
+    name: eso
+    namespace: personal-site-staging
+  - kind: ServiceAccount
+    name: eso
+    namespace: personal-site-prod
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole

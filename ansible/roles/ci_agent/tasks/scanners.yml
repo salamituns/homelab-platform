@@ -9,6 +9,7 @@
     - /opt/ci-scanners
     - "/opt/ci-scanners/trivy-{{ ci_agent_trivy_version }}"
     - "/opt/ci-scanners/syft-{{ ci_agent_syft_version }}"
+    - "/opt/ci-scanners/crane-{{ ci_agent_crane_version }}"
     - "/opt/ci-scanners/gitleaks-{{ ci_agent_gitleaks_version }}"
 
 - name: Download pinned Trivy archive verified by SHA-256
@@ -98,6 +99,46 @@
   ansible.builtin.file:
     src: "/opt/ci-scanners/cosign-{{ ci_agent_cosign_version }}"
     dest: /usr/local/bin/cosign
+    state: link
+    force: true
+
+- name: Download pinned crane archive verified by SHA-256
+  ansible.builtin.get_url:
+    url: "{{ ci_agent_crane_url }}"
+    dest: "/opt/ci-scanners/go-containerregistry_{{ ci_agent_crane_version }}_Linux_x86_64.tar.gz"
+    checksum: "sha256:{{ ci_agent_crane_sha256 }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Unpack crane
+  ansible.builtin.unarchive:
+    src: "/opt/ci-scanners/go-containerregistry_{{ ci_agent_crane_version }}_Linux_x86_64.tar.gz"
+    dest: "/opt/ci-scanners/crane-{{ ci_agent_crane_version }}"
+    remote_src: true
+    extra_opts:
+      - --no-same-owner
+    include:
+      - crane
+    owner: root
+    group: root
+    creates: "/opt/ci-scanners/crane-{{ ci_agent_crane_version }}/crane"
+  # Check mode predicts the version dir into existence without creating it, so the
+  # unarchive cannot stat its dest until the first real run (same as a fresh host).
+  ignore_errors: "{{ ansible_check_mode }}"
+
+- name: Make the crane binary executable
+  ansible.builtin.file:
+    path: "/opt/ci-scanners/crane-{{ ci_agent_crane_version }}/crane"
+    owner: root
+    group: root
+    mode: "0755"
+  when: not ansible_check_mode
+
+- name: Point /usr/local/bin/crane at the pinned version
+  ansible.builtin.file:
+    src: "/opt/ci-scanners/crane-{{ ci_agent_crane_version }}/crane"
+    dest: /usr/local/bin/crane
     state: link
     force: true
 
