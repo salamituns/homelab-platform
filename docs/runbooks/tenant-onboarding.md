@@ -93,3 +93,23 @@ ssh Master 'sudo -n kubectl -n demo-staging get pods -o wide'
 - `bao delete auth/kubernetes/role/tenant-<app>-<env>` and `bao policy delete tenant-<app>-<env>`.
 
 Do not `kubectl delete namespace` as the first step: let Argo prune so the kit stays the source of truth.
+
+
+## Phase 0 gate evidence (8 Nov 2026)
+
+Tenant `demo-staging`, onboarded with the two golden-path PRs (homelab-platform #103 tenant kit, apps-deploy #1 app).
+
+| # | Check | Evidence |
+|---|---|---|
+| 1 | Tenant pod lands on the apps pool | `demo-web` 1/1 Running on `workernode3`; Pod has `nodeSelector homelab.arpa/pool=apps` + the apps toleration (MutatingPolicy at CREATE); Deployment template has none (no Argo drift); Argo `demo-staging` Synced/Healthy |
+| 2 | Untrusted images refused | server dry-run in `demo-staging`: unsigned `registry.home.arpa/platform/...` denied by `verify-tenant-images` (fails closed); `docker.io/library/nginx:1.27` denied by `require-digest` |
+| 3 | Network isolation, against peers with no policies of their own | ingress: master host -> falcosidekick 200 (control), master host -> demo-web:3000 no connection; egress: demo DNS resolves (allowed), demo -> falcosidekick blocked |
+| 4 | Secrets isolation, live | logged in to OpenBao as `demo-staging/eso` (role `tenant-demo-staging`, short-lived token in memory, revoked after): `apps/demo/staging/*` allowed (404, empty), `apps/govgraph/staging/*` **403**, `monitoring/alertmanager` **403**, `platform/nexus-pull` 200 by design |
+
+Found on the way: the new worker could not resolve `registry.home.arpa` (ImagePullBackOff). `dns.yml` had been run
+with `--limit gateway` (server only). Fixed live with `dns.yml --limit WorkerNode3`; `k8s-join.yml` now includes
+`internal_dns` so a new node gets it at join time.
+
+Lessons for test design: a "blocked" result proves nothing without a control that succeeds; test a namespace's
+policy against peers that have no policies of their own (here: the master host and the exempt `falco` namespace),
+or the other side's policy may be what blocked the traffic.
