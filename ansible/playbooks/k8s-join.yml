@@ -22,6 +22,10 @@
     - baseline
     - lab_ca_trust
     - static_ip
+    # *.home.arpa -> gateway (.96). Without it a new node cannot resolve registry.home.arpa and every
+    # tenant pod sits in ImagePullBackOff (WorkerNode3, 8 Nov 2026: cloud-init gives 1.1.1.1/8.8.8.8 only;
+    # dns.yml had been run with --limit gateway, which updates the server but not this client).
+    - internal_dns
     - k8s_node
   tasks:
     - name: Flush k8s_node handlers so containerd is up before certs.d

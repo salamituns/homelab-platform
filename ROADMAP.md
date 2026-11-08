@@ -211,8 +211,11 @@ Tunnel to an apps-only gateway; admin plane stays private. Each phase ends at a 
 - [x] Phase 0 tenant kit live 2026-11-08: `demo-staging` with PSA restricted, quota/limits, default-deny (#105 wave fix),
       own OpenBao role `tenant-demo-staging`, `nexus-pull` synced; AppProject/ApplicationSet `apps` (#103)
 - [ ] Phase 0: Gitea Actions runner VM (mirror-repo CI only; owner apply pending; re-verify the runner release first)
-- [ ] Phase 0 gate: `demo-staging` onboarded with one PR each; cross-tenant secret read and traffic denied;
-      unsigned image denied; tenant pod lands on `workernode3`
+- [x] Phase 0 gate PASSED 2026-11-08 (`demo-staging`, onboarded with homelab-platform #103 + apps-deploy #1):
+      pod 1/1 on `workernode3` (pinned at CREATE, template untouched); unsigned tenant image and docker.io image
+      denied; ingress (host -> demo: no connection, control 200) and egress (demo -> exempt ns: blocked, DNS ok)
+      isolated; as `demo-staging/eso`: own path allowed, govgraph path 403, platform secrets 403
+      ([tenant-onboarding.md](docs/runbooks/tenant-onboarding.md#phase-0-gate-evidence-8-nov-2026))
 - [ ] Phase 1: `personal-site` live via `edge-public` + `public-gateway` + tunnel; admin hosts unreachable via tunnel (tested)
 - [ ] Phase 2: `govgraph` live (secrets from OpenBao, Supabase Postgres egress, cron as CronJob)
 - [ ] Phase 3: `protexa` staging behind Cloudflare Access (prod per owner decision)
