@@ -1,0 +1,39 @@
+# Phase 0 dummy tenant (ADR 0019 gate). Namespace demo-staging.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: demo-staging
+components:
+  - ../../_kit/base
+patches:
+  - target:
+      version: v1
+      kind: Namespace
+      name: tenant
+    patch: |-
+      - op: replace
+        path: /metadata/name
+        value: demo-staging
+      - op: add
+        path: /metadata/labels/homelab.arpa~1tenant
+        value: demo
+      - op: add
+        path: /metadata/labels/homelab.arpa~1env
+        value: staging
+  - target:
+      group: external-secrets.io
+      version: v1
+      kind: SecretStore
+      name: openbao
+    patch: |-
+      - op: replace
+        path: /spec/provider/vault/auth/kubernetes/role
+        value: tenant-demo-staging
+  - target:
+      group: rbac.authorization.k8s.io
+      version: v1
+      kind: RoleBinding
+      name: tenant-developer
+    patch: |-
+      - op: replace
+        path: /subjects/0/name
+        value: demo-dev

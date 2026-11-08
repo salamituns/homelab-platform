@@ -1,0 +1,22 @@
+# Gitea OIDC group <app>-dev: read workloads and patch Rollouts (promote/abort).
+# No secrets, no exec/attach/portforward.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tenant-developer
+rules:
+  - apiGroups: [""]
+    resources: [pods, pods/log, events, services, endpoints]
+    verbs: [get, list, watch]
+  - apiGroups: ["apps"]
+    resources: [deployments, replicasets, statefulsets, daemonsets]
+    verbs: [get, list, watch]
+  - apiGroups: ["batch"]
+    resources: [jobs, cronjobs]
+    verbs: [get, list, watch]
+  - apiGroups: ["argoproj.io"]
+    resources: [rollouts, rollouts/status, analysisruns]
+    verbs: [get, list, watch, patch]
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: [httproutes]
+    verbs: [get, list, watch]

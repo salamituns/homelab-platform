@@ -1,0 +1,93 @@
+# Backstop for ADR 0019 D2: tenant pods (namespace label homelab.arpa/tenant) land on
+# workernode3. JSONPatch appends the taint toleration and sets the nodeSelector key
+# even when spec.nodeSelector is missing. CRD storage version: policies.kyverno.io/v1beta1
+# (checked live 7 Nov 2026).
+apiVersion: policies.kyverno.io/v1beta1
+kind: MutatingPolicy
+metadata:
+  name: tenant-apps-pool
+  annotations:
+    policies.kyverno.io/title: Pin tenant Pods to the apps worker pool
+    policies.kyverno.io/category: Tenancy
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/description: >-
+      Adds nodeSelector homelab.arpa/pool=apps and a matching NoSchedule toleration
+      to Pods in namespaces labelled homelab.arpa/tenant.
+spec:
+  failurePolicy: Fail
+  reinvocationPolicy: IfNeeded
+  evaluation:
+    admission:
+      enabled: true
+    background:
+      enabled: false
+    mutateExisting:
+      enabled: false
+  autogen:
+    podControllers:
+      controllers:
+        - deployments
+        - statefulsets
+        - jobs
+        - replicasets
+        - cronjobs
+        - rollouts.v1alpha1.argoproj.io
+  matchConstraints:
+    namespaceSelector:
+      matchExpressions:
+        - key: homelab.arpa/tenant
+          operator: Exists
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods"]
+  mutations:
+    - patchType: JSONPatch
+      jsonPatch:
+        expression: |-
+          (
+            has(object.spec.nodeSelector)
+            ? [
+                JSONPatch{
+                  op: "add",
+                  path: "/spec/nodeSelector/" + jsonpatch.escapeKey("homelab.arpa/pool"),
+                  value: "apps"
+                }
+              ]
+            : [
+                JSONPatch{
+                  op: "add",
+                  path: "/spec/nodeSelector",
+                  value: {"homelab.arpa/pool": "apps"}
+                }
+              ]
+          ) + (
+            has(object.spec.tolerations)
+            ? [
+                JSONPatch{
+                  op: "add",
+                  path: "/spec/tolerations/-",
+                  value: {
+                    "key": "homelab.arpa/pool",
+                    "operator": "Equal",
+                    "value": "apps",
+                    "effect": "NoSchedule"
+                  }
+                }
+              ]
+            : [
+                JSONPatch{
+                  op: "add",
+                  path: "/spec/tolerations",
+                  value: [
+                    {
+                      "key": "homelab.arpa/pool",
+                      "operator": "Equal",
+                      "value": "apps",
+                      "effect": "NoSchedule"
+                    }
+                  ]
+                }
+              ]
+          )

@@ -1,0 +1,13 @@
+# Overlay patches subjects[0].name to <app>-dev (Gitea OIDC group).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tenant-developer
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: tenant-developer
+subjects:
+  - kind: Group
+    apiGroup: rbac.authorization.k8s.io
+    name: tenant-dev

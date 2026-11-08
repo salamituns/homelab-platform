@@ -205,8 +205,10 @@ Tunnel to an apps-only gateway; admin plane stays private. Each phase ends at a 
 - [ ] protexa repo: move `VITE_AXXESS_API_KEY` server-side (Supabase edge function) before protexa staging is exposed
 - [x] Phase 0 worker: `workernode3` Terraform + `k8s-join.yml` in git (owner apply pending,
       [k8s-add-node.md](docs/runbooks/k8s-add-node.md); ADR 0019 D2)
+- [x] Phase 0 tenant kit: `k8s/tenants/_kit` + `demo/staging`, AppProject/ApplicationSet `apps`,
+      MutatingPolicy apps-pool (owner apply pending, [tenant-onboarding.md](docs/runbooks/tenant-onboarding.md))
 - [ ] Phase 0: `nexus-pull` via ESO; Nexus `platform` + per-app repos/users;
-      tenant kit; `apps` AppProject + ApplicationSet; OpenBao per-app paths/roles; dummy app onboarded
+      OpenBao per-app paths/roles; dummy app onboarded to `demo-staging` with one PR each
 - [ ] Phase 1: `personal-site` live via `edge-public` + `public-gateway` + tunnel; admin hosts unreachable via tunnel (tested)
 - [ ] Phase 2: `govgraph` live (secrets from OpenBao, Supabase Postgres egress, cron as CronJob)
 - [ ] Phase 3: `protexa` staging behind Cloudflare Access (prod per owner decision)
