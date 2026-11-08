@@ -1,0 +1,15 @@
+# Tenant namespace kit (ADR 0019 D1). Overlay sets namespace: <app>-<env>,
+# patches Namespace name/labels, SecretStore role, developer group, and HTTP port.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+resources:
+  - namespace.yaml
+  - resourcequota.yaml
+  - limitrange.yaml
+  - netpol-default-deny.yaml
+  - netpol-dns-egress.yaml
+  - netpol-gateway-ingress.yaml
+  - role-developer.yaml
+  - rolebinding-developer.yaml
+components:
+  - ../secrets

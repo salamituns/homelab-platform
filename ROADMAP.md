@@ -203,12 +203,16 @@ Host real apps (`personal-site`, `govgraph`, `protexa`) as tenants. Public acces
 Tunnel to an apps-only gateway; admin plane stays private. Each phase ends at a gate with evidence.
 - [x] Owner decisions 2026-11-07: protexa prod on a managed host (lab = pipeline + staging), govgraph DB on Supabase, both Vercel-DNS domains to Cloudflare
 - [ ] protexa repo: move `VITE_AXXESS_API_KEY` server-side (Supabase edge function) before protexa staging is exposed
-- [x] Phase 0 worker: `workernode3` Terraform + `k8s-join.yml` in git (owner apply pending,
-      [k8s-add-node.md](docs/runbooks/k8s-add-node.md); ADR 0019 D2)
-- [ ] Phase 0: `nexus-pull` via ESO; Nexus `platform` + per-app repos/users;
-      tenant kit; `apps` AppProject + ApplicationSet; OpenBao per-app paths/roles; dummy app onboarded
-- [ ] Phase 0: Nexus per-app repos + push identities (owner apply pending)
-- [ ] Phase 0: Gitea Actions runner VM (mirror-repo CI only; owner apply pending)
+- [x] Phase 0 worker: `workernode3` live 2026-11-07 (VM 128 `.91`, Ready, `homelab.arpa/pool=apps` taint/label,
+      Falco/Alloy on it; built by `k8s-join.yml`, [k8s-add-node.md](docs/runbooks/k8s-add-node.md); ADR 0019 D2)
+- [x] Phase 0: Nexus per-app repos + push identities live 2026-11-07 (`platform`, `personal-site`, `govgraph`, `protexa`; #100)
+- [x] Phase 0: `nexus-pull` via ESO live 2026-11-08 in `dev`, `kyverno`, `argo-rollouts` (OpenBao `secret/platform/nexus-pull`
+      via `openbao-breakglass.sh root-run nexus-pull`; #101; Kyverno verified a signed image with it)
+- [x] Phase 0 tenant kit live 2026-11-08: `demo-staging` with PSA restricted, quota/limits, default-deny (#105 wave fix),
+      own OpenBao role `tenant-demo-staging`, `nexus-pull` synced; AppProject/ApplicationSet `apps` (#103)
+- [ ] Phase 0: Gitea Actions runner VM (mirror-repo CI only; owner apply pending; re-verify the runner release first)
+- [ ] Phase 0 gate: `demo-staging` onboarded with one PR each; cross-tenant secret read and traffic denied;
+      unsigned image denied; tenant pod lands on `workernode3`
 - [ ] Phase 1: `personal-site` live via `edge-public` + `public-gateway` + tunnel; admin hosts unreachable via tunnel (tested)
 - [ ] Phase 2: `govgraph` live (secrets from OpenBao, Supabase Postgres egress, cron as CronJob)
 - [ ] Phase 3: `protexa` staging behind Cloudflare Access (prod per owner decision)

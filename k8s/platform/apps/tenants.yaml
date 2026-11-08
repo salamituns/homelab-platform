@@ -1,0 +1,28 @@
+# Platform-owned tenant kit: MutatingPolicy, tenant TokenReview binding, and
+# k8s/tenants/<app>/<env> namespaces (ADR 0019 D1/D2). Workloads stay in apps-deploy.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: tenants
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  project: platform
+  source:
+    repoURL: https://gitea.home.arpa/tunsgit/homelab-platform.git
+    targetRevision: main
+    path: k8s/platform/tenants
+  destination:
+    server: https://kubernetes.default.svc
+    # Namespaced objects already set metadata.namespace (demo-staging). Cluster-scoped
+    # objects ignore this. Destination must still match AppProject globs.
+    namespace: demo-staging
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false
+      - ServerSideApply=true
+      - SkipDryRunOnMissingResource=true

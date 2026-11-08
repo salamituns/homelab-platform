@@ -1,0 +1,9 @@
+# Cluster-scoped tenant plumbing (Argo Application `tenants`, project platform).
+# Namespaces themselves live under k8s/tenants/<app>/<env>/ and are included here
+# so one platform app owns them (CreateNamespace=false on the apps ApplicationSet).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - eso-tokenreview-tenants.yaml
+  - mutate-apps-pool.yaml
+  - ../../tenants/demo/staging

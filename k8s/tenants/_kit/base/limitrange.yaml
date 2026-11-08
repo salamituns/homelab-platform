@@ -1,0 +1,27 @@
+# Defaults so a pod that omits resources still satisfies require-requests-limits
+# (CPU request, memory request, memory limit). Kyverno still Deny if a container
+# sets a zero value. Max keeps one container from taking the whole node.
+apiVersion: v1
+kind: LimitRange
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  name: tenant-limits
+spec:
+  limits:
+    - type: Container
+      default:
+        cpu: 100m
+        memory: 128Mi
+      defaultRequest:
+        cpu: 25m
+        memory: 64Mi
+      max:
+        cpu: "1"
+        memory: 1Gi
+      min:
+        cpu: 10m
+        memory: 16Mi
+    - type: PersistentVolumeClaim
+      max:
+        storage: 5Gi

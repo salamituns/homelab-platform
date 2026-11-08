@@ -32,6 +32,9 @@ spec:
     - { server: https://kubernetes.default.svc, namespace: falco }                    # runtime alerts (ADR 0015 D)
     - { server: https://kubernetes.default.svc, namespace: kube-network-policies }    # policy enforcement (ADR 0015 A)
     - { server: https://kubernetes.default.svc, namespace: dev }   # access Role and binding only (ADR 0014 step 8)
+    # Tenant kit (Application `tenants`) owns <app>-staging / <app>-prod namespaces.
+    - { server: https://kubernetes.default.svc, namespace: "*-staging" }
+    - { server: https://kubernetes.default.svc, namespace: "*-prod" }
   clusterResourceWhitelist:
     - { group: "", kind: Namespace }
     - { group: apiextensions.k8s.io, kind: CustomResourceDefinition }
@@ -44,6 +47,7 @@ spec:
     - { group: apiregistration.k8s.io, kind: APIService }   # metrics-server
     - { group: policies.kyverno.io, kind: ImageValidatingPolicy }
     - { group: policies.kyverno.io, kind: ValidatingPolicy }
+    - { group: policies.kyverno.io, kind: MutatingPolicy }   # tenant apps-pool pin (ADR 0019 D2)
     - { group: gateway.networking.k8s.io, kind: GatewayClass }                         # NGINX Gateway Fabric (ADR 0013)
     - { group: admissionregistration.k8s.io, kind: ValidatingAdmissionPolicy }         # Gateway API CRD upgrade guard
     - { group: admissionregistration.k8s.io, kind: ValidatingAdmissionPolicyBinding }

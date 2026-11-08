@@ -1,0 +1,42 @@
+# One Application per apps/<app>/overlays/<env> in apps-deploy (ADR 0019 D5).
+# Namespaces are NOT created here (CreateNamespace=false): they come from the
+# tenant kit (Application `tenants`). Owner must create the Gitea repo
+# tunsgit/apps-deploy and register it in Argo CD before this generator is useful.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: apps
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  goTemplate: true
+  goTemplateOptions:
+    - missingkey=error
+  generators:
+    - git:
+        repoURL: https://gitea.home.arpa/tunsgit/apps-deploy.git
+        revision: main
+        directories:
+          - path: apps/*/overlays/*
+  template:
+    metadata:
+      name: '{{ index .path.segments 1 }}-{{ index .path.segments 3 }}'
+      namespace: argocd
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io
+    spec:
+      project: apps
+      source:
+        repoURL: https://gitea.home.arpa/tunsgit/apps-deploy.git
+        targetRevision: main
+        path: '{{ .path.path }}'
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: '{{ index .path.segments 1 }}-{{ index .path.segments 3 }}'
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=false

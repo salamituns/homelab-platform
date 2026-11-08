@@ -1,0 +1,49 @@
+# Copy to k8s/tenants/<app>/staging/ and replace APP / ENV.
+# Then: patch SecretStore role, Namespace name/labels, developer group.
+# Golden path: docs/runbooks/tenant-onboarding.md
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: APP-staging
+components:
+  - ../../_kit/base
+patches:
+  - target:
+      version: v1
+      kind: Namespace
+      name: tenant
+    patch: |-
+      - op: replace
+        path: /metadata/name
+        value: APP-staging
+      - op: add
+        path: /metadata/labels/homelab.arpa~1tenant
+        value: APP
+      - op: add
+        path: /metadata/labels/homelab.arpa~1env
+        value: staging
+  - target:
+      group: external-secrets.io
+      version: v1
+      kind: SecretStore
+      name: openbao
+    patch: |-
+      - op: replace
+        path: /spec/provider/vault/auth/kubernetes/role
+        value: tenant-APP-staging
+  - target:
+      group: rbac.authorization.k8s.io
+      version: v1
+      kind: RoleBinding
+      name: tenant-developer
+    patch: |-
+      - op: replace
+        path: /subjects/0/name
+        value: APP-dev
+  # Optional: app listen port (kit default 8080).
+  # - target:
+  #     kind: NetworkPolicy
+  #     name: tenant-gateway-ingress
+  #   patch: |-
+  #     - op: replace
+  #       path: /spec/ingress/0/ports/0/port
+  #       value: 8080

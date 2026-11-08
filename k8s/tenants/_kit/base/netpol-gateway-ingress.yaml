@@ -1,0 +1,23 @@
+# Ingress only from the NGF data-plane pods. Overlay patches spec.ingress[0].ports[0].port
+# to the app's container port (kit default 8080; restricted PSA, no host ports).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  name: tenant-gateway-ingress
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: nginx-gateway
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: homelab-gateway-nginx
+      ports:
+        - protocol: TCP
+          port: 8080

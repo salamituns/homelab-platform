@@ -1,0 +1,14 @@
+# Labels PSA restricted + Kyverno admission. Overlay patches metadata.name to
+# <app>-<env> and adds homelab.arpa/tenant and homelab.arpa/env.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tenant
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+    homelab.arpa/admission: enforced
+    homelab.arpa/exposure: internal
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"

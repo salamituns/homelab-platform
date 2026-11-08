@@ -22,6 +22,8 @@
 #   scripts/openbao-breakglass.sh root-run oidc <consumer> # OIDC client secrets (ADR 0016):
 #       #      consumer = grafana | argocd | oauth2-proxy-prometheus | oauth2-proxy-alertmanager
 #   scripts/openbao-breakglass.sh root-run watchdog-url   # PATCH watchdog_url on monitoring/alertmanager
+#   scripts/openbao-breakglass.sh root-run nexus-pull     # registry pull credential + 3 ESO roles (ADR 0019)
+#   scripts/openbao-breakglass.sh root-run tenant <app> <env>  # per-tenant policy + role (ADR 0019 D6)
 #   scripts/openbao-breakglass.sh root-run -- <cmd...>    # anything else with the token
 #   everything also accepts --dry-run (and root-run alertmanager/oidc: --overwrite)
 #
@@ -151,7 +153,7 @@ unseal_loop() {
 # root-run
 # ---------------------------------------------------------------------------
 cmd_root_run() {
-  local mode="exec" cmd_args=() OIDC_CONSUMER=""
+  local mode="exec" cmd_args=() OIDC_CONSUMER="" TENANT_APP="" TENANT_ENV=""
   local args=()
   [[ $# -gt 0 ]] || die "root-run needs a command: 'root-run alertmanager' or 'root-run -- <cmd...>'"
   # allow `root-run -- cmd` and `root-run cmd`; --dry-run/--overwrite peeled off anywhere
@@ -171,6 +173,15 @@ cmd_root_run() {
   elif [[ "${args[0]}" == "watchdog-url" ]]; then
     mode="watchdog"
     [[ ${#args[@]} -gt 1 ]] && die "root-run watchdog-url takes no extra arguments (flags: --dry-run)"
+  elif [[ "${args[0]}" == "nexus-pull" ]]; then
+    mode="nexuspull"
+    [[ ${#args[@]} -gt 1 ]] && die "root-run nexus-pull takes no extra arguments (flags: --overwrite --dry-run)"
+  elif [[ "${args[0]}" == "tenant" ]]; then
+    mode="tenant"
+    [[ ${#args[@]} -eq 3 ]] || die "root-run tenant takes exactly <app> <env>"
+    [[ "${args[1]}" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ && "${args[2]}" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]] \
+      || die "tenant app/env must match ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+    TENANT_APP="${args[1]}" TENANT_ENV="${args[2]}"
   elif [[ "${args[0]}" == "oidc" ]]; then
     mode="oidc"
     [[ ${#args[@]} -eq 2 ]] || die "root-run oidc takes exactly one consumer: grafana|argocd|oauth2-proxy-prometheus|oauth2-proxy-alertmanager"
@@ -221,6 +232,14 @@ cmd_root_run() {
     else
       payload=$(oidc_prompt_and_extend "$payload" "$OIDC_CONSUMER")
     fi
+  elif [[ "$mode" == "nexuspull" ]]; then
+    if [[ "$DRY_RUN" == true ]]; then
+      payload=$(jq -cn --argjson p "$payload" '$p + {nexuspull: {username: "k8s-pull", password: "<hidden>"}, overwrite: false}')
+    else
+      payload=$(nexuspull_fetch_and_extend "$payload")
+    fi
+  elif [[ "$mode" == "tenant" ]]; then
+    payload=$(jq -cn --argjson p "$payload" --arg a "$TENANT_APP" --arg e "$TENANT_ENV" '$p + {tenant: {app: $a, env: $e}}')
   elif [[ "$mode" == "watchdog" ]]; then
     if [[ "$DRY_RUN" == true ]]; then
       payload=$(jq -cn --argjson p "$payload" \
@@ -258,7 +277,7 @@ set -euo pipefail
 umask 077
 P="${BREAKGLASS_PAYLOAD:?}"
 ADDR=$(jq -r .addr <<<"$P")
-MODE=$(jq -r 'if .cmd then "exec" elif .oidc then "oidc" elif .watchdog then "watchdog" else "alertmanager" end' <<<"$P")
+MODE=$(jq -r 'if .cmd then "exec" elif .oidc then "oidc" elif .watchdog then "watchdog" elif .nexuspull then "nexuspull" elif .tenant then "tenant" else "alertmanager" end' <<<"$P")
 
 echo "    [remote] health check"
 curl -q -s "$ADDR/v1/sys/health" | jq -e '.initialized and (.sealed | not)' >/dev/null \
@@ -390,6 +409,55 @@ HCL
     | jq -e --argjson exp "$EXPECTED" '.data.data | keys | sort == $exp' >/dev/null \
     || { echo "ERROR: unexpected keys in secret/$KV" >&2; exit 1; }
   echo "    [remote] oidc setup complete ($CONSUMER)"
+elif [[ "$MODE" == "nexuspull" ]]; then
+  # ---- registry pull credential for ESO (ADR 0019 Phase 0) ----
+  echo "    [remote] checking mounts (kv v2 at secret/, kubernetes auth)"
+  curl -q -s --config "$CFG" "$ADDR/v1/sys/mounts" | jq -e '.["secret/"].options.version == "2"' >/dev/null \
+    || { echo "ERROR: kv v2 is not mounted at secret/" >&2; exit 1; }
+  curl -q -s --config "$CFG" "$ADDR/v1/sys/auth" | jq -e '.["kubernetes/"]' >/dev/null \
+    || { echo "ERROR: kubernetes auth is not enabled" >&2; exit 1; }
+  echo "    [remote] writing policy nexus-pull-read (read secret/data/platform/nexus-pull only)"
+  jq -n --arg policy 'path "secret/data/platform/nexus-pull" {
+  capabilities = ["read"]
+}' '{policy: $policy}' \
+    | curl -q -s -o /dev/null --config "$CFG" -X PUT --data-binary @- "$ADDR/v1/sys/policies/acl/nexus-pull-read"
+  for NS in dev kyverno argo-rollouts; do
+    echo "    [remote] writing kubernetes auth role nexus-pull-$NS (SA $NS/eso-nexus-pull)"
+    jq -n --arg ns "$NS" '{bound_service_account_names: ["eso-nexus-pull"], bound_service_account_namespaces: [$ns], token_policies: ["nexus-pull-read"], token_ttl: "1h"}' \
+      | curl -q -s -o /dev/null --config "$CFG" -X POST --data-binary @- "$ADDR/v1/auth/kubernetes/role/nexus-pull-$NS"
+  done
+  EXISTS=$(curl -q -s --config "$CFG" -o /dev/null -w '%{http_code}' "$ADDR/v1/secret/metadata/platform/nexus-pull")
+  OVER=$(jq -r '.overwrite // false' <<<"$P")
+  if [[ "$EXISTS" == "200" && "$OVER" != "true" ]]; then
+    echo "    [remote] secret/platform/nexus-pull already exists (pass --overwrite to replace)"
+  else
+    echo "    [remote] writing secret/platform/nexus-pull (username + password; values never printed)"
+    CODE=$(jq -c '{data: .nexuspull}' <<<"$P" \
+      | curl -q -s --config "$CFG" -o /dev/null -w '%{http_code}' -X POST --data-binary @- "$ADDR/v1/secret/data/platform/nexus-pull")
+    [[ "$CODE" == "200" || "$CODE" == "204" ]] \
+      || { echo "ERROR: writing secret/platform/nexus-pull failed (HTTP $CODE)" >&2; exit 1; }
+  fi
+  curl -q -s --config "$CFG" "$ADDR/v1/secret/data/platform/nexus-pull" \
+    | jq -e '.data.data | (keys == ["password","username"]) and (.password | length > 0)' >/dev/null \
+    || { echo "ERROR: secret/platform/nexus-pull does not hold exactly username+password" >&2; exit 1; }
+  echo "    [remote] nexus-pull setup complete"
+elif [[ "$MODE" == "tenant" ]]; then
+  # ---- per-tenant least-privilege access (ADR 0019 D6) ----
+  APP=$(jq -r .tenant.app <<<"$P"); ENVN=$(jq -r .tenant.env <<<"$P")
+  [[ "$APP" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ && "$ENVN" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]] \
+    || { echo "ERROR: bad tenant name" >&2; exit 1; }
+  NAME="tenant-$APP-$ENVN"
+  echo "    [remote] writing policy $NAME (read secret/data/apps/$APP/$ENVN/* + the shared pull credential)"
+  POLICY=$(printf 'path "secret/data/apps/%s/%s/*" {\n  capabilities = ["read"]\n}\npath "secret/data/platform/nexus-pull" {\n  capabilities = ["read"]\n}\n' "$APP" "$ENVN")
+  jq -n --arg policy "$POLICY" '{policy: $policy}' \
+    | curl -q -s -o /dev/null --config "$CFG" -X PUT --data-binary @- "$ADDR/v1/sys/policies/acl/$NAME"
+  echo "    [remote] writing kubernetes auth role $NAME (SA $APP-$ENVN/eso)"
+  jq -n --arg ns "$APP-$ENVN" --arg pol "$NAME" '{bound_service_account_names: ["eso"], bound_service_account_namespaces: [$ns], token_policies: [$pol], token_ttl: "1h"}' \
+    | curl -q -s -o /dev/null --config "$CFG" -X POST --data-binary @- "$ADDR/v1/auth/kubernetes/role/$NAME"
+  curl -q -s --config "$CFG" "$ADDR/v1/auth/kubernetes/role/$NAME" \
+    | jq -e --arg ns "$APP-$ENVN" --arg pol "$NAME" '.data.bound_service_account_namespaces == [$ns] and .data.token_policies == [$pol]' >/dev/null \
+    || { echo "ERROR: role $NAME did not read back as written" >&2; exit 1; }
+  echo "    [remote] tenant $APP-$ENVN setup complete"
 elif [[ "$MODE" == "watchdog" ]]; then
   # PATCH only watchdog_url on the existing SMTP secret. Never rewrite username/password/from/to.
   KV=monitoring/alertmanager
@@ -504,6 +572,19 @@ alertmanager_prompt_and_extend() {   # $1 payload-so-far -> full payload on stdo
 
 # Hidden prompt for the healthchecks.io ping URL. Prefix-checked here so a bad value
 # never reaches OpenBao. Stdout is ONLY the payload JSON (this runs inside $( )).
+# Reads the k8s-pull password from the nexus VM (root 0600 file) over ssh into a local variable and
+# extends the payload. Never printed, never argv. BREAKGLASS_NEXUS_PULL_CMD overrides the fetch (tests).
+nexuspull_fetch_and_extend() {  # $1 payload-so-far -> full payload on stdout
+  local payload="$1" pw
+  echo "==> reading the k8s-pull password from nexus (never printed; never argv)" >&2
+  pw=$(${BREAKGLASS_NEXUS_PULL_CMD:-ssh -n -o BatchMode=yes tunsadmin@192.168.1.87 sudo -n cat /etc/nexus/secrets/k8s-pull})
+  pw="${pw%$'\n'}"
+  [[ -n "$pw" ]] || die "empty k8s-pull password from nexus (nothing stored)"
+  NEXUS_PULL_PW="$pw" jq -cn --argjson p "$payload" --argjson o "$( [[ "$OVERWRITE" == true ]] && echo true || echo false )" \
+    '$p + {nexuspull: {username: "k8s-pull", password: env.NEXUS_PULL_PW}, overwrite: $o}'
+  unset pw NEXUS_PULL_PW
+}
+
 watchdog_prompt_and_extend() {  # $1 payload-so-far -> full payload on stdout
   local payload="$1" url
   echo "==> healthchecks.io ping URL (never printed; never argv)" >&2
