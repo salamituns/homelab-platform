@@ -20,14 +20,11 @@ Namespaces, quotas, NetworkPolicies, developer RBAC, `nexus-pull`, and the apps-
 ### 1. OpenBao (before the namespace exists is OK; ESO retries)
 
 ```sh
-./scripts/openbao-tenant.sh demo staging            # dry-run
-export BAO_ADDR=https://bao.home.arpa
-export BAO_CACERT=ansible/files/ca/sectools-caddy-root.crt
-read -rs BAO_TOKEN; export BAO_TOKEN
-./scripts/openbao-tenant.sh demo staging --apply
-bao token revoke -self
-unset BAO_TOKEN
+scripts/openbao-breakglass.sh root-run tenant demo staging --dry-run   # plan only
+scripts/openbao-breakglass.sh root-run tenant demo staging             # 2 hidden unseal-share prompts
 ```
+
+No token on the Mac: the root token is minted, used and revoked on sectools (root revoked 2026-11-02).
 
 Details: [`tenant-secrets.md`](tenant-secrets.md). Role name must be `tenant-<app>-<env>` (the SecretStore patch).
 
@@ -86,7 +83,7 @@ ssh Master 'sudo -n kubectl -n demo-staging get pods -o wide'
 # OpenBao role tenant-demo-staging can read secret/data/apps/demo/staging/*
 # and secret/data/platform/nexus-pull only. A read of
 # secret/data/apps/govgraph/staging/* with that role must be 403.
-# scripts/openbao-tenant.sh documents the policy.
+# Proven by scripts/openbao-breakglass-test.sh (section 12) against a throwaway OpenBao.
 ```
 
 ## Rollback
