@@ -1,0 +1,12 @@
+# Managed by Ansible (role: k8s_node). Merged via containerd imports conf.d.
+# Live WorkerNode2 7 Nov 2026: version 3, SystemdCgroup, pause 3.10.1, certs.d path.
+version = 3
+
+[plugins.'io.containerd.cri.v1.images'.pinned_images]
+  sandbox = '{{ k8s_node_pause_image }}'
+
+[plugins.'io.containerd.cri.v1.images'.registry]
+  config_path = '/etc/containerd/certs.d:/etc/docker/certs.d'
+
+[plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.runc.options]
+  SystemdCgroup = true

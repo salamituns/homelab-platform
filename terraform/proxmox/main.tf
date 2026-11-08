@@ -77,6 +77,16 @@ locals {
       disk_gb      = 60
       tags         = ["ci"]
     }
+    # Apps-pool worker (ADR 0019 D2). VMID 128: 104-106 are free but their PBS
+    # backup groups still exist; do not reuse. Template 109 (var.template_id).
+    workernode3 = {
+      vm_id        = 128
+      ipv4_address = "192.168.1.91"
+      cores        = 4
+      memory_mb    = 8192
+      disk_gb      = 80
+      tags         = ["k8s", "apps"]
+    }
   }
 }
 

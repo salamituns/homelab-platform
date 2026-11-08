@@ -1,0 +1,3 @@
+# Apps-pool worker (ADR 0019 D2). System trust of the registry CA is extra to
+# containerd_registry (certs.d); curl/apt to registry.home.arpa then work too.
+lab_ca_trust_cas: [nexus]

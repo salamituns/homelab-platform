@@ -1,0 +1,19 @@
+# 0600, deleted after kubeadm join. Token is short-lived (15m).
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: JoinConfiguration
+discovery:
+  bootstrapToken:
+    apiServerEndpoint: "{{ k8s_join_api }}"
+    token: "{{ k8s_join_token }}"
+    caCertHashes:
+      - "{{ k8s_join_ca_hash }}"
+    unsafeSkipCAVerification: false
+nodeRegistration:
+  criSocket: "{{ k8s_node_cri_socket }}"
+  kubeletExtraArgs:
+    - name: node-labels
+      value: "{{ k8s_join_node_label }}"
+  taints:
+    - key: "{{ k8s_join_taint_key }}"
+      value: "{{ k8s_join_taint_value }}"
+      effect: "{{ k8s_join_taint_effect }}"

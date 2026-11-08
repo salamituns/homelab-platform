@@ -1,0 +1,6 @@
+# Managed by Ansible (role: k8s_node). Replaces the containerd.io package default, which ships
+# disabled_plugins = ["cri"]: with that file kubeadm join fails ("container runtime is not running").
+# Live workers (7 Nov 2026) run version 3 with disabled_plugins = [] and imports conf.d.
+version = 3
+disabled_plugins = []
+imports = ['/etc/containerd/conf.d/*.toml']

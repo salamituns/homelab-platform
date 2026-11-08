@@ -1,0 +1,29 @@
+# Pins match WorkerNode2 7 Nov 2026 (Ubuntu 24.04.3). containerd.io MUST stay
+# on 2.2.1: ci-agent is on 2.4.x from the same Docker repo, and a float would
+# break CRI pull / Falco's containerd socket assumptions.
+k8s_node_minor: "1.33"
+k8s_node_version: "1.33.13"
+k8s_node_pkg_version: "{{ k8s_node_version }}-1.1"
+k8s_node_cni_pkg_version: "1.2.0-2.1"
+
+k8s_node_containerd_pkg: "containerd.io=2.2.1-1~ubuntu.24.04~noble"
+k8s_node_pause_image: "registry.k8s.io/pause:3.10.1"
+k8s_node_cri_socket: "unix:///run/containerd/containerd.sock"
+
+k8s_node_docker_apt_key_url: https://download.docker.com/linux/ubuntu/gpg
+k8s_node_docker_apt_key_dest: /etc/apt/keyrings/docker.asc
+k8s_node_k8s_apt_uris: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_node_minor }}/deb/"
+k8s_node_k8s_apt_key: "{{ k8s_node_k8s_apt_uris }}Release.key"
+
+k8s_node_packages:
+  - "kubelet={{ k8s_node_pkg_version }}"
+  - "kubeadm={{ k8s_node_pkg_version }}"
+  - "kubectl={{ k8s_node_pkg_version }}"
+  - "kubernetes-cni={{ k8s_node_cni_pkg_version }}"
+
+k8s_node_hold:
+  - kubelet
+  - kubeadm
+  - kubectl
+  - kubernetes-cni
+  - containerd.io

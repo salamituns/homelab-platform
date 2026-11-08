@@ -95,6 +95,12 @@ controller:
     - key: node-role.kubernetes.io/control-plane
       operator: Exists
       effect: NoSchedule
+    # Apps-pool worker (ADR 0019 D2). MetalLB speaker does NOT get this taint:
+    # the admin VIP must not be announced from the apps node.
+    - key: homelab.arpa/pool
+      operator: Equal
+      value: apps
+      effect: NoSchedule
 
 configReloader:
   enabled: true
