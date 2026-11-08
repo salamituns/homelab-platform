@@ -77,6 +77,16 @@ locals {
       disk_gb      = 60
       tags         = ["ci"]
     }
+    # Gitea Actions runner (ADR 0019 D4, govgraph's CI). Runs UNTRUSTED build code from the
+    # Gitea mirror repos in Docker containers: no Gitea admin creds, no cluster creds here.
+    gitea-runner = {
+      vm_id        = 129
+      ipv4_address = "192.168.1.94"
+      cores        = 2
+      memory_mb    = 4096
+      disk_gb      = 60
+      tags         = ["ci"]
+    }
     # Apps-pool worker (ADR 0019 D2). VMID 128: 104-106 are free but their PBS
     # backup groups still exist; do not reuse. Template 109 (var.template_id).
     workernode3 = {

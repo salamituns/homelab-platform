@@ -1,0 +1,6 @@
+- name: Restart gitea-runner
+  ansible.builtin.systemd_service:
+    name: gitea-runner
+    state: restarted
+    daemon_reload: true
+  ignore_errors: "{{ ansible_check_mode }}"

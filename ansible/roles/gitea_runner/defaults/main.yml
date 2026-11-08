@@ -1,0 +1,53 @@
+# Gitea Runner (the official Gitea Actions runner, formerly act_runner), the build VM for
+# Gitea Actions (ADR 0019 D4). It runs UNTRUSTED code from the Gitea mirror repos in Docker
+# containers: it holds no Gitea admin credential, no cluster credential and no Nexus identity.
+#
+# Pin + SHA-256 bumped together. Checksum source: the release "checksums.txt" published next
+# to the downloads (signed as checksums.txt.sig since v5.4.0), checked 2026-11-07:
+# https://gitea.com/gitea/runner/releases/download/v<version>/checksums.txt
+gitea_runner_version: "5.4.1"
+gitea_runner_sha256: "7c4b1bd1fbc0d0dfb5a09bfa70b89e550a0af15fc90a911df7ccaeb348143508"
+gitea_runner_download_url: "https://gitea.com/gitea/runner/releases/download/v{{ gitea_runner_version }}/gitea-runner-{{ gitea_runner_version }}-linux-amd64"
+
+gitea_runner_user: gitea-runner
+gitea_runner_group: gitea-runner
+# Job working directories and the registration file (.runner, a secret) live here.
+gitea_runner_home: /var/lib/gitea-runner
+gitea_runner_binary_path: /usr/local/bin/gitea-runner
+gitea_runner_config_dir: /etc/gitea-runner
+gitea_runner_config_path: "{{ gitea_runner_config_dir }}/config.yaml"
+
+# The registration token the OWNER creates in the Gitea admin UI and places here (0600,
+# owned by the runner user). Registration reads it with --token-file (never argv) and
+# shreds it on success.
+gitea_runner_token_path: "{{ gitea_runner_config_dir }}/registration.token"
+
+# Must be the Gitea instance's ROOT_URL: job containers resolve and dial this name
+# (docs.gitea.com/runner/registration: "localhost does not work from job containers").
+gitea_runner_instance_url: https://gitea.home.arpa/
+gitea_runner_name: "{{ inventory_hostname }}"
+
+# One job at a time on a 2 vCPU VM; the runner default is one per core, which would thrash.
+gitea_runner_capacity: 1
+
+# `runs-on: ubuntu-24.04` runs the job in this image, pulled from Gitea's official registry
+# mirror (docker.gitea.com). NOT via registry.home.arpa: the Nexus dockerhub proxy serves
+# library/* only and requires auth, and this VM has no Nexus identity (by design). A workflow
+# can always pin its own container image; see the role README before changing this.
+gitea_runner_labels:
+  - "ubuntu-24.04:docker://docker.gitea.com/runner-images:ubuntu-24.04"
+
+# Docker CE pinned and held like ci-agent (the isolated-build-host model, ADR 0011; same
+# versions so both build VMs run the same engine, pool listing checked 2026-10-29).
+gitea_runner_docker_apt_key_url: https://download.docker.com/linux/ubuntu/gpg
+gitea_runner_docker_apt_key_dest: /usr/share/keyrings/docker.asc
+gitea_runner_docker_packages:
+  - "docker-ce=5:29.9.2-1~ubuntu.24.04~noble"
+  - "docker-ce-cli=5:29.9.2-1~ubuntu.24.04~noble"
+  - "containerd.io=2.4.2-3~ubuntu.24.04~noble"
+  - "docker-buildx-plugin=0.38.1-1~ubuntu.24.04~noble"
+gitea_runner_docker_hold:
+  - docker-ce
+  - docker-ce-cli
+  - containerd.io
+  - docker-buildx-plugin

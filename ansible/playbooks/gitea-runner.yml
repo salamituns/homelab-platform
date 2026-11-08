@@ -1,0 +1,15 @@
+# Gitea Actions runner VM (ADR 0019 D4, govgraph's CI).
+# The runner polls out to Gitea, so nothing inbound is opened on it. Gitea itself must
+# be Actions-enabled first: run playbooks/gitea.yml (or --limit gitea).
+# Usage:
+#   ansible-playbook playbooks/gitea-runner.yml --check --diff
+#   ansible-playbook playbooks/gitea-runner.yml
+- name: Configure the Gitea Actions runner
+  hosts: gitea-runner
+  become: true
+  roles:
+    - baseline
+    - lab_ca_trust   # before gitea_runner: the runner polls https://gitea.home.arpa
+    - internal_dns
+    - firewall
+    - gitea_runner

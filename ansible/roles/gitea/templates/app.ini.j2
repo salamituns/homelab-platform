@@ -41,7 +41,12 @@ DEFAULT_PRIVATE = private
 ROOT = /var/lib/gitea/data/gitea-repositories
 
 [actions]
-ENABLED = false
+ENABLED = true
+; Relative `uses:` in workflows resolve against this Gitea instance instead of github.com
+; (1.27 supports only `github` | `self`). Actions must be mirrored into Gitea first; a
+; workflow can still pin a full URL. The upstream docs warn that `self` makes short names
+; ambiguous - accepted here on purpose: builds must not pull code from public GitHub.
+DEFAULT_ACTIONS_URL = self
 
 [webhook]
 ; Gitea refuses webhooks to private addresses by default (SSRF guard). Allow exactly the hosts in

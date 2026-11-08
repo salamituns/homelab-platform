@@ -1,0 +1,7 @@
+# Gitea Runner: pinned Docker engine first (the daemon is what isolates the untrusted jobs),
+# then the pinned runner binary, registration, config and service.
+- name: Install Docker CE (pinned and held) and the runner user
+  ansible.builtin.import_tasks: docker.yml
+
+- name: Install the pinned Gitea Runner, register it, and start the daemon
+  ansible.builtin.import_tasks: runner.yml

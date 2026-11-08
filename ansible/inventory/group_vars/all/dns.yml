@@ -14,6 +14,7 @@ internal_dns_records:
   - { names: [nexus, registry], ip: 192.168.1.87 }     # registry: Docker repos via Caddy (ADR 0011)
   - { names: [jenkins], ip: 192.168.1.88 }
   - { names: [ci-agent], ip: 192.168.1.93 }
+  - { names: [gitea-runner], ip: 192.168.1.94 }       # Gitea Actions runner (ADR 0019 D4; owner apply pending)
   - { names: [workernode1], ip: 192.168.1.89 }
   - { names: [master, k8s-api], ip: 192.168.1.90 }
   - { names: [workernode3], ip: 192.168.1.91 }         # apps-pool worker (ADR 0019 D2; owner apply pending)

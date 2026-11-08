@@ -1,0 +1,34 @@
+# Managed by Ansible (homelab-platform, role: gitea_runner). Local edits are overwritten.
+#
+# Outbound-only: the runner polls https://gitea.home.arpa/, so this VM accepts no inbound
+# connections beyond SSH and Gitea holds no credential for it beyond the runner registration.
+# Job containers are started through /run/docker.sock (docker group) and publish no ports.
+[Unit]
+Description=Gitea Actions runner (gitea-runner)
+After=network-online.target docker.service
+Wants=network-online.target docker.service
+
+[Service]
+Type=simple
+User={{ gitea_runner_user }}
+Group={{ gitea_runner_group }}
+WorkingDirectory={{ gitea_runner_home }}
+Environment=HOME={{ gitea_runner_home }}
+ExecStart={{ gitea_runner_binary_path }} daemon --config {{ gitea_runner_config_path }}
+Restart=on-failure
+RestartSec=5s
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths={{ gitea_runner_home }}
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

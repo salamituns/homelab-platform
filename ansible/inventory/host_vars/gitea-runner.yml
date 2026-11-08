@@ -1,0 +1,8 @@
+# No extra inbound ports. The runner dials out to https://gitea.home.arpa/ and job
+# containers never publish ports, so UFW keeps its default-deny (SSH only) posture.
+firewall_service_rules: []
+
+# The runner polls https://gitea.home.arpa/ (Caddy TLS). Go reads the system trust store
+# once per process, so restart the daemon when a CA file changes (name is a unit, not Java).
+lab_ca_trust_cas: [gitea]
+lab_ca_trust_java_service: gitea-runner

@@ -1,0 +1,25 @@
+# Managed by Ansible (homelab-platform, role: gitea_runner). Local edits are overwritten.
+# Reference: `gitea-runner generate-config` defaults (docs.gitea.com/runner).
+log:
+  level: info
+runner:
+  # The registration credential. A secret: whoever holds it can accept jobs as this runner.
+  file: {{ gitea_runner_home }}/.runner
+  capacity: {{ gitea_runner_capacity }}
+  # The Gitea TLS chain is in the system trust store (role lab_ca_trust); never skip verify.
+  insecure: false
+  labels:
+{% for label in gitea_runner_labels %}
+    - "{{ label }}"
+{% endfor %}
+container:
+  # A fresh bridge network per job; jobs are never privileged and may not mount host volumes.
+  network: ""
+  privileged: false
+  options:
+  workdir_parent: {{ gitea_runner_home }}/work
+  valid_volumes: []
+cache:
+  # The cache server binds a listening socket for actions/cache. UFW blocks inbound traffic
+  # anyway, but the bind scope is undecided, so it stays off until that is a real decision.
+  enabled: false

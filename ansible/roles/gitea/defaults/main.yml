@@ -23,6 +23,7 @@ gitea_https_clients:
   - { name: mac, ip: 192.168.1.121 }          # Workstation fixed DHCP allocation
   - { name: jenkins, ip: 192.168.1.88 }       # ADR 0011: branch indexing, Jenkinsfile reads
   - { name: ci-agent, ip: 192.168.1.93 }      # ADR 0011: git clone in builds
+  - { name: gitea-runner, ip: 192.168.1.94 }  # ADR 0019 D4: the Actions runner polls 443
 
 # Local dump directory and retention count for gitea-backup.timer.
 gitea_backup_dir: /var/backups/gitea
