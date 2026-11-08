@@ -11,4 +11,4 @@ metadata:
     homelab.arpa/admission: enforced
     homelab.arpa/exposure: internal
   annotations:
-    argocd.argoproj.io/sync-wave: "-1"
+    argocd.argoproj.io/sync-wave: "-2"

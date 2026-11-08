@@ -3,6 +3,8 @@
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
   name: tenant-gateway-ingress
 spec:
   podSelector: {}

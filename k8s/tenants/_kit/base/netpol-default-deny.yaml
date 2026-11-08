@@ -1,4 +1,8 @@
-# Default-deny. Sync after the allow policies in this component (wave 1).
+# Default-deny. Wave -1 with the allow policies, right after the Namespace (-2) and BEFORE the
+# secrets objects (wave 1). It was wave 1 first: Argo waits for every earlier-wave resource to be
+# healthy, so an unconfigured SecretStore (Degraded until `root-run tenant` runs) kept the namespace
+# WITHOUT default-deny (demo-staging, 8 Nov 2026). The namespace is new and empty when wave -1 runs, so
+# deny and allows landing in the same wave leaves no window with running pods.
 # kube-network-policies evaluates post-DNAT: peers are pods / node /32s, never ClusterIPs
 # (docs/runbooks/network-policy.md).
 apiVersion: networking.k8s.io/v1
@@ -6,7 +10,7 @@ kind: NetworkPolicy
 metadata:
   name: tenant-default-deny
   annotations:
-    argocd.argoproj.io/sync-wave: "1"
+    argocd.argoproj.io/sync-wave: "-1"
 spec:
   podSelector: {}
   policyTypes:
