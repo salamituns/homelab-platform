@@ -17,8 +17,9 @@ Nexus Repository Community Edition on `nexus` (VMID 124, `192.168.1.87`), with t
    - Docker hosted repos from `nexus_docker_repos`, each on a localhost connector port, tags immutable (`allow_once`)
    - Docker proxy repos from `nexus_docker_proxies` (`dockerhub` on 8083, `ghcr` on 8084)
    - service users from `nexus_service_users`, one role each: `ci-push` (push to `belleshop`), `ci-pull` (read/browse
-     `ghcr` for Trivy DBs on all builds including PRs), `k8s-pull` (pull `belleshop` and `dockerhub`);
-     passwords generated on the host in `/etc/nexus/secrets/<user>` (0600)
+     `ghcr` for Trivy DBs on all builds including PRs), `k8s-pull` (pull every hosted repo and `dockerhub`), and one
+     push user per app repo — `push-platform`, `push-personal-site`, `push-govgraph`, `push-protexa` (ADR 0019 D4,
+     never another app's repo); passwords generated on the host in `/etc/nexus/secrets/<user>` (0600)
 
 The `caddy` role then serves `nexus.home.arpa` (UI/API) and `registry.home.arpa` (Docker) on 443, and fetches its root CA
 to `ansible/files/ca/nexus-caddy-root.crt` for the Mac, the CI agent and the k8s nodes.
