@@ -9,7 +9,7 @@
 #   3. flag false opens the endpoints after a restart, and the legacy endpoint the bao
 #      CLI uses stays gated regardless (why the script speaks the new API);
 #   4. --dry-run of every subcommand (apply-config, root-run alertmanager, root-run oidc,
-#      root-run watchdog-url) contacts nothing and prompts for nothing;
+#      root-run watchdog-url, root-run cloudflared-token) contacts nothing and prompts for nothing;
 #   5. the full root-run alertmanager flow through the LOCAL shell override
 #      (BREAKGLASS_SSH="bash -c"): hidden-share prompts fed over stdin, the root token
 #      minted/decoded/used/revoked, the alertmanager policy, role and secret written,
@@ -203,6 +203,12 @@ if grep -q "revocation" "$TD/dry4.out"; then
   ok "root-run watchdog-url --dry-run prints the flow, prompted for nothing"
 else
   bad "root-run watchdog-url --dry-run"; cat "$TD/dry4.out"
+fi
+"$SCRIPT" root-run --dry-run cloudflared-token >"$TD/dry5.out" 2>&1
+if grep -q "revocation" "$TD/dry5.out"; then
+  ok "root-run cloudflared-token --dry-run prints the flow, prompted for nothing"
+else
+  bad "root-run cloudflared-token --dry-run"; cat "$TD/dry5.out"
 fi
 
 echo "== 5. root-run alertmanager through the local-shell override (the full flow)"
@@ -404,6 +410,71 @@ BAO_TOKEN="$TT" bao kv get secret/apps/demo/staging/web >/dev/null 2>&1 && ok "t
 if BAO_TOKEN="$TT" bao kv get secret/apps/other/staging/web >/dev/null 2>&1; then bad "TENANT TOKEN READ ANOTHER TENANT'S SECRET"; else ok "tenant token CANNOT read another tenant's path (403)"; fi
 if BAO_TOKEN="$TT" bao kv get secret/monitoring/alertmanager >/dev/null 2>&1; then bad "TENANT TOKEN READ A PLATFORM SECRET"; else ok "tenant token CANNOT read platform secrets"; fi
 unset RT TT TP
+
+echo "== 13. root-run cloudflared-token (ADR 0019 D7); bad shape dies before mint"
+# Throwaway JWT built at runtime so the fixture is not a literal secret-shaped string in git.
+# Three base64url segments, length >= 100. Not a real tunnel token.
+CF_THROW=$(python3 -c 'import base64
+h=base64.urlsafe_b64encode(b"{\"alg\":\"none\"}").rstrip(b"=").decode()
+p=base64.urlsafe_b64encode(b"{\"t\":\"harness\"}").rstrip(b"=").decode()
+print(h+"."+p+"."+("x"*80))
+')
+Fcfbad=$(feed_shares)
+printf '%s\n' "$(python3 -c 'print("x"*120)')" >>"$Fcfbad"
+if run_flow "$TD/run-cf-bad.out" root-run cloudflared-token <"$Fcfbad"; then
+  bad "bad tunnel token should have been rejected"
+else
+  ok "bad tunnel token rejected (nonzero exit)"
+fi
+if grep -q "must start with eyJ" "$TD/run-cf-bad.out"; then
+  ok "bad token error names the JWT shape"
+else
+  bad "bad token error missing"; cat "$TD/run-cf-bad.out"
+fi
+if grep -q "minting the root token" "$TD/run-cf-bad.out"; then
+  bad "bad tunnel token minted a root token (should die locally first)"
+else
+  ok "bad tunnel token died before minting"
+fi
+
+feed_cloudflared() {
+  local f; f=$(mktemp "$TD/answers.XXXXXX")
+  jq -r '.unseal_keys_b64[0,1]' "$TD/init.json" >"$f"
+  printf '%s\n' "$CF_THROW" >>"$f"
+  echo "$f"
+}
+Fcf=$(feed_cloudflared)
+if run_flow "$TD/run-cf.out" root-run cloudflared-token <"$Fcf"; then
+  ok "root-run cloudflared-token exited 0"
+else
+  bad "root-run cloudflared-token failed"; cat "$TD/run-cf.out"; exit 1
+fi
+grep -q "stored (${#CF_THROW} chars)" "$TD/run-cf.out" && ok "prints stored (N chars) only"
+grep -q "cloudflared-token setup complete" "$TD/run-cf.out" && ok "cloudflared policy, role and secret written"
+grep -q "revocation verified" "$TD/run-cf.out" && ok "cloudflared-token run revoked its token"
+if grep -qF "$CF_THROW" "$TD/run-cf.out"; then
+  bad "THE TUNNEL TOKEN WAS PRINTED INTO THE OUTPUT"
+else
+  ok "tunnel token never printed in the output"
+fi
+Fcf2=$(feed_cloudflared)
+run_flow "$TD/run-cf2.out" root-run cloudflared-token <"$Fcf2" || true
+if grep -q "already exists" "$TD/run-cf2.out"; then
+  ok "cloudflared-token re-run skips the existing secret (no --overwrite)"
+else
+  bad "cloudflared-token re-run did not skip"; cat "$TD/run-cf2.out"
+fi
+RT="$(jq -r .root_token "$TD/init.json")"
+BAO_TOKEN="$RT" bao read -format=json secret/data/platform/cloudflared \
+  | jq -e --arg t "$CF_THROW" '.data.data | (keys == ["tunnel_token"]) and .tunnel_token == $t' >/dev/null \
+  && ok "secret/platform/cloudflared holds tunnel_token of the first write"
+BAO_TOKEN="$RT" bao read -format=json auth/kubernetes/role/cloudflared \
+  | jq -e '.data.bound_service_account_names == ["eso"] and .data.bound_service_account_namespaces == ["edge-public"] and .data.token_policies == ["cloudflared-read"]' >/dev/null \
+  && ok "role cloudflared bound to edge-public/eso with cloudflared-read"
+BAO_TOKEN="$RT" bao policy read cloudflared-read | grep -q 'secret/data/platform/cloudflared' \
+  && [[ "$(BAO_TOKEN="$RT" bao policy read cloudflared-read | grep -c '^path')" == 1 ]] \
+  && ok "policy cloudflared-read grants exactly the tunnel-token path"
+unset RT
 
 echo ""
 echo "result: $PASS passed, $FAIL failed"

@@ -1,0 +1,14 @@
+# Cloudflare Tunnel connector (ADR 0019 D7). Hostname map is NOT here — this repo is
+# public; the map lives in the Cloudflare dashboard (remotely-managed tunnel).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: edge-public
+resources:
+  - namespace.yaml
+  - netpol-default-deny.yaml
+  - netpol-allow.yaml
+  - eso-sa.yaml
+  - cloudflared-sa.yaml
+  - secretstore-openbao.yaml
+  - externalsecret-cloudflared.yaml
+  - cloudflared.yaml

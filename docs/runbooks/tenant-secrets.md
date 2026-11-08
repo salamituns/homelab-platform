@@ -18,9 +18,10 @@ Previously, `nexus-pull` was copied by hand into `dev`, `kyverno`, and `argo-rol
 | `kyverno` (existing) | `eso-nexus-pull` | `openbao-nexus-pull` | `nexus-pull-kyverno` | `nexus-pull-read` | `secret/data/platform/nexus-pull` |
 | `argo-rollouts` (existing) | `eso-nexus-pull` | `openbao-nexus-pull` | `nexus-pull-argo-rollouts` | `nexus-pull-read` | `secret/data/platform/nexus-pull` |
 | `<app>-<env>` (tenant kit) | `eso` | `openbao` | `tenant-<app>-<env>` | `tenant-<app>-<env>` | `secret/data/apps/<app>/<env>/*`, `secret/data/platform/nexus-pull` |
+| `edge-public` | `eso` | `openbao` | `cloudflared` | `cloudflared-read` | `secret/data/platform/cloudflared` |
 
 - **Why `dev` uses `openbao-nexus-pull` / `eso-nexus-pull`:** `belleshop-deploy` already manages `SecretStore/openbao` and `ServiceAccount/eso-belleshop` in `dev` (bound to OpenBao role `belleshop`). Using `openbao-nexus-pull` avoids colliding with `belleshop-deploy` (the same separation used by `monitoring/openbao-oidc` in `k8s/platform/monitoring/manifests/secretstore-openbao-oidc.yaml`).
-- **TokenReview delegation (`k8s/platform/cluster-config/eso-tokenreview.yaml`):** OpenBao's Kubernetes auth mount runs with `disable_local_ca_jwt: true` (`scripts/openbao-setup-belleshop.sh`), so OpenBao calls the Kubernetes `TokenReview` API using the client ServiceAccount's own JWT. Every ESO ServiceAccount (`eso-nexus-pull` in `dev`, `kyverno`, `argo-rollouts`, and `eso` in each `<app>-<env>`) must be listed in `ClusterRoleBinding/eso-tokenreview-belleshop`.
+- **TokenReview delegation (`k8s/platform/cluster-config/eso-tokenreview.yaml`):** OpenBao's Kubernetes auth mount runs with `disable_local_ca_jwt: true` (`scripts/openbao-setup-belleshop.sh`), so OpenBao calls the Kubernetes `TokenReview` API using the client ServiceAccount's own JWT. Every ESO ServiceAccount (`eso-nexus-pull` in `dev`, `kyverno`, `argo-rollouts`, `eso` in `edge-public`, and `eso` in each `<app>-<env>`) must be listed in `ClusterRoleBinding/eso-tokenreview-belleshop`.
 
 ---
 

@@ -108,6 +108,56 @@ spec:
       ports:
         - { protocol: TCP, port: 8443 }   # agent-grpc: data plane -> control plane
 ---
+# Public data-plane egress: agent-grpc to the control plane, and backends in namespaces
+# labelled exposure=public on the tenant kit listen port (8080, post-DNAT). No path to
+# admin UIs in monitoring/argocd (those stay on homelab-gateway-nginx).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nginx-gateway-public-data-plane-egress
+  namespace: nginx-gateway
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: public-gateway-nginx
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              homelab.arpa/exposure: public
+      ports:
+        - { protocol: TCP, port: 8080 }
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: nginx-gateway
+      ports:
+        - { protocol: TCP, port: 8443 }   # agent-grpc
+---
+# Public data-plane ingress: ONLY cloudflared in edge-public, on the HTTP listener
+# port (80). No 192.168.1.0/24 — that is the point of ClusterIP + this policy.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nginx-gateway-public-data-plane-ingress
+  namespace: nginx-gateway
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: public-gateway-nginx
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: edge-public
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: cloudflared
+      ports:
+        - { protocol: TCP, port: 80 }
+---
 # Data-plane ingress: the Gateway listener ports on the pod (80/443). externalTrafficPolicy
 # is Local (verified), so the source is the LAN client itself - 192.168.1.0/24. The
 # 10.244.0.0/16 entry covers the Cluster case (node masquerade) and in-cluster clients;
@@ -153,6 +203,9 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: homelab-gateway-nginx
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: public-gateway-nginx   # second data plane (ADR 0019 D7)
         - ipBlock:
             cidr: 10.244.0.0/24   # master podCIDR: the apiserver calling the webhook
       ports:

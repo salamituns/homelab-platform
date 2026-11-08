@@ -118,6 +118,7 @@ scripts/openbao-breakglass.sh apply-config    # ONCE per config change; see belo
 scripts/openbao-breakglass.sh root-run <cmd>  # mint, run the command, revoke (always)
 scripts/openbao-breakglass.sh root-run alertmanager   # the step-5 alert setup (ADR 0015 D)
 scripts/openbao-breakglass.sh root-run watchdog-url   # PATCH watchdog_url only (keep SMTP)
+scripts/openbao-breakglass.sh root-run cloudflared-token  # tunnel token for edge-public (ADR 0019 D7)
 scripts/openbao-breakglass.sh root-run -- bao auth list   # anything else, same pattern
 ```
 

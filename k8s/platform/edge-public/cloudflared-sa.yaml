@@ -1,0 +1,8 @@
+# Workload identity for the connector pods. Distinct from eso (TokenReview). No API access.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  name: cloudflared
+automountServiceAccountToken: false

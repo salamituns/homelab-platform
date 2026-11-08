@@ -27,6 +27,9 @@ subjects:
   - kind: ServiceAccount
     name: eso-nexus-pull
     namespace: argo-rollouts
+  - kind: ServiceAccount
+    name: eso
+    namespace: edge-public
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole

@@ -24,6 +24,7 @@
 #   scripts/openbao-breakglass.sh root-run watchdog-url   # PATCH watchdog_url on monitoring/alertmanager
 #   scripts/openbao-breakglass.sh root-run nexus-pull     # registry pull credential + 3 ESO roles (ADR 0019)
 #   scripts/openbao-breakglass.sh root-run tenant <app> <env>  # per-tenant policy + role (ADR 0019 D6)
+#   scripts/openbao-breakglass.sh root-run cloudflared-token  # tunnel token for edge-public (ADR 0019 D7)
 #   scripts/openbao-breakglass.sh root-run -- <cmd...>    # anything else with the token
 #   everything also accepts --dry-run (and root-run alertmanager/oidc: --overwrite)
 #
@@ -176,6 +177,9 @@ cmd_root_run() {
   elif [[ "${args[0]}" == "nexus-pull" ]]; then
     mode="nexuspull"
     [[ ${#args[@]} -gt 1 ]] && die "root-run nexus-pull takes no extra arguments (flags: --overwrite --dry-run)"
+  elif [[ "${args[0]}" == "cloudflared-token" ]]; then
+    mode="cloudflared"
+    [[ ${#args[@]} -gt 1 ]] && die "root-run cloudflared-token takes no extra arguments (flags: --overwrite --dry-run)"
   elif [[ "${args[0]}" == "tenant" ]]; then
     mode="tenant"
     [[ ${#args[@]} -eq 3 ]] || die "root-run tenant takes exactly <app> <env>"
@@ -240,6 +244,13 @@ cmd_root_run() {
     fi
   elif [[ "$mode" == "tenant" ]]; then
     payload=$(jq -cn --argjson p "$payload" --arg a "$TENANT_APP" --arg e "$TENANT_ENV" '$p + {tenant: {app: $a, env: $e}}')
+  elif [[ "$mode" == "cloudflared" ]]; then
+    if [[ "$DRY_RUN" == true ]]; then
+      payload=$(jq -cn --argjson p "$payload" \
+        '$p + {cloudflared: {tunnel_token: "<hidden>", nchars: 0}, overwrite: false}')
+    else
+      payload=$(cloudflared_prompt_and_extend "$payload")
+    fi
   elif [[ "$mode" == "watchdog" ]]; then
     if [[ "$DRY_RUN" == true ]]; then
       payload=$(jq -cn --argjson p "$payload" \
@@ -277,7 +288,7 @@ set -euo pipefail
 umask 077
 P="${BREAKGLASS_PAYLOAD:?}"
 ADDR=$(jq -r .addr <<<"$P")
-MODE=$(jq -r 'if .cmd then "exec" elif .oidc then "oidc" elif .watchdog then "watchdog" elif .nexuspull then "nexuspull" elif .tenant then "tenant" else "alertmanager" end' <<<"$P")
+MODE=$(jq -r 'if .cmd then "exec" elif .oidc then "oidc" elif .watchdog then "watchdog" elif .nexuspull then "nexuspull" elif .tenant then "tenant" elif .cloudflared then "cloudflared" else "alertmanager" end' <<<"$P")
 
 echo "    [remote] health check"
 curl -q -s "$ADDR/v1/sys/health" | jq -e '.initialized and (.sealed | not)' >/dev/null \
@@ -458,6 +469,42 @@ elif [[ "$MODE" == "tenant" ]]; then
     | jq -e --arg ns "$APP-$ENVN" --arg pol "$NAME" '.data.bound_service_account_namespaces == [$ns] and .data.token_policies == [$pol]' >/dev/null \
     || { echo "ERROR: role $NAME did not read back as written" >&2; exit 1; }
   echo "    [remote] tenant $APP-$ENVN setup complete"
+elif [[ "$MODE" == "cloudflared" ]]; then
+  # ---- Cloudflare Tunnel token for edge-public/eso (ADR 0019 D7) ----
+  echo "    [remote] checking mounts (kv v2 at secret/, kubernetes auth)"
+  curl -q -s --config "$CFG" "$ADDR/v1/sys/mounts" | jq -e '.["secret/"].options.version == "2"' >/dev/null \
+    || { echo "ERROR: kv v2 is not mounted at secret/" >&2; exit 1; }
+  curl -q -s --config "$CFG" "$ADDR/v1/sys/auth" | jq -e '.["kubernetes/"]' >/dev/null \
+    || { echo "ERROR: kubernetes auth is not enabled" >&2; exit 1; }
+  echo "    [remote] writing policy cloudflared-read (read secret/data/platform/cloudflared only)"
+  jq -n --arg policy 'path "secret/data/platform/cloudflared" {
+  capabilities = ["read"]
+}' '{policy: $policy}' \
+    | curl -q -s -o /dev/null --config "$CFG" -X PUT --data-binary @- "$ADDR/v1/sys/policies/acl/cloudflared-read"
+  echo "    [remote] writing kubernetes auth role cloudflared (SA edge-public/eso)"
+  jq -n '{bound_service_account_names: ["eso"], bound_service_account_namespaces: ["edge-public"], token_policies: ["cloudflared-read"], token_ttl: "1h"}' \
+    | curl -q -s -o /dev/null --config "$CFG" -X POST --data-binary @- "$ADDR/v1/auth/kubernetes/role/cloudflared"
+  EXISTS=$(curl -q -s --config "$CFG" -o /dev/null -w '%{http_code}' "$ADDR/v1/secret/metadata/platform/cloudflared")
+  OVER=$(jq -r '.overwrite // false' <<<"$P")
+  if [[ "$EXISTS" == "200" && "$OVER" != "true" ]]; then
+    echo "    [remote] secret/platform/cloudflared already exists (pass --overwrite to replace)"
+    curl -q -s --config "$CFG" "$ADDR/v1/secret/data/platform/cloudflared" \
+      | jq -e '.data.data | keys == ["tunnel_token"]' >/dev/null \
+      || { echo "ERROR: existing secret/platform/cloudflared does not hold exactly tunnel_token" >&2; exit 1; }
+  else
+    echo "    [remote] writing secret/platform/cloudflared (tunnel_token; value never printed)"
+    CODE=$(jq -c '{data: {tunnel_token: .cloudflared.tunnel_token}}' <<<"$P" \
+      | curl -q -s --config "$CFG" -o /dev/null -w '%{http_code}' -X POST --data-binary @- "$ADDR/v1/secret/data/platform/cloudflared")
+    [[ "$CODE" == "200" || "$CODE" == "204" ]] \
+      || { echo "ERROR: writing secret/platform/cloudflared failed (HTTP $CODE)" >&2; exit 1; }
+    NCHARS=$(jq -r '.cloudflared.nchars' <<<"$P")
+    curl -q -s --config "$CFG" "$ADDR/v1/secret/data/platform/cloudflared" \
+      | jq -e --argjson n "$NCHARS" \
+        '(.data.data | keys == ["tunnel_token"]) and ((.data.data.tunnel_token | length) == $n)' >/dev/null \
+      || { echo "ERROR: secret/platform/cloudflared does not hold exactly tunnel_token of the expected length" >&2; exit 1; }
+    echo "    [remote] stored ($NCHARS chars)"
+  fi
+  echo "    [remote] cloudflared-token setup complete"
 elif [[ "$MODE" == "watchdog" ]]; then
   # PATCH only watchdog_url on the existing SMTP secret. Never rewrite username/password/from/to.
   KV=monitoring/alertmanager
@@ -583,6 +630,33 @@ nexuspull_fetch_and_extend() {  # $1 payload-so-far -> full payload on stdout
   NEXUS_PULL_PW="$pw" jq -cn --argjson p "$payload" --argjson o "$( [[ "$OVERWRITE" == true ]] && echo true || echo false )" \
     '$p + {nexuspull: {username: "k8s-pull", password: env.NEXUS_PULL_PW}, overwrite: $o}'
   unset pw NEXUS_PULL_PW
+}
+
+# Hidden prompt for a Cloudflare remotely-managed tunnel token. Shape-checked locally so a
+# paste of an unseal share or OpenBao token never reaches the store. Cloudflare issues these
+# as JWTs (three base64url segments, header starts with eyJ). Stdout is ONLY the payload JSON.
+cloudflared_prompt_and_extend() {  # $1 payload-so-far -> full payload on stdout
+  local payload="$1" tok
+  echo "==> Cloudflare Tunnel token (never printed; never argv)" >&2
+  if [[ -t 0 ]]; then
+    read -rs -p "    token (hidden): " tok
+    echo >&2
+  else
+    IFS= read -r tok
+  fi
+  tok="${tok//[$' \t\r\n']/}"
+  [[ -n "$tok" ]] || die "tunnel token must not be empty"
+  [[ ${#tok} -ge 100 ]] || die "tunnel token too short (Cloudflare tokens are JWTs, >= 100 chars; nothing stored)"
+  [[ "$tok" == eyJ* ]] || die "tunnel token must start with eyJ (JWT header; nothing stored)"
+  [[ "$tok" =~ ^eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$ ]] \
+    || die "tunnel token must be a JWT (three base64url segments; nothing stored)"
+  local overwrite=false
+  [[ "$OVERWRITE" == true ]] && overwrite=true
+  local nchars=${#tok}
+  CF_TUNNEL_TOKEN="$tok" \
+    jq -cn --argjson p "$payload" --argjson n "$nchars" --argjson overwrite "$overwrite" \
+      '$p + {cloudflared: {tunnel_token: env.CF_TUNNEL_TOKEN, nchars: $n}, overwrite: $overwrite}'
+  unset tok CF_TUNNEL_TOKEN
 }
 
 watchdog_prompt_and_extend() {  # $1 payload-so-far -> full payload on stdout
