@@ -1,0 +1,11 @@
+# Dedicated identity for External Secrets Operator when reading `secret/data/platform/nexus-pull`
+# into `dev/nexus-pull` (ADR 0014, ADR 0019 Phase 0). Kept separate from `dev/eso-belleshop`
+# (managed in belleshop-deploy) so OpenBao policies stay per-path least-privilege:
+# `nexus-pull-dev` grants `nexus-pull-read` (`secret/data/platform/nexus-pull` only).
+# Bound to system:auth-delegator in k8s/platform/cluster-config/eso-tokenreview.yaml.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: eso-nexus-pull
+  namespace: dev
+automountServiceAccountToken: false
