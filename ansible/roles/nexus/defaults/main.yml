@@ -22,8 +22,14 @@ nexus_secrets_dir: /etc/nexus/secrets
 
 # Docker hosted repositories. Each one gets its own localhost connector, published by Caddy as registry.home.arpa.
 # write_policy allow_once = a tag can never be overwritten: belleshop-backend:v42 always means the same image.
+# One repo per app (ADR 0019 D4): `platform` takes platform-owned images; `personal-site`, `govgraph` and
+# `protexa` are the tenant apps. Caddy routes /v2/<repo>/* to each connector (host_vars/nexus.yml).
 nexus_docker_repos:
   - { name: belleshop, http_port: 8082, write_policy: allow_once }
+  - { name: platform, http_port: 8085, write_policy: allow_once }
+  - { name: personal-site, http_port: 8086, write_policy: allow_once }
+  - { name: govgraph, http_port: 8087, write_policy: allow_once }
+  - { name: protexa, http_port: 8088, write_policy: allow_once }
 
 # Pull-through caches. Caddy routes registry.home.arpa paths to each connector (host_vars/nexus.yml):
 # - /v2/library/*      -> dockerhub (8083): third-party official images, pinned by digest (ADR 0012)
@@ -33,11 +39,16 @@ nexus_docker_proxies:
   - { name: ghcr, http_port: 8084, remote_url: "https://ghcr.io", index_type: REGISTRY }
 
 # Least privilege: CI may push to its repo only; ci-pull reads cached scanner DBs on every build (including PRs);
-# the cluster may only pull runtime images. Passwords are generated on the host into {{ nexus_secrets_dir }}/<user>.
+# the cluster may only pull runtime images. One push identity per app repo (ADR 0019 D4): a push user never
+# gets access to another app's repo. Passwords are generated on the host into {{ nexus_secrets_dir }}/<user>.
 nexus_service_users:
   - { name: ci-push, repos: [belleshop], actions: [read, browse, add, edit] }
   - { name: ci-pull, repos: [ghcr], actions: [read, browse] }
-  - { name: k8s-pull, repos: [belleshop, dockerhub], actions: [read, browse] }
+  - { name: k8s-pull, repos: [belleshop, dockerhub, platform, personal-site, govgraph, protexa], actions: [read, browse] }
+  - { name: push-platform, repos: [platform], actions: [read, browse, add, edit] }
+  - { name: push-personal-site, repos: [personal-site], actions: [read, browse, add, edit] }
+  - { name: push-govgraph, repos: [govgraph], actions: [read, browse, add, edit] }
+  - { name: push-protexa, repos: [protexa], actions: [read, browse, add, edit] }
 
 # Nexus Repository CE serves no repository traffic until its Community EULA is accepted. Accepting is a legal decision
 # by the owner, so it is off by default and switched on per host (host_vars) with the date of that decision.

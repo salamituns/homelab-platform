@@ -1,6 +1,7 @@
 # Runbook: the CI platform (Nexus, SonarQube, Jenkins, agent)
 
-Design: [ADR 0011](../adr/0011-ci-platform-rebuild.md). Roles: `ansible/roles/{nexus,sonarqube,jenkins,ci_agent,lab_ca_trust,containerd_registry}`.
+Design: [ADR 0011](../adr/0011-ci-platform-rebuild.md). Per-app registry repos and identities: [ADR 0019](../adr/0019-internal-developer-platform.md) D4.
+Roles: `ansible/roles/{nexus,sonarqube,jenkins,ci_agent,lab_ca_trust,containerd_registry}`.
 Playbooks: `ansible/playbooks/{nexus,sonarqube,jenkins,k8s-registry-trust}.yml`.
 Gates: `ci/gates/README.md`. First draft: 2026-10-29.
 
@@ -12,21 +13,43 @@ All four VMs and the Nexus data disk are in the nightly PBS backup (ADR 0006).
 
 | Host | IP | VMID | Size | Service (systemd) | Local port | URL |
 |---|---|---|---|---|---|---|
-| `nexus` | `192.168.1.87` | 124 | 4c/6 GB + 100 GB data | `nexus` - Nexus Repository CE 3.97.2-02 (bundled JDK) | `127.0.0.1:8081` UI/API, `127.0.0.1:8082` Docker | `https://nexus.home.arpa/` |
+| `nexus` | `192.168.1.87` | 124 | 4c/6 GB + 100 GB data | `nexus` - Nexus Repository CE 3.97.2-02 (bundled JDK) | `127.0.0.1:8081` UI/API, `127.0.0.1:8082-8088` Docker connectors | `https://nexus.home.arpa/` |
 | `sonarqube` | `192.168.1.86` | 125 | 2c/4 GB | `sonarqube` - Community Build 26.10 + PostgreSQL 16 | `127.0.0.1:9000` | `https://sonarqube.home.arpa/` (alias `sonar.home.arpa`) |
 | `jenkins` | `192.168.1.88` | 126 | 2c/2 GB | `jenkins` - LTS 2.580.2, **0 executors** (controller only) | `127.0.0.1:8080` | `https://jenkins.home.arpa/` |
 | `ci-agent` | `192.168.1.93` | 127 | 2c/4 GB/60 GB | `jenkins-agent` + Docker CE (pinned, held) | - (dials out) | - |
 
-- `registry.home.arpa` is Caddy on `nexus` fronting the Docker connector `127.0.0.1:8082`
-  (repo `belleshop`, `write_policy: allow_once` — a tag can never be overwritten). Anonymous
-  access is off: `ci-push` may push, `k8s-pull` may only pull.
-- The three k8s nodes (`Master` `.90`, `WorkerNode1` `.89`, `WorkerNode2` `.84`) trust the
-  registry's CA through `roles/containerd_registry` (`/etc/containerd/certs.d/registry.home.arpa/`).
+- `registry.home.arpa` is Caddy on `nexus` fronting one Docker connector per repo (table below). Every
+  hosted repo is `write_policy: allow_once` — a tag can never be overwritten. Anonymous access is off.
+  One repo and one push identity per app ([ADR 0019](../adr/0019-internal-developer-platform.md) D4);
+  a push user never gets access to another app's repo.
+- The k8s nodes (`Master` `.90`, `WorkerNode1` `.89`, `WorkerNode2` `.84`, plus `workernode3` `.91`
+  once Phase 0 package 1 onboards it) trust the registry's CA through `roles/containerd_registry`
+  (`/etc/containerd/certs.d/registry.home.arpa/`). UFW on `nexus` admits `443` to that same client
+  list plus `ci-agent`.
 - `ci-agent` connects **inbound** to the controller over WebSocket, so Jenkins holds no SSH key
   on it. Gate scripts are in `/opt/ci-gates`, scanners in `/opt/ci-scanners`.
 - JVMs on `jenkins`, `sonarqube` and `ci-agent` trust the lab CAs through `roles/lab_ca_trust`.
   A JVM reads its truststore at start, so that role restarts the named unit when a CA file
   changes (skipped on a first run, when the unit does not exist yet).
+
+### Registry layout (per app, ADR 0019 D4)
+
+Image names are `registry.home.arpa/<repo>/<image>:<tag>`. All connectors bind `127.0.0.1` on `nexus`;
+the LAN sees only Caddy's `443` (UFW default deny). Data: `roles/nexus/defaults/main.yml`
+(`nexus_docker_repos`, `nexus_service_users`), routes: `inventory/host_vars/nexus.yml`.
+
+| Repo (Nexus) | Connector | Path on `registry.home.arpa` | Who pushes | Who pulls |
+|---|---|---|---|---|
+| `belleshop` (hosted) | `8082` | default upstream (`/v2/belleshop/*`, anything unmatched) | `ci-push` | `k8s-pull` |
+| `platform` (hosted, platform-owned images) | `8085` | `/v2/platform/*` | `push-platform` | `k8s-pull` |
+| `personal-site` (hosted) | `8086` | `/v2/personal-site/*` | `push-personal-site` | `k8s-pull` |
+| `govgraph` (hosted) | `8087` | `/v2/govgraph/*` | `push-govgraph` | `k8s-pull` |
+| `protexa` (hosted) | `8088` | `/v2/protexa/*` | `push-protexa` | `k8s-pull` |
+| `dockerhub` (proxy) | `8083` | `/v2/library/*` | nobody (pull-through cache) | `k8s-pull` |
+| `ghcr` (proxy) | `8084` | `/v2/aquasecurity/*` | nobody (pull-through cache) | `ci-pull` (Trivy DBs, every build) |
+
+The Argo Rollouts plugin image still lives in `belleshop` today
+(`belleshop/rollouts-gatewayapi-plugin:v0.17.0`); moving it to `platform` is a later, separate change.
 
 ## 2. Build or rebuild the whole platform
 
@@ -78,6 +101,7 @@ the host itself or by the owner by hand; nothing secret is in git.
 | Nexus admin password | `nexus:/root/nexus-admin-password` (0600) | `nexus` role (first-start rotation) | Owner login; later playbook runs. If you change it in the UI, update the file too |
 | `ci-push` registry password | `nexus:/etc/nexus/secrets/ci-push` (0600) | `nexus` role (`openssl rand`, on the host) | Copied onto `jenkins:/etc/jenkins/secrets/nexus-ci-push` (0640) -> Jenkins credential `nexus-ci-push` |
 | `k8s-pull` registry password | `nexus:/etc/nexus/secrets/k8s-pull` (0600) | `nexus` role | The k8s `imagePullSecret`. Nothing in this repo creates it yet; do it by hand (unverified) |
+| Per-app push passwords (`push-platform`, `push-personal-site`, `push-govgraph`, `push-protexa`) | `nexus:/etc/nexus/secrets/<user>` (0600) | `nexus` role (same on-host `openssl rand` mechanism as `ci-push`) | Each app's Jenkins job, one credential per app (job wiring is later Phase 0 work, not in this repo yet) |
 | SonarQube admin password | `sonarqube:/root/sonarqube-initial-admin-password` (0600) | `sonarqube` role (rotates built-in `admin/admin`) | Owner login, and `tasks/integration.yml` reads it on every run: keep it (change it in the UI = update the file) |
 | SonarQube DB password | `sonarqube:/etc/sonarqube/secrets/db_password` (0640 root:sonar) | `sonarqube` role, on the host | `sonar.properties`; handed to `psql` on stdin, never argv |
 | SonarQube token for Jenkins | `sonarqube:/etc/sonarqube/secrets/jenkins-token` (0600) | `sonarqube` role (integration) | Copied onto `jenkins:/etc/jenkins/secrets/sonarqube-token` -> JCasC credential |
