@@ -178,16 +178,18 @@ This creates:
 - Policy `tenant-<app>-<env>` granting `read` on `secret/data/apps/<app>/<env>/*` and `secret/data/platform/nexus-pull` only.
 - Kubernetes auth role `tenant-<app>-<env>` bound to ServiceAccount `eso` in namespace `<app>-<env>` (`token_ttl: 1h`).
 
-### 2. Include `k8s/tenants/_kit/secrets` in the tenant overlay
+### 2. Include `k8s/tenants/_kit/base` in the tenant overlay
 
-In the tenant environment's `kustomization.yaml` (e.g. `k8s/tenants/<app>/<env>/kustomization.yaml`), include the component, set `namespace: <app>-<env>`, and patch `SecretStore/openbao`'s role name to `tenant-<app>-<env>`:
+In the tenant environment's `kustomization.yaml` (copy `k8s/tenants/_template/<env>/`;
+the base kit already pulls `_kit/secrets`), set `namespace: <app>-<env>`, and patch
+`SecretStore/openbao`'s role name to `tenant-<app>-<env>`:
 
 ```yaml
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: <app>-<env>
 components:
-  - ../../_kit/secrets
+  - ../../_kit/base
 patches:
   - target:
       group: external-secrets.io
@@ -200,9 +202,12 @@ patches:
         value: tenant-<app>-<env>
 ```
 
-### 3. Bind `<app>-<env>/eso` in `eso-tokenreview.yaml`
+### 3. Bind `<app>-<env>/eso` in `eso-tokenreview-tenants.yaml`
 
-Add the tenant namespace's `eso` ServiceAccount to `k8s/platform/cluster-config/eso-tokenreview.yaml` so OpenBao can verify its JWT via `TokenReview`:
+Add the tenant namespace's `eso` ServiceAccount to
+`k8s/platform/tenants/eso-tokenreview-tenants.yaml` (not the BelleShop/platform
+binding) so OpenBao can verify its JWT via `TokenReview`. Full kit:
+[`tenant-onboarding.md`](tenant-onboarding.md).
 
 ```yaml
   - kind: ServiceAccount

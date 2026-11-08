@@ -1,0 +1,67 @@
+# Sibling of verify-belleshop-images (same Cosign key + SPDX SBOM). Covers the
+# Nexus hosted repos created for ADR 0019 (platform + per-app). BelleShop stays
+# on verify-belleshop-images so existing kyverno tests keep their policy name.
+apiVersion: policies.kyverno.io/v1beta1
+kind: ImageValidatingPolicy
+metadata:
+  name: verify-tenant-images
+  annotations:
+    policies.kyverno.io/title: Verify tenant and platform image signatures and SBOM attestations
+    policies.kyverno.io/category: Supply Chain Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/description: >-
+      Verifies registry.home.arpa/{platform,personal-site,govgraph,protexa}/* images
+      carry a Cosign v3 Sigstore bundle signature and an SPDX SBOM attestation
+      signed by the homelab Cosign key (no transparency log).
+spec:
+  failurePolicy: Fail
+  validationActions:
+    - Deny
+  validationConfigurations:
+    mutateDigest: true
+    verifyDigest: true
+    required: true
+  credentials:
+    providers:
+      - default
+    secrets:
+      - nexus-pull
+  matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        homelab.arpa/admission: enforced
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods"]
+  matchImageReferences:
+    - glob: "registry.home.arpa/platform/*"
+    - glob: "registry.home.arpa/personal-site/*"
+    - glob: "registry.home.arpa/govgraph/*"
+    - glob: "registry.home.arpa/protexa/*"
+  attestors:
+    - name: homelab
+      cosign:
+        key:
+          data: |
+            -----BEGIN PUBLIC KEY-----
+            MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE5JAg935sFy1XUwsdi1MD5+xRtWbJ
+            reA3iv9/MOvs/70iYpiEapyluzhy47wPV5jIiVmxhbTjE++lnnz70ASoPg==
+            -----END PUBLIC KEY-----
+        ctlog:
+          insecureIgnoreTlog: true
+          insecureIgnoreSCT: true
+  attestations:
+    - name: sbom
+      intoto:
+        type: https://spdx.dev/Document
+  validations:
+    - expression: >-
+        [images.containers, images.initContainers, images.ephemeralContainers].flatten().map(image, verifyImageSignatures(image, [attestors.homelab])).all(e, e > 0)
+      message: >-
+        Image signature verification failed: image must be signed by the homelab Cosign key.
+    - expression: >-
+        [images.containers, images.initContainers, images.ephemeralContainers].flatten().map(image, verifyAttestationSignatures(image, attestations.sbom, [attestors.homelab])).all(e, e > 0)
+      message: >-
+        Image SBOM attestation verification failed: image must carry a signed SPDX SBOM (https://spdx.dev/Document).

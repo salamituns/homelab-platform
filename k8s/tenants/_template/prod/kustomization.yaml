@@ -1,0 +1,39 @@
+# Copy to k8s/tenants/<app>/prod/ and replace APP. See ../staging for comments.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: APP-prod
+components:
+  - ../../_kit/base
+patches:
+  - target:
+      version: v1
+      kind: Namespace
+      name: tenant
+    patch: |-
+      - op: replace
+        path: /metadata/name
+        value: APP-prod
+      - op: add
+        path: /metadata/labels/homelab.arpa~1tenant
+        value: APP
+      - op: add
+        path: /metadata/labels/homelab.arpa~1env
+        value: prod
+  - target:
+      group: external-secrets.io
+      version: v1
+      kind: SecretStore
+      name: openbao
+    patch: |-
+      - op: replace
+        path: /spec/provider/vault/auth/kubernetes/role
+        value: tenant-APP-prod
+  - target:
+      group: rbac.authorization.k8s.io
+      version: v1
+      kind: RoleBinding
+      name: tenant-developer
+    patch: |-
+      - op: replace
+        path: /subjects/0/name
+        value: APP-dev

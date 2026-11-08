@@ -1,0 +1,17 @@
+# Staging-sized cap so one noisy app cannot eat workernode3 (8 Gi, ~5 Gi headroom, ADR 0019 D2).
+# Raise in the tenant overlay if a real app needs more; do not remove.
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: tenant-quota
+spec:
+  hard:
+    pods: "20"
+    services: "10"
+    persistentvolumeclaims: "4"
+    requests.cpu: "2"
+    requests.memory: 2Gi
+    limits.cpu: "4"
+    limits.memory: 4Gi
+    count/httproutes.gateway.networking.k8s.io: "8"
+    count/rollouts.argoproj.io: "8"

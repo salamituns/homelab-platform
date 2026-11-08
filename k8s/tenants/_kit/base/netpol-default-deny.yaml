@@ -1,0 +1,14 @@
+# Default-deny. Sync after the allow policies in this component (wave 1).
+# kube-network-policies evaluates post-DNAT: peers are pods / node /32s, never ClusterIPs
+# (docs/runbooks/network-policy.md).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tenant-default-deny
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress

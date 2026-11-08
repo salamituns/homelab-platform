@@ -1,0 +1,24 @@
+# AppProject for app workloads from apps-deploy (ADR 0019 D5). Tenants cannot
+# create cluster-scoped objects or loosen ResourceQuota / LimitRange /
+# NetworkPolicy / Role / RoleBinding (those stay in the platform tenant kit).
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: apps
+  namespace: argocd
+spec:
+  description: Tenant apps from apps-deploy (ADR 0019 D5)
+  sourceRepos:
+    - https://gitea.home.arpa/tunsgit/apps-deploy.git
+  destinations:
+    - { server: https://kubernetes.default.svc, namespace: "*-staging" }
+    - { server: https://kubernetes.default.svc, namespace: "*-prod" }
+  clusterResourceWhitelist: []
+  namespaceResourceBlacklist:
+    - { group: "", kind: ResourceQuota }
+    - { group: "", kind: LimitRange }
+    - { group: networking.k8s.io, kind: NetworkPolicy }
+    - { group: rbac.authorization.k8s.io, kind: Role }
+    - { group: rbac.authorization.k8s.io, kind: RoleBinding }
+  orphanedResources:
+    warn: true
