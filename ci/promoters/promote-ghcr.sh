@@ -92,6 +92,11 @@ VERIFY_FLAGS=(
 	--certificate-github-workflow-repository "${SOURCE_REPO}"
 )
 
+# cosign reads COSIGN_KEY from the environment as --key, and --key plus a keyless identity
+# is an error. The Jenkinsfile exports the LAB key for step 6, so the keyless checks run
+# with it removed (build #3 failed on exactly this, 2026-11-09).
+keyless() { env -u COSIGN_KEY -u COSIGN_PASSWORD cosign "$@"; }
+
 # 1. Resolve the tag to a digest. The digest is the only thing this script trusts.
 DIGEST="$(crane digest "${GHCR_REF}:${GHCR_TAG}")" || ci_die "cannot resolve ${GHCR_TAG} (is the GHCR package public?)"
 [[ "${DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]] || ci_die "crane returned something that is not a digest"
@@ -99,12 +104,12 @@ SOURCE_REF="${GHCR_REF}@${DIGEST}"
 ci_log "promote: ${GHCR_TAG} is ${DIGEST}"
 
 # 2. Keyless signature must come from the release workflow on main.
-cosign verify "${VERIFY_FLAGS[@]}" "${SOURCE_REF}" \
+keyless verify "${VERIFY_FLAGS[@]}" "${SOURCE_REF}" \
 	>"${REPORT_DIR}/ghcr-signature.json" || ci_die "keyless signature verification failed"
 ci_log "promote: keyless signature verified (issuer ${ID_ISSUER}, workflow lab-release.yml@main)"
 
 # 3. SPDX attestation, same identity. cosign prints the verified attestations to stdout.
-cosign verify-attestation --type spdxjson "${VERIFY_FLAGS[@]}" "${SOURCE_REF}" \
+keyless verify-attestation --type spdxjson "${VERIFY_FLAGS[@]}" "${SOURCE_REF}" \
 	>"${REPORT_DIR}/ghcr-attestation.json" || ci_die "SPDX attestation verification failed"
 [[ -s "${REPORT_DIR}/ghcr-attestation.json" ]] || ci_die "no SPDX attestation for ${DIGEST}"
 ci_log "promote: SPDX attestation verified"

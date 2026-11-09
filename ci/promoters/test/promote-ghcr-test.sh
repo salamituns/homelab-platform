@@ -16,6 +16,11 @@ for t in crane cosign trivy syft; do
 #!/bin/bash
 echo "$t \$*" >>"\$CALLS"
 if [ "$t" = crane ] && [ "\$1" = digest ]; then echo "$DIG"; fi
+# Like real cosign 3.x: COSIGN_KEY in the environment acts as --key, and --key plus a
+# keyless identity flag is an error (build #3, 2026-11-09).
+if [ "$t" = cosign ] && [ -n "\${COSIGN_KEY:-}" ] && printf '%s\n' "\$@" | grep -q -- '--certificate-identity'; then
+  echo "Error: exactly one of: key reference (--key) or certificate identity" >&2; exit 1
+fi
 if [ "$t" = cosign ]; then echo '{}'; fi
 exit 0
 EOF
