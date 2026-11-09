@@ -198,7 +198,7 @@ Carried over from Week 6 (kept at the level described in [ADR 0015](docs/adr/001
       [TEMPLATE.md](docs/postmortems/TEMPLATE.md) (detect / mitigate / recover)
 - **Proof:** five postmortems. This is what senior interviews ask about.
 
-## Phase 2: internal developer platform (proposed, [ADR 0019](docs/adr/0019-internal-developer-platform.md))
+## Phase 2: internal developer platform (accepted, [ADR 0019](docs/adr/0019-internal-developer-platform.md))
 Host real apps (`personal-site`, `govgraph`, `protexa`) as tenants. Public access through a Cloudflare
 Tunnel to an apps-only gateway; admin plane stays private. Each phase ends at a gate with evidence.
 - [x] Owner decisions 2026-11-07: protexa prod on a managed host (lab = pipeline + staging), govgraph DB on Supabase, both Vercel-DNS domains to Cloudflare
@@ -216,7 +216,12 @@ Tunnel to an apps-only gateway; admin plane stays private. Each phase ends at a 
       denied; ingress (host -> demo: no connection, control 200) and egress (demo -> exempt ns: blocked, DNS ok)
       isolated; as `demo-staging/eso`: own path allowed, govgraph path 403, platform secrets 403
       ([tenant-onboarding.md](docs/runbooks/tenant-onboarding.md#phase-0-gate-evidence-8-nov-2026))
-- [ ] Phase 1: `personal-site` live via `edge-public` + `public-gateway` + tunnel; admin hosts unreachable via tunnel (tested)
-- [ ] Phase 2: `govgraph` live (secrets from OpenBao, Supabase Postgres egress, cron as CronJob)
+- [x] Phase 1: `personal-site` live via `edge-public` + `public-gateway` + tunnel; admin hosts unreachable via tunnel (tested) —
+      done 2026-11-09: apex 200 from the lab with security headers, staging 302 to Cloudflare Access, edge isolation 22/22,
+      Argo Synced/Healthy, first promotion digest-pinned end to end. Cut-over record:
+      [edge-public.md](docs/runbooks/edge-public.md); promoter: [promoter.md](docs/runbooks/promoter.md); gate evidence:
+      [ADR 0019](docs/adr/0019-internal-developer-platform.md). The 7-days-green window from cut-over ends 2026-11-16.
+      (Before cut-over the site on Vercel returned 402 DEPLOYMENT_DISABLED; the cut-over restored it.)
+- [ ] Phase 2 (next): `govgraph` live (secrets from OpenBao, Supabase Postgres egress, cron as CronJob)
 - [ ] Phase 3: `protexa` staging behind Cloudflare Access (prod per owner decision)
 - [ ] Phase 4: drills — tunnel down, apps node loss, per-tenant secret rotation, 4th app onboarded in < 1 h

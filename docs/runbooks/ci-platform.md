@@ -3,7 +3,8 @@
 Design: [ADR 0011](../adr/0011-ci-platform-rebuild.md). Per-app registry repos and identities: [ADR 0019](../adr/0019-internal-developer-platform.md) D4.
 Roles: `ansible/roles/{nexus,sonarqube,jenkins,ci_agent,lab_ca_trust,containerd_registry}`.
 Playbooks: `ansible/playbooks/{nexus,sonarqube,jenkins,k8s-registry-trust}.yml`.
-Gates: `ci/gates/README.md`. First draft: 2026-10-29.
+Gates: `ci/gates/README.md`. GHCR → lab promoter (Jenkins job
+`personal-site-promoter`): [promoter.md](promoter.md). First draft: 2026-10-29.
 
 ## 1. What runs where
 

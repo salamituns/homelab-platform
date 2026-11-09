@@ -45,15 +45,20 @@ kubectl kustomize k8s/tenants/demo/staging
 kubectl kustomize k8s/platform/tenants
 ```
 
+**Public tenants** (proven with `personal-site`, live 2026-11-09; see
+`k8s/tenants/personal-site/` for the real overlay): also set the Namespace label
+`homelab.arpa/exposure: public` (the kit base defaults to `internal`) and include
+`../../_kit/public-ingress`, which admits `public-gateway-nginx` on 8080. Do **not** set
+`homelab.arpa/gateway-routes` — that label admits the namespace to `homelab-gateway`.
+
 ### 3. Deploy PR (`apps-deploy`)
 
 Path the ApplicationSet watches: `apps/<app>/overlays/<env>`. Destination namespace is `<app>-<env>` (`CreateNamespace=false`). Put the HTTPRoute / Service / Deployment or Rollout here. Images must be `registry.home.arpa/<app>/*` (or `platform/*`), Cosign-signed, with SPDX SBOM, digest-pinned.
 
-**Public app extra (Phase 1, [edge-public.md](edge-public.md)):** set Namespace
-`homelab.arpa/exposure: public`, include `../../_kit/public-ingress`, and **do not** set
-`homelab.arpa/gateway-routes`. HTTPRoute `parentRefs` Gateway `public-gateway` (namespace
-`nginx-gateway`). Public hostnames belong in `apps-deploy` and the Cloudflare dashboard,
-not this repo.
+**Public app extra** ([edge-public.md](edge-public.md)): the HTTPRoute lives **here, in
+`apps-deploy`**, and it is the only place that names public hostnames — `parentRefs` Gateway
+`public-gateway` (namespace `nginx-gateway`), hostnames as configured in the Cloudflare
+dashboard. This repo is public and stays hostname-free; `apps-deploy` is private.
 
 ### 4. Prove (Phase 0 gate)
 

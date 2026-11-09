@@ -1,10 +1,11 @@
 # ADR 0019: Internal developer platform — hosting real apps from the lab
 
-- Status: **Accepted on merge** (owner answered the open questions 2026-11-07; see Rev B)
+- Status: **Accepted on merge** (owner answered the open questions 2026-11-07; see Rev B).
+  Phase 1 gate passed 2026-11-09 (see Rev C and the Phase 1 gate evidence)
 - Date: 2026-11-07
 - Owner: owner
-- Last reviewed: 7 Nov 2026
-- Next review: when the owner answers the open questions below, then after each phase gate
+- Last reviewed: 9 Nov 2026
+- Next review: after each phase gate (next: Phase 2, govgraph)
 
 ## Revision history
 
@@ -12,6 +13,7 @@
 |---|---|---|
 | A | 7 Nov 2026 | Initial proposal from the three app repos, the live cluster and the 7 Nov hardening state |
 | B | 7 Nov 2026 | Owner decisions: protexa prod on a managed host (lab = pipeline + staging; protexa is demo/pilot, no live customers); govgraph DB is Supabase Postgres (moved from Neon by the owner); move both Vercel-DNS domains to Cloudflare |
+| C | 9 Nov 2026 | Phase 1 (personal site) done: cut-over record and gate evidence added; runbooks [edge-public.md](../runbooks/edge-public.md) and [promoter.md](../runbooks/promoter.md) |
 
 ## Scope
 
@@ -182,10 +184,46 @@ but idle as the documented fallback for each app until its first 30 days on the 
 | Phase | Work | Gate (evidence) |
 |---|---|---|
 | **0. Platform prerequisites** | `workernode3` (D2); `nexus-pull` via ESO everywhere (closes ROADMAP item); Nexus `platform` repo + per-app repos/users; tenant kit (D1); `apps` AppProject + ApplicationSet (D5); OpenBao per-app paths + roles (D6) | A dummy app onboarded to `demo-staging` with one PR each; cross-tenant secret read denied; cross-namespace traffic denied |
-| **1. personal-site** | static profile; staging behind Access; `edge-public` + `public-gateway` + tunnel (D7); outside uptime check; cut DNS from Vercel | Public URL served from the lab; admin hostnames unreachable through the tunnel (tested); WAF on; 7 days green |
+| **1. personal-site** | static profile; staging behind Access; `edge-public` + `public-gateway` + tunnel (D7); outside uptime check; cut DNS from Vercel | Public URL served from the lab; admin hostnames unreachable through the tunnel (tested); WAF on; 7 days green. **Done 2026-11-09** — see the Phase 1 gate evidence below |
 | **2. govgraph** | `next` profile; secrets from OpenBao; Supabase Postgres egress (session `:5432`); cron → `CronJob` with `CRON_SECRET`; DNS to Cloudflare | Page renders with live data; cron ran; SLO + logs per tenant; 7 days green |
 | **3. protexa** | staging in the lab behind Access (demo data only); prod pipeline deploys to the managed host; `VITE_AXXESS_API_KEY` moved server-side first; kletraq DNS to Cloudflare | Staging behind Access, both brands by host; managed prod deployed from the signed pipeline |
 | **4. Platform drills** | tunnel down, apps node loss, per-tenant secret rotation, onboard a 4th app in < 1 h | Postmortems like Week 8 |
+
+## Phase 1 gate evidence (9 Nov 2026)
+
+The personal site is live from the lab. Full records: [edge-public.md](../runbooks/edge-public.md)
+(cut-over), [promoter.md](../runbooks/promoter.md) (the GHCR → lab promoter and its rollout bugs).
+
+- **Pipeline + promoter live.** GitHub Actions `lab-release.yml` (push to main) builds the
+  nginx-unprivileged image, runs the Trivy gate, generates the Syft SBOM, pushes the GHCR package
+  `personal-site`, signs it keyless and attaches the SPDX attestation. The Jenkins job
+  `personal-site-promoter` (cron H/15, `/opt/ci-gates/promote-ghcr.sh`) then verifies the keyless
+  signature (issuer `token.actions.githubusercontent.com`, workflow `lab-release.yml@refs/heads/main`,
+  repository claim) and the SPDX attestation, re-scans with Trivy, copies the digest preserving it
+  to `registry.home.arpa/personal-site/site`, re-signs with the lab key and opens a staging PR in
+  apps-deploy as `ci-promote`. First promotion: digest
+  `sha256:b8e21fea3a74dc2b0aa40926a457a4041c3712446fef8fb7a9ba4b5a71335d8b`, build #4 SUCCESS,
+  apps-deploy PR #3. Steady state confirmed: build #8 logged "staging overlay on main already pins
+  … nothing to do", SUCCESS.
+- **Admission holds.** Kyverno server dry-run in `personal-site-staging`: the promoted digest is
+  admitted; a never-signed digest is denied by `verify-tenant-images`; the GHCR original is denied
+  by `restrict-registries`. Only the lab-signed copy runs.
+- **Workload.** Staging and prod pods run on `workernode3` as uid 101 with a read-only root
+  filesystem; `/healthz` returns 200; `/api/contributions` returns 404 by design (no pod egress; `site.js`
+  falls back to the public contributions API in the browser).
+- **Edge.** 2 cloudflared pods (workernode1, workernode2), 4 QUIC connections each;
+  `public-gateway` is ClusterIP; `scripts/edge-isolation-test.sh` 22/22 PASS (admin hostnames
+  unreachable through the tunnel — the recorded matrix is in
+  [edge-public.md](../runbooks/edge-public.md)).
+- **External checks after cut-over (2026-11-09).** The apex hostname returns 200 with CSP,
+  nosniff, Referrer-Policy and Permissions-Policy headers and no Vercel headers; `/nginx.conf`
+  is 404; http → https is 301; `www` → apex is 301 preserving path and query (one hop); the
+  staging hostname 302s to Cloudflare Access; cloudflared reports 0 ERR and 0 restarts; site pods
+  report 0 5xx; Argo apps `edge-public`, `nginx-gateway`, `tenants`, `personal-site-staging`,
+  `personal-site-prod` are Synced/Healthy.
+- Before cut-over the site on Vercel returned 402 DEPLOYMENT_DISABLED, so the cut-over restored it.
+- The gate's 7-days-green window runs from the 2026-11-09 cut-over to 2026-11-16; the checks above
+  are the day-zero evidence.
 
 ## Consequences
 

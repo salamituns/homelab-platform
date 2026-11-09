@@ -41,15 +41,25 @@ Secret on `public-gateway`. Revisit if the extra hop must be encrypted.
 
 ### 1. Cloudflare dashboard (nothing in git)
 
-1. Create a **remotely-managed** tunnel. On the "install connector" page copy ONLY the
-   token after `--token` (starts with `eyJ`). Do **not** run the shown
+These are the steps as they were actually run at the 2026-11-09 cut-over.
+
+1. Create a **remotely-managed** tunnel. On the "install connector" page copy ONLY the value
+   after `--token` — one standard-base64 blob; it decodes to JSON `{"a","t","s"}` (account
+   tag, tunnel UUID, secret) and is **not** a JWT. Do **not** run the shown
    `cloudflared service install` command on any machine: the two cloudflared pods in
    `edge-public` are the connectors. Store the token only in the password manager until step 2.
 2. Public DNS for each hostname: proxied CNAME to the tunnel, **not** to `.240` or any
    LAN address.
-3. WAF / rate limits / Always Online as needed. Cloudflare Access in front of every
-   `-staging` hostname.
-4. Public hostname origin: `http://public-gateway-nginx.nginx-gateway.svc:80`. The map
+3. `www` → apex is a **Redirect Rule** plus a **proxied `www` DNS record** (CNAME `www` →
+   the apex, orange cloud). The record only exists so Cloudflare receives `www` requests; the
+   rule answers them at the edge and nothing reaches the tunnel. Rule: *Hostname equals*
+   `www.<apex>`, type Dynamic, expression `concat("https://<apex>", http.request.uri.path)`,
+   status `301`, **Preserve query string** ticked. Enable **Always Use HTTPS**. Check: the
+   public-gateway access log must show no `www` requests (on 2026-11-09 a missing rule showed
+   up there as 404s for `Host: www.<apex>`).
+4. WAF / rate limits / Always Online as needed. Cloudflare Access in front of the `-staging`
+   hostnames **only** — the apex stays public.
+5. Public hostname origin: `http://public-gateway-nginx.nginx-gateway.svc:80`. The map
    stays in the dashboard.
 
 ### 2. OpenBao (before or with the Argo sync)
@@ -129,6 +139,27 @@ First runs caught two harness bugs before they could hide a result: the look-ali
 not schedule (anti-affinity, above), and a rerun raced the previous run's terminating
 probes, so two "blocked" checks passed against pods that no longer existed. The failed
 controls exposed it; the script now waits for old probes and checks each probe is alive.
+
+## Cut-over record (9 Nov 2026)
+
+The personal site moved to the tunnel. Before the cut-over the site on Vercel returned
+402 DEPLOYMENT_DISABLED, so the cut-over restored it; it did not break anything. Cloudflare
+state as configured: proxied DNS to the tunnel, **Always Use HTTPS** on, the `www` → apex
+Redirect Rule (301, dynamic `concat()` expression, query preserved), **Access on the staging
+hostname only**.
+
+Verified after cut-over (2026-11-09):
+
+| Check | Result |
+|---|---|
+| Apex hostname | 200, with CSP, nosniff, Referrer-Policy and Permissions-Policy headers; no Vercel headers |
+| `/nginx.conf` | 404 (no repo files served) |
+| http → https | 301 |
+| `www` → apex | 301, path + query preserved, one hop |
+| Staging hostname | 302 to Cloudflare Access |
+| `cloudflared` | 0 ERR, 0 restarts (2 pods, 4 QUIC connections each; isolation test 22/22 PASS, above) |
+| Site pods | 0 5xx |
+| Argo apps | `edge-public`, `nginx-gateway`, `tenants`, `personal-site-staging`, `personal-site-prod` Synced/Healthy |
 
 ## Rollback
 
