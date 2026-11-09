@@ -157,13 +157,16 @@ cmd_root_run() {
   local mode="exec" cmd_args=() OIDC_CONSUMER="" TENANT_APP="" TENANT_ENV=""
   local args=()
   [[ $# -gt 0 ]] || die "root-run needs a command: 'root-run alertmanager' or 'root-run -- <cmd...>'"
-  # allow `root-run -- cmd` and `root-run cmd`; --dry-run/--overwrite peeled off anywhere
-  local a
+  # Named modes: `root-run <mode> ...`. An arbitrary command needs an explicit `--` BEFORE it:
+  # `root-run -- <cmd...>`. A bare word that is not a known mode is refused, before any share
+  # is asked for: twice (2026-11-09) a mode missing from a stale checkout ran as a "command"
+  # with a root token. --dry-run/--overwrite are peeled off anywhere.
+  local a explicit_cmd=false
   for a in "$@"; do
     case "$a" in
       --dry-run) DRY_RUN=true ;;
       --overwrite) OVERWRITE=true ;;
-      --) ;;
+      --) [[ ${#args[@]} -eq 0 ]] && explicit_cmd=true ;;
       *) args+=("$a") ;;
     esac
   done
@@ -193,8 +196,13 @@ cmd_root_run() {
       grafana|argocd|oauth2-proxy-prometheus|oauth2-proxy-alertmanager) OIDC_CONSUMER="${args[1]}" ;;
       *) die "unknown oidc consumer: ${args[1]} (grafana|argocd|oauth2-proxy-prometheus|oauth2-proxy-alertmanager)" ;;
     esac
-  else
+  elif [[ "$explicit_cmd" == true ]]; then
     cmd_args=("${args[@]}")
+  else
+    die "unknown root-run mode '${args[0]}' (nothing asked, nothing minted).
+    Known modes: alertmanager, watchdog-url, nexus-pull, cloudflared-token, tenant <app> <env>,
+    oidc <consumer>. A mode from a recently merged PR? Run 'git pull' first.
+    To run an arbitrary command with the token: root-run -- <cmd...>"
   fi
 
   say "openbao break-glass root-run ($mode)"

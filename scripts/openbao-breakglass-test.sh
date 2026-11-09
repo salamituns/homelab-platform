@@ -281,6 +281,31 @@ else
 fi
 grep -q "revocation verified" "$TD/run6.out" && ok "oauth2-proxy run revoked its token"
 
+echo "== 10a. a bare unknown mode is refused before any share is asked or token minted"
+# 2026-11-09, twice: a mode missing from a stale checkout fell through to "run it as a command".
+Fu=$(feed_shares)
+if run_flow "$TD/run-unknown.out" root-run public-site-probes-typo <"$Fu"; then
+  bad "unknown bare mode should be refused"
+else
+  ok "unknown bare mode refused (nonzero exit)"
+fi
+if grep -q "unknown root-run mode" "$TD/run-unknown.out" && grep -q "git pull" "$TD/run-unknown.out"; then
+  ok "refusal names the problem and suggests git pull"
+else
+  bad "refusal message missing"; cat "$TD/run-unknown.out"
+fi
+if grep -qE "unseal share|minting the root token" "$TD/run-unknown.out"; then
+  bad "unknown mode got as far as shares / minting"
+else
+  ok "unknown mode stopped before shares and minting"
+fi
+# `--` after a word is not an escape hatch: the word is still treated as a mode name.
+if run_flow "$TD/run-unknown2.out" root-run bao -- auth list <"$Fu"; then
+  bad "'root-run bao -- ...' should be refused (-- must come first)"
+else
+  ok "'--' only opens command mode when it comes first"
+fi
+
 echo "== 10. root-run -- <cmd> passthrough works with BAO_TOKEN set"
 F3=$(feed_shares)
 run_flow "$TD/run3.out" root-run -- bao auth list <"$F3"
