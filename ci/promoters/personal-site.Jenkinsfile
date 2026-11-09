@@ -27,10 +27,16 @@ pipeline {
           string(credentialsId: 'cosign-password', variable: 'COSIGN_PASS'),
           usernamePassword(credentialsId: 'gitea-ci-promote', usernameVariable: 'PROMOTE_USER', passwordVariable: 'PROMOTE_TOKEN'),
         ]) {
+          // Jenkins runs sh steps with /bin/sh (dash on the agent): POSIX only, no <<< or [[ ]].
           sh '''
             set -eu
-            # Registry auth for crane / syft / cosign: they all read ~/.docker/config.json.
-            docker login registry.home.arpa -u "$NEXUS_USER" --password-stdin <<< "$NEXUS_PASSWORD"
+            # Registry auth for crane / syft / cosign / trivy lives in a per-build
+            # DOCKER_CONFIG, deleted on exit, so the Nexus push password never outlives
+            # the build in the agent's ~/.docker/config.json.
+            DOCKER_CONFIG="$(mktemp -d "${WORKSPACE_TMP:-/tmp}/docker-config.XXXXXX")"
+            export DOCKER_CONFIG
+            trap 'rm -rf "$DOCKER_CONFIG"' EXIT
+            printf '%s' "$NEXUS_PASSWORD" | docker login registry.home.arpa -u "$NEXUS_USER" --password-stdin >/dev/null
             export COSIGN_KEY="$COSIGN_KEY_FILE" COSIGN_PASSWORD="$COSIGN_PASS"
             export GITEA_PROMOTE_USER="$PROMOTE_USER" GITEA_PROMOTE_TOKEN="$PROMOTE_TOKEN"
             /opt/ci-gates/promote-ghcr.sh
