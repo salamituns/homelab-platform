@@ -41,8 +41,10 @@ Secret on `public-gateway`. Revisit if the extra hop must be encrypted.
 
 ### 1. Cloudflare dashboard (nothing in git)
 
-1. Create a **remotely-managed** tunnel. Copy the connector token (a JWT starting with
-   `eyJ`). Store it only in the password manager until step 2.
+1. Create a **remotely-managed** tunnel. On the "install connector" page copy ONLY the
+   token after `--token` (starts with `eyJ`). Do **not** run the shown
+   `cloudflared service install` command on any machine: the two cloudflared pods in
+   `edge-public` are the connectors. Store the token only in the password manager until step 2.
 2. Public DNS for each hostname: proxied CNAME to the tunnel, **not** to `.240` or any
    LAN address.
 3. WAF / rate limits / Always Online as needed. Cloudflare Access in front of every
@@ -59,7 +61,8 @@ scripts/openbao-breakglass.sh root-run cloudflared-token --dry-run   # plan only
 scripts/openbao-breakglass.sh root-run cloudflared-token             # 2 hidden shares, then hidden token
 ```
 
-Shape check is local: JWT, starts with `eyJ`, three base64url segments, length ≥ 100.
+Shape check is local: the token is one standard-base64 blob of JSON `{"a","t","s"}`
+(account tag, tunnel UUID, secret), not a JWT. It is decoded and checked without printing.
 A bad paste dies **before** minting a root token. The value is never printed (`stored (N chars)`).
 Re-run skips an existing secret unless `--overwrite`.
 
