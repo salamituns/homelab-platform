@@ -198,7 +198,7 @@ Carried over from Week 6 (kept at the level described in [ADR 0015](docs/adr/001
       [TEMPLATE.md](docs/postmortems/TEMPLATE.md) (detect / mitigate / recover)
 - **Proof:** five postmortems. This is what senior interviews ask about.
 
-## Phase 2: internal developer platform (proposed, [ADR 0019](docs/adr/0019-internal-developer-platform.md))
+## Phase 2: internal developer platform (accepted, [ADR 0019](docs/adr/0019-internal-developer-platform.md))
 Host real apps (`personal-site`, `govgraph`, `protexa`) as tenants. Public access through a Cloudflare
 Tunnel to an apps-only gateway; admin plane stays private. Each phase ends at a gate with evidence.
 - [x] Owner decisions 2026-11-07: protexa prod on a managed host (lab = pipeline + staging), govgraph DB on Supabase, both Vercel-DNS domains to Cloudflare
