@@ -209,7 +209,8 @@ The personal site is live from the lab. Full records: [edge-public.md](../runboo
   admitted; a never-signed digest is denied by `verify-tenant-images`; the GHCR original is denied
   by `restrict-registries`. Only the lab-signed copy runs.
 - **Workload.** Staging and prod pods run on `workernode3` as uid 101 with a read-only root
-  filesystem; `/healthz` returns 200; `/api/contributions` returns 404.
+  filesystem; `/healthz` returns 200; `/api/contributions` returns 404 by design (no pod egress; `site.js`
+  falls back to the public contributions API in the browser).
 - **Edge.** 2 cloudflared pods (workernode1, workernode2), 4 QUIC connections each;
   `public-gateway` is ClusterIP; `scripts/edge-isolation-test.sh` 22/22 PASS (admin hostnames
   unreachable through the tunnel — the recorded matrix is in

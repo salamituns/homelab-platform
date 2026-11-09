@@ -50,9 +50,13 @@ These are the steps as they were actually run at the 2026-11-09 cut-over.
    `edge-public` are the connectors. Store the token only in the password manager until step 2.
 2. Public DNS for each hostname: proxied CNAME to the tunnel, **not** to `.240` or any
    LAN address.
-3. `www` → apex is a **Redirect Rule** (not a DNS record): *Hostname equals* `www.<apex>`,
-   dynamic target built with a `concat()` expression of the apex hostname and the request
-   path, status `301`, preserve query string. Enable **Always Use HTTPS**.
+3. `www` → apex is a **Redirect Rule** plus a **proxied `www` DNS record** (CNAME `www` →
+   the apex, orange cloud). The record only exists so Cloudflare receives `www` requests; the
+   rule answers them at the edge and nothing reaches the tunnel. Rule: *Hostname equals*
+   `www.<apex>`, type Dynamic, expression `concat("https://<apex>", http.request.uri.path)`,
+   status `301`, **Preserve query string** ticked. Enable **Always Use HTTPS**. Check: the
+   public-gateway access log must show no `www` requests (on 2026-11-09 a missing rule showed
+   up there as 404s for `Host: www.<apex>`).
 4. WAF / rate limits / Always Online as needed. Cloudflare Access in front of the `-staging`
    hostnames **only** — the apex stays public.
 5. Public hostname origin: `http://public-gateway-nginx.nginx-gateway.svc:80`. The map
