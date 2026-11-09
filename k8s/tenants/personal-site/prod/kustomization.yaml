@@ -1,0 +1,47 @@
+# Personal-site tenant (ADR 0019 D4): the static site the GHCR->lab promoter deploys.
+# Exposure public, not the kit default internal: the public-ingress component lets public-gateway reach it; the HTTPRoute lives in apps-deploy.
+# Promotion to prod is a human PR in apps-deploy (staging digest copied to the prod overlay).
+# OpenBao role tenant-personal-site-prod and group personal-site-dev are owner steps
+# (docs/runbooks/tenant-onboarding.md).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: personal-site-prod
+components:
+  - ../../_kit/base
+  - ../../_kit/public-ingress   # admits public-gateway-nginx on 8080 (edge-public.md)
+patches:
+  - target:
+      version: v1
+      kind: Namespace
+      name: tenant
+    patch: |-
+      - op: replace
+        path: /metadata/name
+        value: personal-site-prod
+      - op: add
+        path: /metadata/labels/homelab.arpa~1tenant
+        value: personal-site
+      - op: add
+        path: /metadata/labels/homelab.arpa~1env
+        value: prod
+      - op: replace
+        path: /metadata/labels/homelab.arpa~1exposure
+        value: public
+  - target:
+      group: external-secrets.io
+      version: v1
+      kind: SecretStore
+      name: openbao
+    patch: |-
+      - op: replace
+        path: /spec/provider/vault/auth/kubernetes/role
+        value: tenant-personal-site-prod
+  - target:
+      group: rbac.authorization.k8s.io
+      version: v1
+      kind: RoleBinding
+      name: tenant-developer
+    patch: |-
+      - op: replace
+        path: /subjects/0/name
+        value: personal-site-dev
