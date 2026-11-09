@@ -633,8 +633,11 @@ nexuspull_fetch_and_extend() {  # $1 payload-so-far -> full payload on stdout
 }
 
 # Hidden prompt for a Cloudflare remotely-managed tunnel token. Shape-checked locally so a
-# paste of an unseal share or OpenBao token never reaches the store. Cloudflare issues these
-# as JWTs (three base64url segments, header starts with eyJ). Stdout is ONLY the payload JSON.
+# paste of an unseal share or OpenBao token never reaches the store. A connector token is
+# NOT a JWT: it is ONE standard-base64 blob of JSON {"a": account tag, "t": tunnel UUID,
+# "s": secret, optional "e"} (cloudflared connection/connection.go TunnelToken.Encode,
+# verified against 2026.10.7). Decoded and checked locally, exit code only - nothing is
+# printed. Stdout is ONLY the payload JSON.
 cloudflared_prompt_and_extend() {  # $1 payload-so-far -> full payload on stdout
   local payload="$1" tok
   echo "==> Cloudflare Tunnel token (never printed; never argv)" >&2
@@ -646,10 +649,20 @@ cloudflared_prompt_and_extend() {  # $1 payload-so-far -> full payload on stdout
   fi
   tok="${tok//[$' \t\r\n']/}"
   [[ -n "$tok" ]] || die "tunnel token must not be empty"
-  [[ ${#tok} -ge 100 ]] || die "tunnel token too short (Cloudflare tokens are JWTs, >= 100 chars; nothing stored)"
-  [[ "$tok" == eyJ* ]] || die "tunnel token must start with eyJ (JWT header; nothing stored)"
-  [[ "$tok" =~ ^eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$ ]] \
-    || die "tunnel token must be a JWT (three base64url segments; nothing stored)"
+  [[ "$tok" == eyJ* ]] || die "tunnel token must start with eyJ (base64 of a JSON object; nothing stored)"
+  [[ "$tok" != *.*.* ]] || die "that looks like a JWT, not a Cloudflare tunnel token (copy the value after --token; nothing stored)"
+  CF_TUNNEL_TOKEN="$tok" python3 -I -c '
+import base64, binascii, json, os, sys, uuid
+t = os.environ["CF_TUNNEL_TOKEN"]
+try:
+    d = json.loads(base64.b64decode(t + "=" * (-len(t) % 4), validate=True))
+    ok = (isinstance(d, dict) and isinstance(d.get("a"), str) and len(d["a"]) > 0
+          and isinstance(d.get("s"), str) and len(d["s"]) > 0
+          and isinstance(d.get("t"), str) and bool(uuid.UUID(d["t"])))
+except (binascii.Error, ValueError, TypeError):
+    ok = False
+sys.exit(0 if ok else 1)
+' || die "tunnel token must decode to Cloudflare's {a, t, s} JSON (account, tunnel UUID, secret; nothing stored)"
   local overwrite=false
   [[ "$OVERWRITE" == true ]] && overwrite=true
   local nchars=${#tok}

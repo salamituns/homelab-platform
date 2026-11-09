@@ -412,13 +412,30 @@ if BAO_TOKEN="$TT" bao kv get secret/monitoring/alertmanager >/dev/null 2>&1; th
 unset RT TT TP
 
 echo "== 13. root-run cloudflared-token (ADR 0019 D7); bad shape dies before mint"
-# Throwaway JWT built at runtime so the fixture is not a literal secret-shaped string in git.
-# Three base64url segments, length >= 100. Not a real tunnel token.
-CF_THROW=$(python3 -c 'import base64
-h=base64.urlsafe_b64encode(b"{\"alg\":\"none\"}").rstrip(b"=").decode()
-p=base64.urlsafe_b64encode(b"{\"t\":\"harness\"}").rstrip(b"=").decode()
-print(h+"."+p+"."+("x"*80))
+# Throwaway token in Cloudflare's real format, built at runtime so no secret-shaped literal
+# sits in git: standard base64 of {"a","t","s"} (cloudflared TunnelToken.Encode). Not real.
+CF_THROW=$(python3 -c 'import base64, json, uuid
+print(base64.b64encode(json.dumps({"a": "0"*32, "t": str(uuid.uuid4()), "s": base64.b64encode(b"harness"*6).decode()}).encode()).decode())
 ')
+# A JWT-shaped paste (what the first version wrongly demanded) must now be refused.
+# shellcheck disable=SC2034  # read indirectly via ${!bad_tok} below
+CF_JWT=$(python3 -c 'import base64
+h=base64.urlsafe_b64encode(b"{\"alg\":\"none\"}").rstrip(b"=").decode()
+print(h+"."+h+"."+("x"*80))
+')
+# base64 JSON without the tunnel fields must be refused too.
+# shellcheck disable=SC2034  # read indirectly via ${!bad_tok} below
+CF_NOFIELDS=$(python3 -c 'import base64, json; print(base64.b64encode(json.dumps({"x": 1}).encode()).decode())')
+for bad_tok in CF_JWT CF_NOFIELDS; do
+  Fb=$(feed_shares); printf '%s\n' "${!bad_tok}" >>"$Fb"
+  if run_flow "$TD/run-cf-$bad_tok.out" root-run cloudflared-token <"$Fb"; then
+    bad "$bad_tok tunnel token should have been rejected"
+  elif grep -q "minting the root token" "$TD/run-cf-$bad_tok.out"; then
+    bad "$bad_tok tunnel token minted a root token (should die locally first)"
+  else
+    ok "$bad_tok tunnel token rejected before minting"
+  fi
+done
 Fcfbad=$(feed_shares)
 printf '%s\n' "$(python3 -c 'print("x"*120)')" >>"$Fcfbad"
 if run_flow "$TD/run-cf-bad.out" root-run cloudflared-token <"$Fcfbad"; then
@@ -427,7 +444,7 @@ else
   ok "bad tunnel token rejected (nonzero exit)"
 fi
 if grep -q "must start with eyJ" "$TD/run-cf-bad.out"; then
-  ok "bad token error names the JWT shape"
+  ok "bad token error names the expected eyJ prefix"
 else
   bad "bad token error missing"; cat "$TD/run-cf-bad.out"
 fi
