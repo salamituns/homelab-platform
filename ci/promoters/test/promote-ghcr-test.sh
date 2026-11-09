@@ -60,6 +60,10 @@ copies() { grep -c '^crane copy' "$CALLS"; }
 posts() { cat "$W/posts"; }
 : >"$W/posts"
 
+# The Jenkins credential arrives with the file's trailing newline (build #2, 2026-11-09).
+rc=$(SOURCE_REPO=$'Owner/site.example\n' run --dry-run)
+ok "SOURCE_REPO with trailing newline accepted" '[ "$rc" = 0 ]'
+
 rc=$(run --dry-run)
 ok "dry-run exits 0"                      '[ "$rc" = 0 ]'
 ok "dry-run: no copy, no sign"            '[ "$(copies)" = 0 ] && [ "$(signs)" = 0 ]'

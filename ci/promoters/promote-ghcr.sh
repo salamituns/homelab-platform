@@ -61,7 +61,10 @@ ci_require_cmd cosign
 ci_require_cmd trivy
 
 # SOURCE_REPO is "<owner>/<repo>" on GitHub (credential; never printed).
-[[ -n "${SOURCE_REPO:-}" ]] || ci_die "SOURCE_REPO is unset (Jenkins credential personal-site-source-repo)"
+# Strip whitespace: a credential read from a one-line file keeps its trailing newline,
+# which the anchored name checks below would (correctly) refuse.
+SOURCE_REPO="$(printf '%s' "${SOURCE_REPO:-}" | tr -d ' \t\r\n')"
+[[ -n "${SOURCE_REPO}" ]] || ci_die "SOURCE_REPO is unset (Jenkins credential personal-site-source-repo)"
 OWNER="${SOURCE_REPO%%/*}"
 REPO="${SOURCE_REPO##*/}"
 # GitHub usernames are [A-Za-z0-9-] and repo names [A-Za-z0-9._-]; anything else is a
