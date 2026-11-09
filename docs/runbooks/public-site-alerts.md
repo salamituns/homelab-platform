@@ -27,10 +27,18 @@ Warnings stay on the root `null` receiver (UI only), same as BelleShop latency.
    `public-site-apex` / `public-site-staging`). Until then the bootstrap Secret
    is `[]` and the down alerts have no series (they do **not** page).
 
-3. Promoter paging is **not** Prometheus. Create Jenkins credential
-   `promoter-watchdog-url` (string, a healthchecks ping URL). On success the job
-   GETs the URL; on **3 consecutive failures** it GETs `{url}/fail`. Missing
-   credential is skipped (build still fails for the real error).
+3. Promoter paging is **not** Prometheus. JCasC overwrites UI-created
+   credentials. Put the healthchecks ping URL (one line) in gitignored
+   `private/promoter-watchdog-url`, then:
+
+   ```sh
+   cd ansible && ansible-playbook playbooks/jenkins.yml
+   ```
+
+   That copies it to `/etc/jenkins/secrets/promoter-watchdog-url` and the
+   `promoter-watchdog-url` string credential. On success the job GETs the URL;
+   on **3 consecutive failures** it GETs `{url}/fail`. Missing file skips the
+   credential (build still fails for the real error). Never print the URL.
 
 ## CloudflaredReplicasLow (critical, 5m)
 

@@ -84,6 +84,7 @@ pipeline {
 def pingPromoterWatchdog(String suffix) {
   try {
     withCredentials([string(credentialsId: 'promoter-watchdog-url', variable: 'WD_URL')]) {
+      // set -eu only: never set -x; the ping URL is a secret and must not hit the log.
       sh '''
         set -eu
         u=$(printf '%s' "$WD_URL" | tr -d ' \t\r\n')
