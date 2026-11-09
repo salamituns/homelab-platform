@@ -65,8 +65,9 @@ spec:
 # Prometheus scrapes, from the prometheus pods only (nothing else in monitoring dials
 # out). Two rule groups:
 #  - pod targets by CIDR without ports (coredns 9153, external-secrets, belleshop backend
-#    8000, cert-manager 9402 - and whatever pod target a future ServiceMonitor adds):
-#    10.244.0.0/16.
+#    8000, cert-manager 9402, cloudflared :2000 - and whatever pod target a future
+#    ServiceMonitor adds): 10.244.0.0/16. There is still no Prometheus internet egress;
+#    public HTTPS probes leave via blackbox_exporter only.
 #  - node targets with the exact ports read from the live Endpoints. The control-plane
 #    node carries the apiserver/etcd/scheduler/controller-manager targets; all three
 #    nodes carry kube-proxy, kubelet (+cadvisor/metrics ports) and node-exporter.

@@ -2,7 +2,8 @@
 # endpoint (ADR 0014 step 3). The client's own JWT doubles as the reviewer credential, so OpenBao
 # stores no long-lived reviewer token; for that the client ServiceAccount needs system:auth-delegator.
 # The ServiceAccounts live in their respective namespaces (`dev/eso-belleshop` in belleshop-deploy,
-# `monitoring/eso-alertmanager` and `monitoring/eso-oidc` in k8s/platform/monitoring/manifests);
+# `monitoring/eso-alertmanager`, `monitoring/eso-oidc` and
+# `monitoring/eso-public-site-probes` in k8s/platform/monitoring/manifests);
 # more namespaces bind their own ServiceAccount here as they adopt ESO.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -17,6 +18,9 @@ subjects:
     namespace: monitoring
   - kind: ServiceAccount
     name: eso-oidc
+    namespace: monitoring
+  - kind: ServiceAccount
+    name: eso-public-site-probes
     namespace: monitoring
   - kind: ServiceAccount
     name: eso-nexus-pull

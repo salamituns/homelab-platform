@@ -186,6 +186,47 @@ prometheus:
     retention: 7d
     ruleSelectorNilUsesHelmValues: false
     serviceMonitorSelectorNilUsesHelmValues: false
+    # Public-path blackbox jobs. Targets are file_sd from Secret
+    # public-site-probe-targets (empty [] in git; ESO merges OpenBao URLs).
+    # Prometheus itself still has no internet egress — blackbox_exporter does
+    # the GET (monitoring-blackbox-public-egress).
+    secrets:
+      - public-site-probe-targets
+    additionalScrapeConfigs:
+      - job_name: public-site-apex
+        metrics_path: /probe
+        scrape_interval: 30s
+        scrape_timeout: 10s
+        params:
+          module: [http_2xx_public]
+        file_sd_configs:
+          - files:
+              - /etc/prometheus/secrets/public-site-probe-targets/apex.json
+            refresh_interval: 1m
+        relabel_configs:
+          - source_labels: [__address__]
+            target_label: __param_target
+          - source_labels: [__param_target]
+            target_label: instance
+          - target_label: __address__
+            replacement: blackbox-exporter.monitoring.svc:9115
+      - job_name: public-site-staging
+        metrics_path: /probe
+        scrape_interval: 30s
+        scrape_timeout: 10s
+        params:
+          module: [http_302_public]
+        file_sd_configs:
+          - files:
+              - /etc/prometheus/secrets/public-site-probe-targets/staging.json
+            refresh_interval: 1m
+        relabel_configs:
+          - source_labels: [__address__]
+            target_label: __param_target
+          - source_labels: [__param_target]
+            target_label: instance
+          - target_label: __address__
+            replacement: blackbox-exporter.monitoring.svc:9115
     # Drill 5: Prometheus was BestEffort (0 requests). Live 2026-11-05: working set max
     # 639 Mi / 24h, top 526 Mi, CPU max 213 m. Requests only. Do NOT set a memory limit:
     # compaction / WAL replay can spike RSS and a limit causes OOMKill loops that take

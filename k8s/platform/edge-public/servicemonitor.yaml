@@ -1,0 +1,23 @@
+# Scrape cloudflared :2000 /metrics. Live 2026-11-09: the Deployment already
+# names the port `metrics` and serves Prometheus text there (port-forward).
+# prometheus-stack serviceMonitorSelector is {} so the release label is not
+# required; it is still set to match the other custom ServiceMonitors.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: cloudflared
+  labels:
+    release: prometheus-stack
+    app.kubernetes.io/name: cloudflared
+spec:
+  namespaceSelector:
+    matchNames:
+      - edge-public
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: cloudflared
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s

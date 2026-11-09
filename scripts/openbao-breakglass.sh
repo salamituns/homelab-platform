@@ -25,6 +25,7 @@
 #   scripts/openbao-breakglass.sh root-run nexus-pull     # registry pull credential + 3 ESO roles (ADR 0019)
 #   scripts/openbao-breakglass.sh root-run tenant <app> <env>  # per-tenant policy + role (ADR 0019 D6)
 #   scripts/openbao-breakglass.sh root-run cloudflared-token  # tunnel token for edge-public (ADR 0019 D7)
+#   scripts/openbao-breakglass.sh root-run public-site-probes  # public apex+staging URLs for blackbox (never in git)
 #   scripts/openbao-breakglass.sh root-run -- <cmd...>    # anything else with the token
 #   everything also accepts --dry-run (and root-run alertmanager/oidc: --overwrite)
 #
@@ -180,6 +181,9 @@ cmd_root_run() {
   elif [[ "${args[0]}" == "cloudflared-token" ]]; then
     mode="cloudflared"
     [[ ${#args[@]} -gt 1 ]] && die "root-run cloudflared-token takes no extra arguments (flags: --overwrite --dry-run)"
+  elif [[ "${args[0]}" == "public-site-probes" ]]; then
+    mode="publicsite"
+    [[ ${#args[@]} -gt 1 ]] && die "root-run public-site-probes takes no extra arguments (flags: --overwrite --dry-run)"
   elif [[ "${args[0]}" == "tenant" ]]; then
     mode="tenant"
     [[ ${#args[@]} -eq 3 ]] || die "root-run tenant takes exactly <app> <env>"
@@ -251,6 +255,13 @@ cmd_root_run() {
     else
       payload=$(cloudflared_prompt_and_extend "$payload")
     fi
+  elif [[ "$mode" == "publicsite" ]]; then
+    if [[ "$DRY_RUN" == true ]]; then
+      payload=$(jq -cn --argjson p "$payload" \
+        '$p + {publicsite: {apex_url: "<hidden>", staging_url: "<hidden>", apex_nchars: 0, staging_nchars: 0}, overwrite: false}')
+    else
+      payload=$(publicsite_prompt_and_extend "$payload")
+    fi
   elif [[ "$mode" == "watchdog" ]]; then
     if [[ "$DRY_RUN" == true ]]; then
       payload=$(jq -cn --argjson p "$payload" \
@@ -288,7 +299,7 @@ set -euo pipefail
 umask 077
 P="${BREAKGLASS_PAYLOAD:?}"
 ADDR=$(jq -r .addr <<<"$P")
-MODE=$(jq -r 'if .cmd then "exec" elif .oidc then "oidc" elif .watchdog then "watchdog" elif .nexuspull then "nexuspull" elif .tenant then "tenant" elif .cloudflared then "cloudflared" else "alertmanager" end' <<<"$P")
+MODE=$(jq -r 'if .cmd then "exec" elif .oidc then "oidc" elif .watchdog then "watchdog" elif .nexuspull then "nexuspull" elif .tenant then "tenant" elif .cloudflared then "cloudflared" elif .publicsite then "publicsite" else "alertmanager" end' <<<"$P")
 
 echo "    [remote] health check"
 curl -q -s "$ADDR/v1/sys/health" | jq -e '.initialized and (.sealed | not)' >/dev/null \
@@ -505,6 +516,46 @@ elif [[ "$MODE" == "cloudflared" ]]; then
     echo "    [remote] stored ($NCHARS chars)"
   fi
   echo "    [remote] cloudflared-token setup complete"
+elif [[ "$MODE" == "publicsite" ]]; then
+  # ---- public-path blackbox targets (hostnames never in git) ----
+  KV=monitoring/public-site-probes
+  echo "    [remote] checking mounts (kv v2 at secret/, kubernetes auth)"
+  curl -q -s --config "$CFG" "$ADDR/v1/sys/mounts" | jq -e '.["secret/"].options.version == "2"' >/dev/null \
+    || { echo "ERROR: kv v2 is not mounted at secret/" >&2; exit 1; }
+  curl -q -s --config "$CFG" "$ADDR/v1/sys/auth" | jq -e '.["kubernetes/"]' >/dev/null \
+    || { echo "ERROR: kubernetes auth is not enabled" >&2; exit 1; }
+  echo "    [remote] writing policy public-site-probes-read (read secret/data/monitoring/public-site-probes only)"
+  jq -n --arg policy 'path "secret/data/monitoring/public-site-probes" {
+  capabilities = ["read"]
+}' '{policy: $policy}' \
+    | curl -q -s -o /dev/null --config "$CFG" -X PUT --data-binary @- "$ADDR/v1/sys/policies/acl/public-site-probes-read"
+  echo "    [remote] writing kubernetes auth role public-site-probes (SA monitoring/eso-public-site-probes)"
+  jq -n '{bound_service_account_names: ["eso-public-site-probes"], bound_service_account_namespaces: ["monitoring"], token_policies: ["public-site-probes-read"], token_ttl: "1h"}' \
+    | curl -q -s -o /dev/null --config "$CFG" -X POST --data-binary @- "$ADDR/v1/auth/kubernetes/role/public-site-probes"
+  EXISTS=$(curl -q -s --config "$CFG" -o /dev/null -w '%{http_code}' "$ADDR/v1/secret/metadata/$KV")
+  OVER=$(jq -r '.overwrite // false' <<<"$P")
+  if [[ "$EXISTS" == "200" && "$OVER" != "true" ]]; then
+    echo "    [remote] secret/$KV already exists (pass --overwrite to replace)"
+    curl -q -s --config "$CFG" "$ADDR/v1/secret/data/$KV" \
+      | jq -e '.data.data | keys == ["apex_url","staging_url"]' >/dev/null \
+      || { echo "ERROR: existing secret/$KV does not hold exactly apex_url+staging_url" >&2; exit 1; }
+  else
+    echo "    [remote] writing secret/$KV (apex_url, staging_url; values never printed)"
+    CODE=$(jq -c '{data: {apex_url: .publicsite.apex_url, staging_url: .publicsite.staging_url}}' <<<"$P" \
+      | curl -q -s --config "$CFG" -o /dev/null -w '%{http_code}' -X POST --data-binary @- "$ADDR/v1/secret/data/$KV")
+    [[ "$CODE" == "200" || "$CODE" == "204" ]] \
+      || { echo "ERROR: writing secret/$KV failed (HTTP $CODE)" >&2; exit 1; }
+    AN=$(jq -r '.publicsite.apex_nchars' <<<"$P")
+    SN=$(jq -r '.publicsite.staging_nchars' <<<"$P")
+    curl -q -s --config "$CFG" "$ADDR/v1/secret/data/$KV" \
+      | jq -e --argjson a "$AN" --argjson s "$SN" \
+        '(.data.data | keys == ["apex_url","staging_url"])
+         and ((.data.data.apex_url | length) == $a)
+         and ((.data.data.staging_url | length) == $s)' >/dev/null \
+      || { echo "ERROR: secret/$KV does not hold apex_url+staging_url of the expected lengths" >&2; exit 1; }
+    echo "    [remote] stored (apex $AN chars, staging $SN chars)"
+  fi
+  echo "    [remote] public-site-probes setup complete"
 elif [[ "$MODE" == "watchdog" ]]; then
   # PATCH only watchdog_url on the existing SMTP secret. Never rewrite username/password/from/to.
   KV=monitoring/alertmanager
@@ -670,6 +721,69 @@ sys.exit(0 if ok else 1)
     jq -cn --argjson p "$payload" --argjson n "$nchars" --argjson overwrite "$overwrite" \
       '$p + {cloudflared: {tunnel_token: env.CF_TUNNEL_TOKEN, nchars: $n}, overwrite: $overwrite}'
   unset tok CF_TUNNEL_TOKEN
+}
+
+# Hidden prompts for the two public-path HTTPS URLs blackbox will probe. Shape-checked
+# locally so a LAN IP, http://, or a credential-shaped paste never reaches the store.
+# Stdout is ONLY the payload JSON. Values are never printed.
+publicsite_prompt_and_extend() {  # $1 payload-so-far -> full payload on stdout
+  local payload="$1" apex staging
+  echo "==> public-path probe URLs (never printed; never argv)" >&2
+  if [[ -t 0 ]]; then
+    read -rs -p "    apex URL (hidden, expect 200): " apex
+    echo >&2
+    read -rs -p "    staging URL (hidden, expect 302): " staging
+    echo >&2
+  else
+    IFS= read -r apex
+    IFS= read -r staging
+  fi
+  apex="${apex//[$' \t\r\n']/}"
+  staging="${staging//[$' \t\r\n']/}"
+  [[ -n "$apex" && -n "$staging" ]] || die "both probe URLs must be non-empty"
+  PUBLICSITE_URL="$apex" python3 -I -c '
+import ipaddress, os, sys
+from urllib.parse import urlparse
+u = os.environ["PUBLICSITE_URL"]
+if not u.startswith("https://"):
+    sys.exit(1)
+p = urlparse(u)
+if p.scheme != "https" or not p.netloc or p.username or p.password:
+    sys.exit(1)
+host = p.hostname or ""
+if "." not in host:
+    sys.exit(1)
+try:
+    ipaddress.ip_address(host)
+    sys.exit(1)
+except ValueError:
+    pass
+' || die "apex URL must be https://<hostname>/... with a DNS name, not an IP (nothing stored)"
+  PUBLICSITE_URL="$staging" python3 -I -c '
+import ipaddress, os, sys
+from urllib.parse import urlparse
+u = os.environ["PUBLICSITE_URL"]
+if not u.startswith("https://"):
+    sys.exit(1)
+p = urlparse(u)
+if p.scheme != "https" or not p.netloc or p.username or p.password:
+    sys.exit(1)
+host = p.hostname or ""
+if "." not in host:
+    sys.exit(1)
+try:
+    ipaddress.ip_address(host)
+    sys.exit(1)
+except ValueError:
+    pass
+' || die "staging URL must be https://<hostname>/... with a DNS name, not an IP (nothing stored)"
+  local overwrite=false
+  [[ "$OVERWRITE" == true ]] && overwrite=true
+  PUBLICSITE_APEX="$apex" PUBLICSITE_STAGING="$staging" \
+    jq -cn --argjson p "$payload" --argjson overwrite "$overwrite" \
+      --argjson an "${#apex}" --argjson sn "${#staging}" \
+      '$p + {publicsite: {apex_url: env.PUBLICSITE_APEX, staging_url: env.PUBLICSITE_STAGING, apex_nchars: $an, staging_nchars: $sn}, overwrite: $overwrite}'
+  unset apex staging PUBLICSITE_APEX PUBLICSITE_STAGING PUBLICSITE_URL
 }
 
 watchdog_prompt_and_extend() {  # $1 payload-so-far -> full payload on stdout

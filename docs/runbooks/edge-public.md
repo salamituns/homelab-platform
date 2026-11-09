@@ -112,7 +112,12 @@ kubectl -n nginx-gateway get svc public-gateway-nginx -o jsonpath='{.spec.type}{
 # Connector up (after the token Secret exists)
 kubectl -n edge-public get deploy,pods
 
+# Metrics scrape (port 2000); expect 2 endpoints after ServiceMonitor sync
+kubectl -n edge-public get svc,servicemonitor cloudflared
 ```
+
+Alerts for replica count and `cloudflared_tunnel_ha_connections` (live healthy
+value 4 per pod, 2026-11-09): [public-site-alerts.md](public-site-alerts.md).
 
 ### Isolation test (admin kubeconfig, run on master)
 

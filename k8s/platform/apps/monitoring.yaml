@@ -38,3 +38,14 @@ spec:
     syncOptions:
       - ServerSideApply=true   # Prometheus Operator CRDs are too big for client-side apply
       - CreateNamespace=true
+      # Without this, ignoreDifferences only hides drift: selfHeal reapplies stringData: "[]"
+      # and wipes the OpenBao URLs ESO merged (Argo CD v3.5.1 sync option).
+      - RespectIgnoreDifferences=true
+  # ESO Merge writes apex.json / staging.json; the bootstrap Secret in git is [].
+  ignoreDifferences:
+    - group: ""
+      kind: Secret
+      name: public-site-probe-targets
+      jsonPointers:
+        - /data
+        - /stringData

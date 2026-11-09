@@ -12,3 +12,5 @@ resources:
   - secretstore-openbao.yaml
   - externalsecret-cloudflared.yaml
   - cloudflared.yaml
+  - cloudflared-metrics-service.yaml
+  - servicemonitor.yaml

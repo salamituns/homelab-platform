@@ -75,6 +75,9 @@ jenkins_personal_site_script_path: ci/promoters/personal-site.Jenkinsfile
 # "<owner>/<repo>" of the personal site on GitHub. The repo name contains the site's
 # public domain, so it is owner-provided via gitignored private/ and never in git.
 jenkins_personal_site_source_repo_src: "{{ jenkins_private_dir }}/personal-site-source-repo"
+# healthchecks.io ping URL for personal-site-promoter (success ping + /fail after 3
+# consecutive failures). Owner file, never in git; JCasC overwrites UI-created creds.
+jenkins_promoter_watchdog_url_src: "{{ jenkins_private_dir }}/promoter-watchdog-url"
 # Push identity scoped to the personal-site Nexus repo only (created by the nexus role).
 jenkins_nexus_push_personal_site_user: push-personal-site
 jenkins_nexus_push_personal_site_src: /etc/nexus/secrets/push-personal-site
