@@ -45,12 +45,17 @@
 
 - name: Docker apt signing key (containerd.io lives here, not in Ubuntu)
   ansible.builtin.get_url:
+    timeout: 120   # default 10s; mirrors stall (pkg.jenkins.io TLS handshake, GitHub 504, 2026-11-09)
     url: "{{ k8s_node_docker_apt_key_url }}"
     dest: "{{ k8s_node_docker_apt_key_dest }}"
     owner: root
     group: root
     mode: "0644"
 
+  register: k8s_node_download
+  until: k8s_node_download is succeeded
+  retries: 4
+  delay: 15
 - name: Docker official apt repository
   ansible.builtin.deb822_repository:
     name: docker

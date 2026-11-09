@@ -2,6 +2,7 @@
 
 - name: Download the pinned Gitea Runner binary (SHA-256 from the release checksums.txt)
   ansible.builtin.get_url:
+    timeout: 120   # default 10s; mirrors stall (pkg.jenkins.io TLS handshake, GitHub 504, 2026-11-09)
     url: "{{ gitea_runner_download_url }}"
     dest: "{{ gitea_runner_binary_path }}"
     checksum: "sha256:{{ gitea_runner_sha256 }}"
@@ -9,6 +10,10 @@
     group: root
     mode: "0755"
   notify: Restart gitea-runner
+  register: gitea_runner_download
+  until: gitea_runner_download is succeeded
+  retries: 4
+  delay: 15
 
 - name: Create the config directory
   ansible.builtin.file:

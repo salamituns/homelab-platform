@@ -9,6 +9,7 @@
 
 - name: Download Proxmox archive keyring for Debian 13 (trixie) verified by SHA-256
   ansible.builtin.get_url:
+    timeout: 120   # default 10s; mirrors stall (pkg.jenkins.io TLS handshake, GitHub 504, 2026-11-09)
     url: "{{ pbs_keyring_url }}"
     dest: "{{ pbs_keyring_path }}"
     checksum: "sha256:{{ pbs_keyring_sha256 }}"
@@ -16,6 +17,10 @@
     group: root
     mode: "0644"
 
+  register: pbs_download
+  until: pbs_download is succeeded
+  retries: 4
+  delay: 15
 - name: Configure Proxmox Backup Server no-subscription repository (deb822)
   ansible.builtin.deb822_repository:
     name: pbs-no-subscription

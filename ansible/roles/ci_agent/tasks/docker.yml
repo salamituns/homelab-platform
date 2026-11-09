@@ -1,11 +1,16 @@
 - name: Download Docker apt signing key
   ansible.builtin.get_url:
+    timeout: 120   # default 10s; mirrors stall (pkg.jenkins.io TLS handshake, GitHub 504, 2026-11-09)
     url: "{{ ci_agent_docker_apt_key_url }}"
     dest: "{{ ci_agent_docker_apt_key_dest }}"
     owner: root
     group: root
     mode: "0644"
 
+  register: ci_agent_download
+  until: ci_agent_download is succeeded
+  retries: 4
+  delay: 15
 - name: Add Docker official apt repository
   ansible.builtin.deb822_repository:
     name: docker

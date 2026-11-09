@@ -8,6 +8,7 @@
 
 - name: Download pinned jenkins-plugin-manager jar verified by SHA-256
   ansible.builtin.get_url:
+    timeout: 120   # default 10s; mirrors stall (pkg.jenkins.io TLS handshake, GitHub 504, 2026-11-09)
     url: "{{ jenkins_plugin_manager_url }}"
     dest: "{{ jenkins_plugin_manager_dest }}"
     checksum: "sha256:{{ jenkins_plugin_manager_sha256 }}"
@@ -15,6 +16,10 @@
     group: root
     mode: "0644"
 
+  register: jenkins_download
+  until: jenkins_download is succeeded
+  retries: 4
+  delay: 15
 - name: Create /etc/jenkins
   ansible.builtin.file:
     path: /etc/jenkins
