@@ -139,6 +139,11 @@ can read only its own path. One app can never read another app's secrets, and th
   **Cloudflare Access** in front of every `-staging` hostname. Domains on Vercel DNS move their NS to
   Cloudflare (owner step) before cut-over.
 - Origin TLS: cloudflared → `public-gateway` over HTTPS with the lab CA as `caPool` (no plaintext hop).
+  **Phase 1 C (2026-11-08):** the in-cluster hop is HTTP `:80` on a ClusterIP Service.
+  Cloudflare already terminates public TLS; NetworkPolicy admits only `edge-public/cloudflared`
+  (no LAN). cloudflared origin `caPool` against 2026.10.7 is UNVERIFIED from this repo.
+  Revisit if the extra hop must be encrypted. Hostname → origin map stays in the Cloudflare
+  dashboard (this repo is public).
 
 ### D8. Observability per tenant
 

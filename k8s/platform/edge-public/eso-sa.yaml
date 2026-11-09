@@ -1,0 +1,9 @@
+# ESO identity in edge-public. Bound to system:auth-delegator in
+# cluster-config/eso-tokenreview.yaml. OpenBao role `cloudflared` accepts only this SA.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  name: eso
+automountServiceAccountToken: false

@@ -49,6 +49,12 @@ kubectl kustomize k8s/platform/tenants
 
 Path the ApplicationSet watches: `apps/<app>/overlays/<env>`. Destination namespace is `<app>-<env>` (`CreateNamespace=false`). Put the HTTPRoute / Service / Deployment or Rollout here. Images must be `registry.home.arpa/<app>/*` (or `platform/*`), Cosign-signed, with SPDX SBOM, digest-pinned.
 
+**Public app extra (Phase 1, [edge-public.md](edge-public.md)):** set Namespace
+`homelab.arpa/exposure: public`, include `../../_kit/public-ingress`, and **do not** set
+`homelab.arpa/gateway-routes`. HTTPRoute `parentRefs` Gateway `public-gateway` (namespace
+`nginx-gateway`). Public hostnames belong in `apps-deploy` and the Cloudflare dashboard,
+not this repo.
+
 ### 4. Prove (Phase 0 gate)
 
 Run as the limited cert unless noted. Dummy namespace is `demo-staging`.

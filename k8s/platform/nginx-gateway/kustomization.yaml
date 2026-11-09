@@ -6,6 +6,8 @@ resources:
   - vendor/ngf-crds-v2.8.0.yaml
   - vendor/ngf-deploy-v2.8.0.yaml
   - gateway.yaml
+  - public-gateway-proxy.yaml   # ClusterIP data plane (ADR 0019 D7); Gateway infrastructure.parametersRef
+  - public-gateway.yaml
   - netpol-allow.yaml   # allow flows (ADR 0015 A appendix, round 2); never inert with the agent live
   - netpol-default-deny.yaml   # default-deny ingress+egress (ADR 0015 A, round 2)
 # Control plane and cert-generator Job by digest (ghcr.io, checked 2026-10-31).
@@ -38,6 +40,14 @@ patches:
         value:
           requests: { cpu: 50m, memory: 64Mi }
           limits: { memory: 256Mi }
+  # Same data-plane image pin on the public Gateway's own NginxProxy (ClusterIP Service).
+  - target:
+      kind: NginxProxy
+      name: public-gateway-proxy-config
+    patch: |-
+      - op: replace
+        path: /spec/kubernetes/deployment/container/image/tag
+        value: "2.8.0@sha256:ed85a822d773a1a780c8897054f27fc881e378f586e6f39582dc2e04a152128d"
   # Product telemetry POSTs to nginx.com; netpol egress deny makes it fail every interval
   # (telemetryJob "Failed to export telemetry data", live 2026-11-03). Manifests install
   # uses --product-telemetry-disable (Helm: nginxGateway.productTelemetry.enable=false).

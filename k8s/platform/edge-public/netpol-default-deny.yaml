@@ -1,0 +1,13 @@
+# Default-deny for the tunnel connector. Ingress none (nothing should call in).
+# kube-network-policies evaluates post-DNAT: peers are pods / node /32s, never ClusterIPs.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: edge-public-default-deny
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress

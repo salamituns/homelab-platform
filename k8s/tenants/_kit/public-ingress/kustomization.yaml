@@ -1,0 +1,7 @@
+# Include from a public tenant overlay (set Namespace label homelab.arpa/exposure: public
+# and do NOT set homelab.arpa/gateway-routes). Admits public-gateway-nginx on 8080.
+# Internal tenants keep the kit base policy (homelab-gateway-nginx only).
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+resources:
+  - netpol-public-gateway-ingress.yaml

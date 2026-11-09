@@ -1,0 +1,70 @@
+# Allow set for cloudflared (ADR 0019 D7). Ships with default-deny in the same app.
+# Cloudflare reachability: TCP 443 + TCP/UDP 7844 (QUIC) to the public internet, with
+# RFC1918 except'd so a mis-aimed packet cannot walk the LAN. Origin hop: pods labelled
+# public-gateway-nginx on listener port 80 (post-DNAT; not the Service ClusterIP).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: edge-public-dns-egress
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: edge-public-cloudflare-egress
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: cloudflared
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - { protocol: TCP, port: 443 }
+        - { protocol: TCP, port: 7844 }
+        - { protocol: UDP, port: 7844 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: edge-public-gateway-egress
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: cloudflared
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: nginx-gateway
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: public-gateway-nginx
+      ports:
+        - { protocol: TCP, port: 80 }

@@ -6,6 +6,8 @@ kind: Kustomization
 namespace: APP-staging
 components:
   - ../../_kit/base
+  # Public apps only (edge-public.md): also include ../../_kit/public-ingress and replace
+  # homelab.arpa/exposure internal → public. Do not set homelab.arpa/gateway-routes.
 patches:
   - target:
       version: v1

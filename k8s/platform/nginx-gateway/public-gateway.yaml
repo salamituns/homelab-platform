@@ -1,0 +1,31 @@
+# Apps-only Gateway (ADR 0019 D7). Same GatewayClass `nginx` as homelab-gateway, own
+# data plane. ClusterIP via NginxProxy public-gateway-proxy-config — not spec.addresses
+# (NGF turns those into Service externalIPs; MetalLB never announces them, ADR 0013).
+#
+# Listener is HTTP :80. Cloudflare terminates public TLS. The in-cluster hop is
+# ClusterIP-only and NetworkPolicy admits only edge-public/cloudflared (no LAN).
+# HTTPS-with-lab-CA (ADR D7 origin TLS / cloudflared caPool) is UNVERIFIED from this
+# repo for cloudflared 2026.10.7 and would need a cert Secret on this Gateway; revisit
+# if we want the extra hop encrypted.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: public-gateway
+  namespace: nginx-gateway
+spec:
+  gatewayClassName: nginx
+  infrastructure:
+    parametersRef:
+      group: gateway.nginx.org
+      kind: NginxProxy
+      name: public-gateway-proxy-config
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              homelab.arpa/exposure: public

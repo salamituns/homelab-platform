@@ -1,0 +1,15 @@
+# Platform edge. PSA restricted. Kyverno admission is omitted on purpose: the connector
+# image is digest-pinned docker.io/cloudflare/cloudflared (same exemption as falco,
+# ADR 0012). Do not add homelab.arpa/gateway-routes — that label admits a namespace to
+# homelab-gateway (.240). Public HTTPRoutes attach via homelab.arpa/exposure: public.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: edge-public
+  labels:
+    kubernetes.io/metadata.name: edge-public
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"

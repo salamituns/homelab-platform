@@ -1,0 +1,32 @@
+# Per-Gateway NginxProxy for public-gateway (NGF 2.8.0).
+#
+# GatewayClass `nginx` points at nginx-gateway-proxy-config, whose Service type is
+# LoadBalancer (MetalLB .240). NGF merges a Gateway infrastructure.parametersRef over
+# the class: "If both a Gateway and its GatewayClass reference an NginxProxy, the
+# settings are merged. Settings specified on the Gateway NginxProxy override those set
+# on the GatewayClass NginxProxy." (CRD gateway.nginx.org/v1alpha2 NginxProxy).
+#
+# This object is the override: spec.kubernetes.service.type=ClusterIP (enum includes
+# ClusterIP; default on the CRD is LoadBalancer). No loadBalancerIP, no MetalLB
+# annotations. NGF then creates Service public-gateway-nginx as ClusterIP, so it is not
+# announced on the LAN. Deployment image/resources are restated here so a shallow merge
+# of spec.kubernetes cannot drop the data-plane pin.
+apiVersion: gateway.nginx.org/v1alpha2
+kind: NginxProxy
+metadata:
+  name: public-gateway-proxy-config
+  namespace: nginx-gateway
+spec:
+  kubernetes:
+    deployment:
+      replicas: 1
+      container:
+        image:
+          pullPolicy: IfNotPresent
+          repository: ghcr.io/nginx/nginx-gateway-fabric/nginx
+          tag: 2.8.0   # digest patched in kustomization.yaml (same pin as the admin data plane)
+        resources:
+          requests: { cpu: 50m, memory: 64Mi }
+          limits: { memory: 256Mi }
+    service:
+      type: ClusterIP
