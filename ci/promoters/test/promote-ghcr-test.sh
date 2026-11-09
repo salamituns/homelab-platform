@@ -30,7 +30,17 @@ printf '#!/bin/bash\necho "sign.sh $*" >>"$CALLS"\n' >"$W/opt/sign.sh"; chmod +x
 # kustomize stub: rewrite the digest line like `kustomize edit set image name=ref@digest`
 cat >"$W/bin/kz" <<'EOF'
 #!/bin/bash
-d="${4##*@}"; perl -pi -e "s/digest: .*/digest: $d/" kustomization.yaml
+# Like real kustomize 5.x: rewrites the images list with keys sorted, so "- digest:" comes
+# first and "name:" second (2026-11-09: the old in-place edit hid a parser bug).
+# $4 is NAME=REF@DIGEST
+d="${4##*@}"; n="${4%%=*}"; r="${4#*=}"; ref="${r%@*}"
+python3 - "$d" "$n" "$ref" <<'PY'
+import sys
+d, n, ref = sys.argv[1], sys.argv[2], sys.argv[3]
+s = open("kustomization.yaml").read()
+head = s.split("images:")[0]
+open("kustomization.yaml", "w").write(head + "images:\n- digest: " + d + "\n  name: " + n + "\n  newName: " + ref + "\n")
+PY
 EOF
 chmod +x "$W/bin/kz"
 
