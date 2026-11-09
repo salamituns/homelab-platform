@@ -40,6 +40,8 @@ pipeline {
             # The credential is read from a one-line file and keeps its trailing newline.
             SOURCE_REPO="$(printf '%s' "$SOURCE_REPO" | tr -d ' \t\r\n')"
             export SOURCE_REPO
+            # The package lab-release.yml pushes: ghcr.io/<owner>/personal-site.
+            export GHCR_IMAGE=personal-site
             export COSIGN_KEY="$COSIGN_KEY_FILE" COSIGN_PASSWORD="$COSIGN_PASS"
             export GITEA_PROMOTE_USER="$PROMOTE_USER" GITEA_PROMOTE_TOKEN="$PROMOTE_TOKEN"
             /opt/ci-gates/promote-ghcr.sh

@@ -47,7 +47,7 @@ python3 "$H/fake_gitea.py" "$W" &
 SRV=$!; sleep 1
 PORT=$(cat "$W/port")
 
-export PATH="$W/bin:$PATH" SOURCE_REPO=Owner/site.example GIT_URL=https://gitea.home.arpa/tunsgit/homelab-platform.git
+export PATH="$W/bin:$PATH" SOURCE_REPO=Owner/site.example GHCR_IMAGE=personal-site GIT_URL=https://gitea.home.arpa/tunsgit/homelab-platform.git
 export GITEA_URL="http://127.0.0.1:$PORT" PROMOTE_REMOTE="$W/remote.git" KUSTOMIZE_CMD="$W/bin/kz"
 export GITEA_PROMOTE_USER=ci-promote GITEA_PROMOTE_TOKEN=x COSIGN_KEY="$W/opt/lib.sh" COSIGN_PASSWORD=x
 export TRIVY_CACHE_DIR="$W/cache"
@@ -68,7 +68,9 @@ rc=$(run --dry-run)
 ok "dry-run exits 0"                      '[ "$rc" = 0 ]'
 ok "dry-run: no copy, no sign"            '[ "$(copies)" = 0 ] && [ "$(signs)" = 0 ]'
 ok "dry-run: verify flags use repo claim" 'grep -q -- "--certificate-github-workflow-repository Owner/site.example" "$CALLS"'
-ok "dry-run: ghcr ref lowercased"         'grep -q "crane digest ghcr.io/owner/site.example:main" "$CALLS"'
+ok "dry-run: ghcr ref = owner (lowercased) + GHCR_IMAGE, not the repo name" 'grep -q "crane digest ghcr.io/owner/personal-site:main" "$CALLS"'
+rc=$(GHCR_IMAGE='' run --dry-run)
+ok "GHCR_IMAGE unset is refused"          '[ "$rc" != 0 ] && grep -q "GHCR_IMAGE is unset" "$W/out.log"'
 
 echo 500 >"$W/mode"
 rc=$(run)
