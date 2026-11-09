@@ -6,7 +6,7 @@
 # identity for admission - Kyverno verifies the LAB Cosign key - so this script is
 # what crosses the trust boundary, on a 15-minute timer, for images not a pipeline:
 #
-#   1. resolve ghcr.io/<owner>/<repo>:main to a digest (anonymous, package is public)
+#   1. resolve ghcr.io/<owner>/<GHCR_IMAGE>:main to a digest (anonymous, package is public)
 #   2. cosign verify: Fulcio issuer + workflow identity + repository claim must all
 #      match <owner>/<repo>'s .github/workflows/lab-release.yml on refs/heads/main
 #   3. same again for the SPDX SBOM attestation (cosign verify-attestation)
@@ -61,7 +61,10 @@ ci_require_cmd cosign
 ci_require_cmd trivy
 
 # SOURCE_REPO is "<owner>/<repo>" on GitHub (credential; never printed).
-[[ -n "${SOURCE_REPO:-}" ]] || ci_die "SOURCE_REPO is unset (Jenkins credential personal-site-source-repo)"
+# Strip whitespace: a credential read from a one-line file keeps its trailing newline,
+# which the anchored name checks below would (correctly) refuse.
+SOURCE_REPO="$(printf '%s' "${SOURCE_REPO:-}" | tr -d ' \t\r\n')"
+[[ -n "${SOURCE_REPO}" ]] || ci_die "SOURCE_REPO is unset (Jenkins credential personal-site-source-repo)"
 OWNER="${SOURCE_REPO%%/*}"
 REPO="${SOURCE_REPO##*/}"
 # GitHub usernames are [A-Za-z0-9-] and repo names [A-Za-z0-9._-]; anything else is a
@@ -71,8 +74,12 @@ REPO="${SOURCE_REPO##*/}"
 [[ "${REPO}" =~ ^[A-Za-z0-9._-]+$ ]] || ci_die "SOURCE_REPO repo is not a GitHub repository name"
 
 GHCR_TAG="${GHCR_TAG:-main}"
-# GHCR image paths are lowercase.
-GHCR_REF="ghcr.io/$(printf '%s/%s' "${OWNER}" "${REPO}" | tr '[:upper:]' '[:lower:]')"
+# The package name is what the release workflow pushes (ghcr.io/<owner>/<GHCR_IMAGE>), which
+# is NOT the repo name (lab-release.yml pushes "personal-site"). Set by the Jenkinsfile;
+# it carries no domain, so it may live in git. GHCR image paths are lowercase.
+[[ -n "${GHCR_IMAGE:-}" ]] || ci_die "GHCR_IMAGE is unset (the GHCR package name the release workflow pushes)"
+[[ "${GHCR_IMAGE}" =~ ^[a-z0-9]+([._/-][a-z0-9]+)*$ ]] || ci_die "GHCR_IMAGE is not a valid lowercase image name"
+GHCR_REF="ghcr.io/$(printf '%s' "${OWNER}" | tr '[:upper:]' '[:lower:]')/${GHCR_IMAGE}"
 
 # Keyless identity: Fulcio issuer + the workflow in the SAN + the repository claim in
 # the OIDC token. The regexp keeps <owner> pinned but tolerates a renamed repo; the
