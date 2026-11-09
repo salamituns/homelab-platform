@@ -217,20 +217,31 @@ overlay_digest() {
 import sys
 
 want, path = sys.argv[1], sys.argv[2]
-name = digest = None
-found = ""
+# Read each entry of the top-level images: list as a whole. kustomize edit set image
+# rewrites entries with keys sorted ("- digest:" before "name:"), so the key order of
+# an entry must not matter (2026-11-09: an order-dependent parser made every run
+# re-sign an already promoted digest).
+items, cur, in_images = [], None, False
 for raw in open(path, encoding="utf-8"):
-    line = raw.strip()
-    if line.startswith("- name:") or line.startswith("name:"):
-        if name == want and digest:
-            found = digest
-        name = line.split(":", 1)[1].strip()
-        digest = None
-    elif line.startswith("digest:"):
-        digest = line.split(":", 1)[1].strip()
-if name == want and digest:
-    found = digest
-print(found or "")
+    line = raw.rstrip("\n")
+    if not line.strip() or line.lstrip().startswith("#"):
+        continue
+    if line.startswith("images:"):
+        in_images = True
+        continue
+    if in_images and not line[0].isspace() and not line.startswith("-"):
+        in_images = False
+    if not in_images:
+        continue
+    body = line.strip()
+    if body.startswith("- "):
+        cur = {}
+        items.append(cur)
+        body = body[2:].strip()
+    if cur is not None and ":" in body:
+        k, v = body.split(":", 1)
+        cur[k.strip()] = v.strip().strip("\"'")
+print(next((i.get("digest", "") for i in items if i.get("name") == want), ""))
 PY
 }
 
