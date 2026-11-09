@@ -53,6 +53,7 @@
 # (126 MB), a mismatch (bumped gitea_version + gitea_sha256) downloads, verifies and replaces it.
 - name: Download pinned Gitea binary verified by SHA-256
   ansible.builtin.get_url:
+    timeout: 120   # default 10s; mirrors stall (pkg.jenkins.io TLS handshake, GitHub 504, 2026-11-09)
     url: "{{ gitea_download_url }}"
     dest: /usr/local/bin/gitea
     checksum: "sha256:{{ gitea_sha256 }}"
@@ -61,3 +62,7 @@
     group: root
     mode: "0755"
   notify: Restart gitea
+  register: gitea_download
+  until: gitea_download is succeeded
+  retries: 4
+  delay: 15

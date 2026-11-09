@@ -56,6 +56,7 @@
 
 - name: Download pinned SeaweedFS release verified by SHA-256
   ansible.builtin.get_url:
+    timeout: 120   # default 10s; mirrors stall (pkg.jenkins.io TLS handshake, GitHub 504, 2026-11-09)
     url: "{{ seaweedfs_download_url }}"
     dest: "/opt/seaweedfs/seaweedfs-{{ seaweedfs_version }}-linux_amd64.tar.gz"
     checksum: "sha256:{{ seaweedfs_sha256 }}"
@@ -63,6 +64,10 @@
     group: root
     mode: "0644"
 
+  register: seaweedfs_download
+  until: seaweedfs_download is succeeded
+  retries: 4
+  delay: 15
 - name: Unpack the weed binary
   ansible.builtin.unarchive:
     src: "/opt/seaweedfs/seaweedfs-{{ seaweedfs_version }}-linux_amd64.tar.gz"

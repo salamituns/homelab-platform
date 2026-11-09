@@ -22,6 +22,7 @@
 
 - name: Download the pinned Nexus archive (SHA-256 verified)
   ansible.builtin.get_url:
+    timeout: 120   # default 10s; mirrors stall (pkg.jenkins.io TLS handshake, GitHub 504, 2026-11-09)
     url: "{{ nexus_download_url }}"
     dest: "/var/cache/nexus-{{ nexus_version }}.tar.gz"
     checksum: "sha256:{{ nexus_sha256 }}"
@@ -29,6 +30,10 @@
     group: root
     mode: "0644"
 
+  register: nexus_download
+  until: nexus_download is succeeded
+  retries: 4
+  delay: 15
 # The archive also holds an empty sonatype-work/; only the program directory is unpacked.
 # Owned by root: the nexus process can read its program but never rewrite it.
 - name: Unpack Nexus into /opt/nexus-<version>

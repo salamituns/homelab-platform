@@ -51,6 +51,7 @@
 
 - name: Download pinned SonarQube Community Build zip verified by SHA-256
   ansible.builtin.get_url:
+    timeout: 120   # default 10s; mirrors stall (pkg.jenkins.io TLS handshake, GitHub 504, 2026-11-09)
     url: "{{ sonarqube_download_url }}"
     dest: "/opt/sonarqube-{{ sonarqube_version }}.zip"
     checksum: "sha256:{{ sonarqube_sha256 }}"
@@ -59,6 +60,10 @@
     group: root
     mode: "0644"
 
+  register: sonarqube_download
+  until: sonarqube_download is succeeded
+  retries: 4
+  delay: 15
 - name: Unpack SonarQube Community Build into /opt/sonarqube-{{ sonarqube_version }}
   ansible.builtin.unarchive:
     src: "/opt/sonarqube-{{ sonarqube_version }}.zip"

@@ -19,6 +19,7 @@
 # authenticity check.
 - name: Download agent.jar from the Jenkins controller
   ansible.builtin.get_url:
+    timeout: 120   # default 10s; mirrors stall (pkg.jenkins.io TLS handshake, GitHub 504, 2026-11-09)
     url: "{{ ci_agent_jenkins_url }}jnlpJars/agent.jar"
     dest: "{{ ci_agent_jar_path }}"
     owner: root
@@ -26,6 +27,10 @@
     mode: "0644"
   when: not ansible_check_mode
   notify: Restart jenkins-agent
+  register: ci_agent_download
+  until: ci_agent_download is succeeded
+  retries: 4
+  delay: 15
 
 - name: Read Jenkins admin password on the controller
   ansible.builtin.slurp:

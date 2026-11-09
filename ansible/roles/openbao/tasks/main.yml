@@ -97,6 +97,7 @@
 # run for real only (a real second run is a no-op anyway: same checksum, `creates:` guard).
 - name: Download pinned OpenBao release verified by SHA-256
   ansible.builtin.get_url:
+    timeout: 120   # default 10s; mirrors stall (pkg.jenkins.io TLS handshake, GitHub 504, 2026-11-09)
     url: "{{ openbao_download_url }}"
     dest: "/opt/openbao/openbao-{{ openbao_version }}-linux_amd64.tar.gz"
     checksum: "sha256:{{ openbao_sha256 }}"
@@ -104,6 +105,10 @@
     group: root
     mode: "0644"
   when: not ansible_check_mode
+  register: openbao_download
+  until: openbao_download is succeeded
+  retries: 4
+  delay: 15
 
 - name: Unpack the bao binary
   ansible.builtin.unarchive:

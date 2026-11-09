@@ -1,11 +1,16 @@
 - name: Download Tailscale apt signing keyring
   ansible.builtin.get_url:
+    timeout: 120   # default 10s; mirrors stall (pkg.jenkins.io TLS handshake, GitHub 504, 2026-11-09)
     url: "{{ tailscale_apt_base }}/{{ ansible_facts['distribution_release'] }}.noarmor.gpg"
     dest: /usr/share/keyrings/tailscale-archive-keyring.gpg
     owner: root
     group: root
     mode: "0644"
 
+  register: tailscale_download
+  until: tailscale_download is succeeded
+  retries: 4
+  delay: 15
 - name: Add Tailscale official apt repository
   ansible.builtin.deb822_repository:
     name: tailscale
