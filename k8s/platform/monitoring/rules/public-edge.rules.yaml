@@ -1,0 +1,84 @@
+# Extract of spec.groups from manifests/public-edge-prometheusrule.yaml
+# (promtool cannot load a PrometheusRule CR). Keep the two files in lockstep.
+#
+# Metric names verified live 2026-11-09:
+#   kube_deployment_status_replicas_available{namespace,deployment} from
+#     job=kube-state-metrics (cloudflared=2, public-gateway-nginx=1,
+#     personal-site in personal-site-prod=1)
+#   cloudflared_tunnel_ha_connections gauge HELP "Number of active ha connections"
+#     = 4 on a live connector (kubectl port-forward to :2000 /metrics)
+groups:
+  - name: public-edge.health
+    rules:
+      - alert: CloudflaredReplicasLow
+        expr: |
+          kube_deployment_status_replicas_available{namespace="edge-public",deployment="cloudflared"} < 2
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Fewer than 2 cloudflared connectors are available"
+          description: "edge-public/cloudflared has {{ $value }} available replicas (want 2). See docs/runbooks/public-site-alerts.md."
+          runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/public-site-alerts.md
+      - alert: CloudflaredTunnelDisconnected
+        expr: |
+          cloudflared_tunnel_ha_connections == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "A cloudflared connector has zero HA connections"
+          description: "cloudflared_tunnel_ha_connections is 0 on {{ $labels.instance }} for 5m (healthy live value is 4). See docs/runbooks/public-site-alerts.md."
+          runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/public-site-alerts.md
+      - alert: CloudflaredTunnelHADegraded
+        expr: |
+          cloudflared_tunnel_ha_connections > 0
+          and
+          cloudflared_tunnel_ha_connections < 4
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "A cloudflared connector has dropped HA connections"
+          description: "cloudflared_tunnel_ha_connections is {{ $value }} on {{ $labels.instance }} (want 4). Warning only; 0 connections pages as CloudflaredTunnelDisconnected. See docs/runbooks/public-site-alerts.md."
+          runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/public-site-alerts.md
+      - alert: PublicGatewayDataPlaneDown
+        expr: |
+          kube_deployment_status_replicas_available{namespace="nginx-gateway",deployment="public-gateway-nginx"} < 1
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "public-gateway data plane has no available replicas"
+          description: "nginx-gateway/public-gateway-nginx has {{ $value }} available replicas (want 1). Public origin HTTP dies even if cloudflared is up. See docs/runbooks/public-site-alerts.md."
+          runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/public-site-alerts.md
+      - alert: PersonalSiteProdUnavailable
+        expr: |
+          kube_deployment_status_replicas_available{namespace="personal-site-prod",deployment="personal-site"} < 1
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "personal-site prod Deployment has no available replicas"
+          description: "personal-site-prod/personal-site has {{ $value }} available replicas (want 1). See docs/runbooks/public-site-alerts.md."
+          runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/public-site-alerts.md
+      - alert: PublicSiteApexDown
+        expr: |
+          probe_success{job="public-site-apex"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Public apex probe is failing"
+          description: "probe_success{job=public-site-apex, instance={{ $labels.instance }}} is 0 for 2m (expect HTTP 200 through the public path). See docs/runbooks/public-site-alerts.md."
+          runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/public-site-alerts.md
+      - alert: PublicSiteStagingDown
+        expr: |
+          probe_success{job="public-site-staging"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Public staging probe is failing"
+          description: "probe_success{job=public-site-staging, instance={{ $labels.instance }}} is 0 for 2m (expect HTTP 302 through the public path). See docs/runbooks/public-site-alerts.md."
+          runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/public-site-alerts.md

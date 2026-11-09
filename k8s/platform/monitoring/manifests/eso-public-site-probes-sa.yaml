@@ -1,0 +1,9 @@
+# Dedicated identity for ESO when reading secret/data/monitoring/public-site-probes.
+# Separate from eso-alertmanager so that role stays SMTP+watchdog only.
+# Bound to system:auth-delegator in k8s/platform/cluster-config/eso-tokenreview.yaml.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: eso-public-site-probes
+  namespace: monitoring
+automountServiceAccountToken: false

@@ -38,3 +38,11 @@ spec:
     syncOptions:
       - ServerSideApply=true   # Prometheus Operator CRDs are too big for client-side apply
       - CreateNamespace=true
+  # ESO Merge writes apex.json / staging.json; the bootstrap Secret in git is [].
+  ignoreDifferences:
+    - group: ""
+      kind: Secret
+      name: public-site-probe-targets
+      jsonPointers:
+        - /data
+        - /stringData

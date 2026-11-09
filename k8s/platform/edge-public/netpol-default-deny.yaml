@@ -1,4 +1,5 @@
-# Default-deny for the tunnel connector. Ingress none (nothing should call in).
+# Default-deny for the tunnel connector. Ingress is denied unless an allow
+# names it (metrics scrape from monitoring is the only inbound today).
 # kube-network-policies evaluates post-DNAT: peers are pods / node /32s, never ClusterIPs.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

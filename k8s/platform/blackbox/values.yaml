@@ -85,3 +85,24 @@ config:
         tls_config:
           ca_file: /etc/blackbox/ca/lab-root.crt
           insecure_skip_verify: false
+    # Public-path probes (apex 200, staging 302). System CAs, not the lab
+    # root: the public edge is Cloudflare-terminated. Targets are NOT in this
+    # file — they arrive as Prometheus file_sd from OpenBao via ESO.
+    http_2xx_public:
+      prober: http
+      timeout: 5s
+      http:
+        valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
+        valid_status_codes: [200]
+        follow_redirects: false
+        preferred_ip_protocol: ip4
+        fail_if_not_ssl: true
+    http_302_public:
+      prober: http
+      timeout: 5s
+      http:
+        valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
+        valid_status_codes: [302]
+        follow_redirects: false
+        preferred_ip_protocol: ip4
+        fail_if_not_ssl: true

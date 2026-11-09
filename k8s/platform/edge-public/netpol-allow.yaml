@@ -68,3 +68,30 @@ spec:
               app.kubernetes.io/name: public-gateway-nginx
       ports:
         - { protocol: TCP, port: 80 }
+---
+# Prometheus scrape of cloudflared :2000. Pair with ServiceMonitor/cloudflared.
+# Prometheus scrape egress already allows 10.244.0.0/16 with no port list
+# (monitoring-prometheus-scrape-egress); this is the matching ingress.
+# Default-deny would otherwise drop the scrape (verified 2026-11-09: curl
+# from the hosting node to the pod IP timed out; kubelet port-forward worked).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: edge-public-metrics-ingress
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: cloudflared
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - { protocol: TCP, port: 2000 }

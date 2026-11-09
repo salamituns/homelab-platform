@@ -1,0 +1,207 @@
+# promtool test rules for public-edge alerts. Rule file is extracted from the PrometheusRule CR.
+rule_files:
+  - public-edge.rules.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - name: healthy edge does not fire
+    interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="edge-public",deployment="cloudflared",job="kube-state-metrics"}'
+        values: "2x15"
+      - series: 'kube_deployment_status_replicas_available{namespace="nginx-gateway",deployment="public-gateway-nginx",job="kube-state-metrics"}'
+        values: "1x15"
+      - series: 'kube_deployment_status_replicas_available{namespace="personal-site-prod",deployment="personal-site",job="kube-state-metrics"}'
+        values: "1x15"
+      - series: 'cloudflared_tunnel_ha_connections{job="cloudflared",instance="10.244.4.29:2000"}'
+        values: "4x15"
+      - series: 'cloudflared_tunnel_ha_connections{job="cloudflared",instance="10.244.3.8:2000"}'
+        values: "4x15"
+      - series: 'probe_success{job="public-site-apex",instance="https://apex.example/"}'
+        values: "1x15"
+      - series: 'probe_success{job="public-site-staging",instance="https://staging.example/"}'
+        values: "1x15"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: CloudflaredReplicasLow
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: CloudflaredTunnelDisconnected
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: CloudflaredTunnelHADegraded
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: PublicGatewayDataPlaneDown
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: PersonalSiteProdUnavailable
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: PublicSiteApexDown
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: PublicSiteStagingDown
+        exp_alerts: []
+
+  - name: one connector replica pages after 5m
+    interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="edge-public",deployment="cloudflared",job="kube-state-metrics"}'
+        values: "1x15"
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: CloudflaredReplicasLow
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: CloudflaredReplicasLow
+        exp_alerts:
+          - exp_labels:
+              alertname: CloudflaredReplicasLow
+              severity: critical
+              namespace: edge-public
+              deployment: cloudflared
+              job: kube-state-metrics
+            exp_annotations:
+              summary: "Fewer than 2 cloudflared connectors are available"
+              description: "edge-public/cloudflared has 1 available replicas (want 2). See docs/runbooks/public-site-alerts.md."
+              runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/public-site-alerts.md
+
+  - name: zero HA connections pages after 5m
+    interval: 1m
+    input_series:
+      - series: 'cloudflared_tunnel_ha_connections{job="cloudflared",instance="10.244.4.29:2000"}'
+        values: "0x15"
+      - series: 'cloudflared_tunnel_ha_connections{job="cloudflared",instance="10.244.3.8:2000"}'
+        values: "4x15"
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: CloudflaredTunnelDisconnected
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: CloudflaredTunnelDisconnected
+        exp_alerts:
+          - exp_labels:
+              alertname: CloudflaredTunnelDisconnected
+              severity: critical
+              job: cloudflared
+              instance: "10.244.4.29:2000"
+            exp_annotations:
+              summary: "A cloudflared connector has zero HA connections"
+              description: "cloudflared_tunnel_ha_connections is 0 on 10.244.4.29:2000 for 5m (healthy live value is 4). See docs/runbooks/public-site-alerts.md."
+              runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/public-site-alerts.md
+
+  - name: dropped HA connections warn after 5m and do not page
+    interval: 1m
+    input_series:
+      - series: 'cloudflared_tunnel_ha_connections{job="cloudflared",instance="10.244.4.29:2000"}'
+        values: "2x15"
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: CloudflaredTunnelDisconnected
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: CloudflaredTunnelHADegraded
+        exp_alerts:
+          - exp_labels:
+              alertname: CloudflaredTunnelHADegraded
+              severity: warning
+              job: cloudflared
+              instance: "10.244.4.29:2000"
+            exp_annotations:
+              summary: "A cloudflared connector has dropped HA connections"
+              description: "cloudflared_tunnel_ha_connections is 2 on 10.244.4.29:2000 (want 4). Warning only; 0 connections pages as CloudflaredTunnelDisconnected. See docs/runbooks/public-site-alerts.md."
+              runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/public-site-alerts.md
+
+  - name: public-gateway down pages after 2m
+    interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="nginx-gateway",deployment="public-gateway-nginx",job="kube-state-metrics"}'
+        values: "0x10"
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: PublicGatewayDataPlaneDown
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: PublicGatewayDataPlaneDown
+        exp_alerts:
+          - exp_labels:
+              alertname: PublicGatewayDataPlaneDown
+              severity: critical
+              namespace: nginx-gateway
+              deployment: public-gateway-nginx
+              job: kube-state-metrics
+            exp_annotations:
+              summary: "public-gateway data plane has no available replicas"
+              description: "nginx-gateway/public-gateway-nginx has 0 available replicas (want 1). Public origin HTTP dies even if cloudflared is up. See docs/runbooks/public-site-alerts.md."
+              runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/public-site-alerts.md
+
+  - name: personal-site prod down pages after 2m
+    interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="personal-site-prod",deployment="personal-site",job="kube-state-metrics"}'
+        values: "0x10"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: PersonalSiteProdUnavailable
+        exp_alerts:
+          - exp_labels:
+              alertname: PersonalSiteProdUnavailable
+              severity: critical
+              namespace: personal-site-prod
+              deployment: personal-site
+              job: kube-state-metrics
+            exp_annotations:
+              summary: "personal-site prod Deployment has no available replicas"
+              description: "personal-site-prod/personal-site has 0 available replicas (want 1). See docs/runbooks/public-site-alerts.md."
+              runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/public-site-alerts.md
+
+  - name: missing public probe series do not fire down alerts
+    interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="edge-public",deployment="cloudflared",job="kube-state-metrics"}'
+        values: "2x10"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: PublicSiteApexDown
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: PublicSiteStagingDown
+        exp_alerts: []
+
+  - name: failed public probes page after 2m
+    interval: 1m
+    input_series:
+      - series: 'probe_success{job="public-site-apex",instance="https://apex.example/"}'
+        values: "0x10"
+      - series: 'probe_success{job="public-site-staging",instance="https://staging.example/"}'
+        values: "0x10"
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: PublicSiteApexDown
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: PublicSiteApexDown
+        exp_alerts:
+          - exp_labels:
+              alertname: PublicSiteApexDown
+              severity: critical
+              job: public-site-apex
+              instance: "https://apex.example/"
+            exp_annotations:
+              summary: "Public apex probe is failing"
+              description: "probe_success{job=public-site-apex, instance=https://apex.example/} is 0 for 2m (expect HTTP 200 through the public path). See docs/runbooks/public-site-alerts.md."
+              runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/public-site-alerts.md
+      - eval_time: 3m
+        alertname: PublicSiteStagingDown
+        exp_alerts:
+          - exp_labels:
+              alertname: PublicSiteStagingDown
+              severity: critical
+              job: public-site-staging
+              instance: "https://staging.example/"
+            exp_annotations:
+              summary: "Public staging probe is failing"
+              description: "probe_success{job=public-site-staging, instance=https://staging.example/} is 0 for 2m (expect HTTP 302 through the public path). See docs/runbooks/public-site-alerts.md."
+              runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/public-site-alerts.md

@@ -1,0 +1,16 @@
+# Headless-not-required ClusterIP so a ServiceMonitor can scrape port 2000
+# (container port name `metrics` on the cloudflared Deployment).
+apiVersion: v1
+kind: Service
+metadata:
+  name: cloudflared
+  labels:
+    app.kubernetes.io/name: cloudflared
+spec:
+  selector:
+    app.kubernetes.io/name: cloudflared
+  ports:
+    - name: metrics
+      port: 2000
+      targetPort: metrics
+      protocol: TCP

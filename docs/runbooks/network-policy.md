@@ -219,6 +219,12 @@ scrape flow fails QUIETLY (the scrape just stops), which is exactly what the ale
 The apiserver/etcd/scheduler/controller-manager scrapes are cross-node node traffic from
 the prometheus pod - never exempt.
 
+Public-path blackbox probes (personal-site apex/staging) need
+`monitoring-blackbox-public-egress`: blackbox_exporter only, TCP 443, `0.0.0.0/0`
+except RFC1918. Prometheus scrape egress is **not** widened to the internet.
+cloudflared `:2000` scrape needs `edge-public-metrics-ingress` from
+`monitoring` prometheus pods (pod-CIDR egress already covers the destination).
+
 Rollback: revert the PR; the monitoring app has prune enabled, so both files disappear with
 it and the namespace returns to no policies.
 scripts/netpol-proof.sh argo-rollouts   # dashboard route, app health, a denied check, verdicts

@@ -55,6 +55,42 @@ pipeline {
       // Digest resolution, signature JSON, Trivy report. Digests only, never SOURCE_REPO.
       archiveArtifacts artifacts: 'reports/**', allowEmptyArchive: true
     }
+    success {
+      script { pingPromoterWatchdog('') }
+    }
+    failure {
+      script {
+        // Page on N consecutive failures (N=3). Jenkins has no prometheus plugin
+        // today (roles/jenkins/defaults/main.yml); scraping the controller would
+        // add a plugin, open :8080, and widen monitoring egress to .88. A
+        // healthchecks-style ping reuses the existing dead-man pattern and needs
+        // only credential promoter-watchdog-url (owner-created; not in git).
+        def n = 1
+        def b = currentBuild.previousBuild
+        while (b != null && b.result == 'FAILURE') {
+          n++
+          b = b.previousBuild
+          if (n >= 20) { break }
+        }
+        if (n >= 3) {
+          pingPromoterWatchdog('/fail')
+        }
+      }
+    }
     cleanup { cleanWs() }
+  }
+}
+
+def pingPromoterWatchdog(String suffix) {
+  try {
+    withCredentials([string(credentialsId: 'promoter-watchdog-url', variable: 'WD_URL')]) {
+      sh '''
+        set -eu
+        u=$(printf '%s' "$WD_URL" | tr -d ' \t\r\n')
+        curl -fsS -m 10 -o /dev/null "${u}''' + suffix + '''"
+      '''
+    }
+  } catch (ignored) {
+    echo 'promoter watchdog ping skipped (credential missing or ping failed)'
   }
 }

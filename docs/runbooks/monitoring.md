@@ -80,6 +80,14 @@ ssh Master 'sudo kubeadm certs check-expiration'
 kubeadm renews the control-plane certificates on each `kubeadm upgrade`; renew by hand with
 `sudo kubeadm certs renew all` on master (owner step, then restart the static pods).
 
+## Public personal-site edge (Phase 1 follow-up)
+
+PrometheusRule `public-edge-rules` plus cloudflared ServiceMonitor, public-path
+blackbox jobs (`public-site-apex` / `public-site-staging`), and OpenBao
+`root-run public-site-probes`. Runbook: [public-site-alerts.md](public-site-alerts.md).
+Prometheus has **no** internet egress; only blackbox_exporter is allowed TCP 443
+with RFC1918 except'd.
+
 ## Dashboards as code (ADR 0017 PR 2)
 
 Grafana 13.1.3 loads dashboards from ConfigMaps labelled `grafana_dashboard=1` via the

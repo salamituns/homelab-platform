@@ -9,7 +9,7 @@
 #   3. flag false opens the endpoints after a restart, and the legacy endpoint the bao
 #      CLI uses stays gated regardless (why the script speaks the new API);
 #   4. --dry-run of every subcommand (apply-config, root-run alertmanager, root-run oidc,
-#      root-run watchdog-url, root-run cloudflared-token) contacts nothing and prompts for nothing;
+#      root-run watchdog-url, root-run cloudflared-token, root-run public-site-probes) contacts nothing and prompts for nothing;
 #   5. the full root-run alertmanager flow through the LOCAL shell override
 #      (BREAKGLASS_SSH="bash -c"): hidden-share prompts fed over stdin, the root token
 #      minted/decoded/used/revoked, the alertmanager policy, role and secret written,
@@ -209,6 +209,12 @@ if grep -q "revocation" "$TD/dry5.out"; then
   ok "root-run cloudflared-token --dry-run prints the flow, prompted for nothing"
 else
   bad "root-run cloudflared-token --dry-run"; cat "$TD/dry5.out"
+fi
+"$SCRIPT" root-run --dry-run public-site-probes >"$TD/dry6.out" 2>&1
+if grep -q "revocation" "$TD/dry6.out"; then
+  ok "root-run public-site-probes --dry-run prints the flow, prompted for nothing"
+else
+  bad "root-run public-site-probes --dry-run"; cat "$TD/dry6.out"
 fi
 
 echo "== 5. root-run alertmanager through the local-shell override (the full flow)"
@@ -491,6 +497,70 @@ BAO_TOKEN="$RT" bao read -format=json auth/kubernetes/role/cloudflared \
 BAO_TOKEN="$RT" bao policy read cloudflared-read | grep -q 'secret/data/platform/cloudflared' \
   && [[ "$(BAO_TOKEN="$RT" bao policy read cloudflared-read | grep -c '^path')" == 1 ]] \
   && ok "policy cloudflared-read grants exactly the tunnel-token path"
+unset RT
+
+echo "== 14. root-run public-site-probes; bad shape dies before mint"
+PS_APEX='https://apex.example/'
+PS_STAGING='https://staging.example/'
+Fpsbad=$(feed_shares)
+printf '%s\n' 'http://apex.example/' 'https://staging.example/' >>"$Fpsbad"
+if run_flow "$TD/run-ps-bad.out" root-run public-site-probes <"$Fpsbad"; then
+  bad "http:// apex URL should have been rejected"
+else
+  ok "http:// apex URL rejected (nonzero exit)"
+fi
+if grep -q "minting the root token" "$TD/run-ps-bad.out"; then
+  bad "bad public-site URL minted a root token (should die locally first)"
+else
+  ok "bad public-site URL died before minting"
+fi
+Fpsip=$(feed_shares)
+printf '%s\n' 'https://192.168.1.1/' 'https://staging.example/' >>"$Fpsip"
+if run_flow "$TD/run-ps-ip.out" root-run public-site-probes <"$Fpsip"; then
+  bad "RFC1918 apex URL should have been rejected"
+elif grep -q "minting the root token" "$TD/run-ps-ip.out"; then
+  bad "RFC1918 apex URL minted a root token"
+else
+  ok "RFC1918 apex URL rejected before minting"
+fi
+feed_publicsite() {
+  local f; f=$(mktemp "$TD/answers.XXXXXX")
+  jq -r '.unseal_keys_b64[0,1]' "$TD/init.json" >"$f"
+  printf '%s\n' "$PS_APEX" "$PS_STAGING" >>"$f"
+  echo "$f"
+}
+Fps=$(feed_publicsite)
+if run_flow "$TD/run-ps.out" root-run public-site-probes <"$Fps"; then
+  ok "root-run public-site-probes exited 0"
+else
+  bad "root-run public-site-probes failed"; cat "$TD/run-ps.out"; exit 1
+fi
+grep -q "stored (apex ${#PS_APEX} chars, staging ${#PS_STAGING} chars)" "$TD/run-ps.out" && ok "prints stored (N chars) only"
+grep -q "public-site-probes setup complete" "$TD/run-ps.out" && ok "public-site-probes policy, role and secret written"
+grep -q "revocation verified" "$TD/run-ps.out" && ok "public-site-probes run revoked its token"
+if grep -qF "$PS_APEX" "$TD/run-ps.out" || grep -qF "$PS_STAGING" "$TD/run-ps.out"; then
+  bad "A PROBE URL WAS PRINTED INTO THE OUTPUT"
+else
+  ok "probe URLs never printed in the output"
+fi
+Fps2=$(feed_publicsite)
+run_flow "$TD/run-ps2.out" root-run public-site-probes <"$Fps2" || true
+if grep -q "already exists" "$TD/run-ps2.out"; then
+  ok "public-site-probes re-run skips the existing secret (no --overwrite)"
+else
+  bad "public-site-probes re-run did not skip"; cat "$TD/run-ps2.out"
+fi
+RT="$(jq -r .root_token "$TD/init.json")"
+BAO_TOKEN="$RT" bao read -format=json secret/data/monitoring/public-site-probes \
+  | jq -e --arg a "$PS_APEX" --arg s "$PS_STAGING" \
+    '.data.data | (keys == ["apex_url","staging_url"]) and .apex_url == $a and .staging_url == $s' >/dev/null \
+  && ok "secret/monitoring/public-site-probes holds both URLs of the first write"
+BAO_TOKEN="$RT" bao read -format=json auth/kubernetes/role/public-site-probes \
+  | jq -e '.data.bound_service_account_names == ["eso-public-site-probes"] and .data.bound_service_account_namespaces == ["monitoring"] and .data.token_policies == ["public-site-probes-read"]' >/dev/null \
+  && ok "role public-site-probes bound to monitoring/eso-public-site-probes"
+BAO_TOKEN="$RT" bao policy read public-site-probes-read | grep -q 'secret/data/monitoring/public-site-probes' \
+  && [[ "$(BAO_TOKEN="$RT" bao policy read public-site-probes-read | grep -c '^path')" == 1 ]] \
+  && ok "policy public-site-probes-read grants exactly the probe-URL path"
 unset RT
 
 echo ""
