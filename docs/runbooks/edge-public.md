@@ -102,9 +102,33 @@ kubectl -n nginx-gateway get svc public-gateway-nginx -o jsonpath='{.spec.type}{
 # Connector up (after the token Secret exists)
 kubectl -n edge-public get deploy,pods
 
-# Admin hosts still only on .240 — from a cloudflared pod, HTTPS to grafana/argocd
-# ClusterIPs must fail (no egress rule). Do not write those ClusterIPs into policies.
 ```
+
+### Isolation test (admin kubeconfig, run on master)
+
+```sh
+ssh tunsadmin@192.168.1.90 'bash -s' < scripts/edge-isolation-test.sh
+```
+
+Three short-lived probe pods wear the labels of `cloudflared` and `public-gateway-nginx`
+(so the same NetworkPolicies select them) plus one unlabelled probe, and every "blocked"
+check has an "allowed" control next to it. A probe that is not Running voids its checks
+instead of counting as blocked. The cloudflared look-alike tolerates the apps-pool taint:
+the real pods' required anti-affinity repels it from workernode1/2.
+
+**Recorded 2026-11-09: 22/22 PASS.** Tunnel: 2 connectors (workernode1, workernode2),
+4 QUIC connections each.
+
+| From | Allowed (controls) | Blocked |
+|---|---|---|
+| cloudflared | public-gateway Service + pod :80, internet :443, DNS | admin gateway pod and `.240`, argocd-server, grafana, apiserver `.90:6443`, OpenBao `.95`, router, internet on other ports |
+| public-gateway | NGF control plane :8443 | argocd-server, grafana, internal tenant (demo-staging), OpenBao, internet |
+| into public-gateway | cloudflared | unlabelled pod in `default`, the master host (LAN) |
+
+First runs caught two harness bugs before they could hide a result: the look-alike could
+not schedule (anti-affinity, above), and a rerun raced the previous run's terminating
+probes, so two "blocked" checks passed against pods that no longer existed. The failed
+controls exposed it; the script now waits for old probes and checks each probe is alive.
 
 ## Rollback
 
