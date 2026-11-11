@@ -1,0 +1,29 @@
+# Prometheus (monitoring namespace, label app.kubernetes.io/name=prometheus) scrapes
+# the web pods if a ServiceMonitor or PodMonitor is ever added; the tenant default-deny
+# would drop it. Port 3000 is the only port the app exposes, so a future /metrics route
+# on 3000 is what this admits. Today govgraph serves no /metrics: the public-path
+# blackbox probes (jobs govgraph-apex / govgraph-staging) are the request-health
+# signal, and nothing scrapes the web pods yet.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  name: govgraph-web-prometheus-ingress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: govgraph
+      app.kubernetes.io/component: web
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - { protocol: TCP, port: 3000 }

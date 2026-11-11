@@ -1,6 +1,8 @@
 # Refresh CronJob pods: HTTPS to the public internet (sources + Cloudflare purge API),
 # TCP 5432/6543 to Supabase, TCP 3000 to web pods in this namespace (ISR revalidate).
-# RFC1918 is except'd on the 443 rule so a mis-aimed packet cannot walk the LAN.
+# The private ranges are except'd on the public rules so a mis-aimed packet cannot
+# walk the LAN or the Tailscale/CGNAT space: RFC1918, 100.64.0.0/10 (CGNAT/Tailscale)
+# and 169.254.0.0/16 (link-local).
 # 10.0.0.0/8 already covers the pod (10.244.0.0/16) and Service (10.96.0.0/12)
 # ranges; do not list those CIDRs again (overlapping except is rejected).
 apiVersion: networking.k8s.io/v1
@@ -24,6 +26,8 @@ spec:
               - 10.0.0.0/8
               - 172.16.0.0/12
               - 192.168.0.0/16
+              - 100.64.0.0/10
+              - 169.254.0.0/16
       ports:
         - { protocol: TCP, port: 443 }
     - to:
@@ -33,6 +37,8 @@ spec:
               - 10.0.0.0/8
               - 172.16.0.0/12
               - 192.168.0.0/16
+              - 100.64.0.0/10
+              - 169.254.0.0/16
       ports:
         - { protocol: TCP, port: 5432 }
         - { protocol: TCP, port: 6543 }

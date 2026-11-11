@@ -7,3 +7,4 @@ resources:
   - netpol-web-postgres-egress.yaml
   - netpol-refresh-egress.yaml
   - netpol-web-refresh-ingress.yaml
+  - netpol-web-prometheus-ingress.yaml
