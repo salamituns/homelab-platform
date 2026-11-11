@@ -72,8 +72,14 @@ purge clears the whole zone, so a staging refresh would also drop prod's edge ca
 If staging also points at the prod Supabase database, it would write the same
 snapshot twice a day. So the staging CronJob ships with `suspend: true`, and there
 is no `apps/govgraph/staging/cloudflare` object. The staging refresh ExternalSecret
-reads only `apps/govgraph/staging/app`. The program still requires the Cloudflare
-keys before it persists, so a hand trigger fails closed before the purge. Only prod
+reads only `apps/govgraph/staging/app`, and the staging CronJob sets
+`REFRESH_PURGE=skip` (app PR #78). A hand trigger
+(`kubectl create job --from=cronjob/govgraph-refresh`) therefore **runs the whole
+sequence and does write a snapshot** to staging's `DATABASE_URL`, then skips only the
+purge. If staging's `DATABASE_URL` is the prod Supabase database, a hand trigger is
+a real refresh of prod data (but never a purge); use a separate staging database if
+that matters. Until the staging image contains PR #78, `REFRESH_PURGE` is ignored and a
+hand trigger fails at `CF_ZONE_ID is required` before persisting. Only prod
 refreshes on schedule. There is no `WARM_BASE_URL` in either environment.
 
 Gitea group `govgraph-dev` must exist; the tenant RoleBinding subjects that group.
@@ -329,7 +335,7 @@ Order inside `refresh.mjs`: persist, revalidate every web pod, wait
 (ADR Rev D condition 2), **then** warm the pods. Purging earlier lets the edge
 re-cache stale HTML. Warm-up is not an edge refill and not a GET of the public
 hostname. After the purge the job GETs `/ng` and the versioned graph URL found in
-that page on **each pod** directly (the A records captured from `web-headless`).
+that page on **each pod** directly (the pod IPs from the final successful revalidation round; DNS is re-resolved for every round and retry).
 That fills pod caches. The Cloudflare edge is filled later by real client misses.
 A failed persist, DNS lookup, revalidation round, or purge skips warm-up and fails
 the job. A warm-up failure is logged (`pod warmups failed after purge; refresh

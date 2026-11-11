@@ -70,18 +70,22 @@ patches:
       - op: replace
         path: /spec/hard/services
         value: "6"
+      # Quota fit (pod sizes live in apps-deploy apps/govgraph): a web rollout surge
+      # (2 web pods) plus one refresh pod = requests 700m / 1152Mi, limits 1.7 cpu / 3840Mi.
+      # Headroom over that covers a third web pod still Terminating (preStop + grace),
+      # which ResourceQuota keeps counting: requests 1.2 cpu / 2Gi, limits 2.5 cpu / 4.5Gi.
       - op: replace
         path: /spec/hard/requests.cpu
-        value: "1"
+        value: 1200m
       - op: replace
         path: /spec/hard/requests.memory
-        value: 1536Mi
+        value: 2Gi
       - op: replace
         path: /spec/hard/limits.cpu
-        value: "2"
+        value: 2500m
       - op: replace
         path: /spec/hard/limits.memory
-        value: 3840Mi
+        value: 4608Mi
   - target:
       version: v1
       kind: LimitRange
