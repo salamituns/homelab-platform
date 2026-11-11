@@ -222,6 +222,10 @@ metadata:
   name: web-headless
 spec:
   clusterIP: None
+  # Include NotReady pods: revalidation must reach them too — a pod that is still
+  # starting up has an unbusted ISR cache and would serve stale HTML once it turns
+  # Ready. Without this, headless DNS omits it and refresh.mjs never revalidates it.
+  publishNotReadyAddresses: true
   ports:
     - name: http
       port: 3000
@@ -246,6 +250,7 @@ spec:
   schedule: "0 4 * * *"
   timeZone: Africa/Lagos
   concurrencyPolicy: Forbid
+  suspend: false  # staging overlay: true — staging refreshes by hand only (step 1)
   jobTemplate:
     spec:
       template:
@@ -271,13 +276,22 @@ spec:
                   value: web-headless
                 - name: REVALIDATE_PORT
                   value: "3000"
+                # Prod only. After a successful purge, refresh.mjs warms the public
+                # origin — GETs WARM_BASE_URL for /ng plus the top entity pages, low
+                # concurrency — so the pod caches and the nearest edge refill after
+                # the daily cold start. Optional: unset, the run skips warm-up with a
+                # log line. Staging does not purge, so it does not set this.
+                - name: WARM_BASE_URL
+                  value: https://<govgraph-host>  # prod; omit in the staging overlay
               securityContext:
                 readOnlyRootFilesystem: true
                 allowPrivilegeEscalation: false
 ```
 
 Order inside `refresh.mjs`: revalidate every web pod, **then** purge Cloudflare
-(ADR Rev D condition 2). Purging first lets the edge re-cache stale HTML.
+(ADR Rev D condition 2). Purging first lets the edge re-cache stale HTML. Prod then
+**warms up** (WARM_BASE_URL): re-GET the public origin so the pods and the nearest
+edge re-cache instead of leaving the first real visitor to eat the cold cache.
 
 #### HTTPRoute (hostnames only in apps-deploy)
 
@@ -311,8 +325,11 @@ Do **not** change public DNS until all six are true:
 1. **Edge rules live.** Cache rules for HTML and the graph data (cache key ignores
    unknown query strings), Bot Fight Mode, AI-crawler blocking, and one rate-limit
    rule on uncacheable paths.
-2. **Refresh ordering.** CronJob revalidates every web pod, then purges. Purge token
-   in OpenBao (`CF_API_TOKEN`).
+2. **Refresh ordering.** CronJob revalidates every web pod, then purges, then (prod)
+   warms up. Purge token in OpenBao (`CF_API_TOKEN`). The Cloudflare zone holds
+   **govgraph hostnames only** — the token's purge is zone-wide, so keep it that
+   way: as long as no other app shares the zone, a purge can never drop someone
+   else's edge cache.
 3. **Split egress.** Web = DNS + TCP 5432/6543 only (the app URL uses the transaction pooler :6543). Refresh = HTTPS + 5432/6543 + web:3000.
    Proven by the NetworkPolicies in this repo.
 4. **Build without database credentials.** Image build does not receive
