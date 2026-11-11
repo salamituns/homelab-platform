@@ -24,21 +24,39 @@ Caps in the overlays (sum of requests is the scheduler truth):
 
 | Env | pods | requests | limits | LimitRange default / max |
 |---|---|---|---|---|
-| staging | 6 | 500m / 768Mi | 1 / 1536Mi | 250m/512Mi, max 1/768Mi |
-| prod | 8 | 1 / 1536Mi | 2 / 3Gi | 500m/768Mi, max 1/1536Mi |
+| staging | 6 | 500m / 768Mi | 1 / 2Gi | 250m/512Mi, max 1/768Mi |
+| prod | 8 | 1 / 1536Mi | 2 / 3840Mi | 500m/768Mi, max 1/1536Mi |
 
-Together: **1.5 CPU / 2.25 Gi requests**, **3 CPU / 4.5 Gi limits**. A cache-busting
-flood can only consume govgraph's quota; `personal-site` and DaemonSets keep their
-share. Raise in the overlay if the app needs more; do not remove the quota.
+**Why limits.memory is that size** — a rollout surge of `web` (replicas 1 + surge 1) plus
+one refresh job pod must fit in the same namespace:
+
+| Env | web ×2 at the LimitRange **max** | refresh at the LimitRange **default** | limits.memory |
+|---|---|---|---|
+| staging | 2 × 768Mi = 1536Mi | 512Mi | 1536 + 512 = **2048Mi = 2Gi** |
+| prod | 2 × 1536Mi = 3072Mi | 768Mi | 3072 + 768 = **3840Mi** |
+
+(The first draft had 1536Mi / 3Gi: exactly 2 × max with nothing left, so the refresh pod
+could not be admitted during a surge.) Requests fit at the LimitRange defaultRequest:
+staging 3 × 256Mi = 768Mi, prod 3 × 384Mi = 1152Mi ≤ 1536Mi. That assumes apps-deploy
+does **not** set request = limit; if it ever does, raise `requests.memory` to match the
+limits line.
+
+Together: **1.5 CPU / 2.25 Gi requests**, **3 CPU / 5.75 Gi limits**. Limits are ceilings,
+not reservations — a cache-busting flood can still only consume govgraph's quota, and the
+kubelet's node-pressure eviction is the backstop; `personal-site` and DaemonSets keep
+their requests. Raise in the overlay if the app needs more; do not remove the quota.
 
 ## Split egress
 
 kube-network-policies v1.1.2 is **post-DNAT** and cannot match a hostname, so
-Supabase is an IP-wide TCP `:5432` + `:6543` allow with RFC1918 except'd (LAN Postgres stays
-closed). Web pods have no `:443`. Refresh pods get `:443` except RFC1918 (and
-therefore except the cluster pod/Service ranges under `10.0.0.0/8`), `:5432`/`:6543` the same
-way, and TCP 3000 to web pods. Public-gateway ingress is the kit policy, patched to
-`component=web` port 3000, plus refresh→web `:3000`.
+Supabase is an IP-wide TCP `:5432` + `:6543` allow with the private ranges except'd
+(RFC1918, plus `100.64.0.0/10` CGNAT/Tailscale and `169.254.0.0/16` link-local — LAN
+Postgres stays closed). Web pods have no `:443`. Refresh pods get `:443` except the
+private ranges (and therefore except the cluster pod/Service ranges under `10.0.0.0/8`),
+`:5432`/`:6543` the same way, and TCP 3000 to web pods. Public-gateway ingress is the kit
+policy, patched to `component=web` port 3000, plus refresh→web `:3000`, plus Prometheus
+(monitoring namespace) → web `:3000` for the day the app serves `/metrics`; today it does
+not, so nothing scrapes the web pods.
 
 ## Owner steps (in order)
 
@@ -79,6 +97,21 @@ on schedule.
 
 Gitea group `govgraph-dev` must exist; the tenant RoleBinding subjects that group.
 
+**Probe targets (monitoring, not tenant paths).** The request-health alerts probe the
+public paths, like personal-site's. The two govgraph URLs live in the existing
+`monitoring/public-site-probes` KV object (keys `govgraph_apex_url`,
+`govgraph_staging_url`) so the SecretStore, ServiceAccount and OpenBao role are reused.
+Write them with the raw breakglass mode **before the platform PR merges** — ESO renders
+all four target files from that one object, so until both keys exist the probe-targets
+ExternalSecret cannot sync; the git bootstrap keeps `[]` for govgraph, so its alerts stay
+silent, not wrong:
+
+```sh
+scripts/openbao-breakglass.sh root-run -- bao kv patch secret/monitoring/public-site-probes \
+  govgraph_apex_url='https://<govgraph-host>/' \
+  govgraph_staging_url='https://<govgraph-staging-host>/'
+```
+
 ### 2. Platform PR (this repo)
 
 Already the `tenant-govgraph` change: namespaces, quota, NetworkPolicies, ESO,
@@ -94,7 +127,12 @@ next `playbooks/jenkins.yml` run):
 | `private/govgraph-promoter-watchdog-url` | `govgraph-promoter-watchdog-url` (healthchecks ping; period 15m; **not** the personal-site URL) |
 
 `push-govgraph` is created by the nexus role (`/etc/nexus/secrets/push-govgraph`).
-Re-run `playbooks/jenkins.yml` after the files exist.
+Re-run `playbooks/jenkins.yml` after the files exist. The job is created only when both
+credentials are present (the role skips it and says why otherwise).
+
+The promoter verifies the keyless identity of the GitHub workflow **`lab-release.yml` on
+`main`** (`GHCR_WORKFLOW`, default `lab-release.yml` — the govgraph release workflow must
+keep that file name and branch; see [promoter.md](promoter.md)).
 
 ### 3. apps-deploy PR (private repo)
 
@@ -281,9 +319,10 @@ Do **not** change public DNS until all six are true:
    `DATABASE_URL`.
 5. **Tenant quota.** Caps above are synced on `govgraph-staging` / `govgraph-prod`.
 6. **Outside check and alerts.** Outside uptime check (D8). PrometheusRule
-   `govgraph-rules` covers 5xx ratio, CronJob last success >26 h, and web pods not
-   ready. Edge cache-hit ≥90 % and origin-egress daily threshold alerts are still
-   owner follow-up (they need Cloudflare analytics, not in-cluster scrapes).
+   `govgraph-rules` covers the public-path probes (apex + staging — that is where a 5xx
+   shows), CronJob no success within 26h (including a CronJob that has never succeeded),
+   and web pods not ready. Edge cache-hit ≥90 % and origin-egress daily threshold alerts are
+   still owner follow-up (they need Cloudflare analytics, not in-cluster scrapes).
 
 Also configure Cloudflare Tunnel public hostname origin
 `http://public-gateway-nginx.nginx-gateway.svc:80` for `<govgraph-host>` and
@@ -310,10 +349,19 @@ as the rollback target (D9) until the account is unblocked and a week is green.
 PrometheusRule `govgraph-rules` (`k8s/platform/monitoring/manifests/govgraph-prometheusrule.yaml`).
 promtool tests: `k8s/platform/monitoring/rules/govgraph.test.yaml`.
 
+**Why probes, not a 5xx ratio:** govgraph serves no `/metrics` and nothing scrapes the
+NGF data plane (no ServiceMonitor), so an `http_requests_total`-style ratio has no
+source. The request-health signal is the public-path blackbox probe — personal-site's
+pattern (jobs `govgraph-apex` / `govgraph-staging` in `k8s/platform/monitoring/values.yaml`,
+targets file_sd from OpenBao, owner step above). The `http_2xx_public` module only accepts
+200, so a 5xx fails the probe; a NetworkPolicy admitting Prometheus to the web pods on
+`:3000` is already in the netpol component for the day the app serves `/metrics`.
+
 | Alert | Meaning |
 |---|---|
-| `GovgraphProd5xxRatioHigh` | >5 % 5xx in `govgraph-prod` for 10m (`http_requests_total`; silent until a ServiceMonitor exists) |
-| `GovgraphRefreshStale` | `govgraph-refresh` last success older than 26h |
+| `GovgraphApexDown` | public-path probe of `<govgraph-host>` failing for 2m (job `govgraph-apex`, expects 200; any 5xx fails it) |
+| `GovgraphStagingDown` | public-path probe of `<govgraph-staging-host>` failing for 2m (job `govgraph-staging`, expects 302 behind Cloudflare Access) |
+| `GovgraphRefreshStale` | `govgraph-refresh` has not succeeded within 26h — last success older than 26h **or** the CronJob has existed 26h without ever succeeding (`kube_cronjob_created` + `absent()`) |
 | `GovgraphProdUnavailable` | Deployment `web` available replicas < 1 for 2m |
 
 Promoter paging is the healthchecks check behind `govgraph-promoter-watchdog-url`,

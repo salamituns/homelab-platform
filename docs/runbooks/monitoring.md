@@ -90,11 +90,12 @@ with RFC1918 except'd.
 
 ## Govgraph tenant (Phase 2)
 
-PrometheusRule `govgraph-rules`: 5xx ratio in `govgraph-prod`, CronJob
-`govgraph-refresh` last success older than 26h, Deployment `web` available
-replicas. Runbook: [govgraph.md](govgraph.md). Cache-hit / origin-egress alerts
-from ADR 0019 Rev D condition 6 are not in this rule file (they need Cloudflare
-analytics).
+PrometheusRule `govgraph-rules`: public-path probe failures (jobs `govgraph-apex` /
+`govgraph-staging`, file_sd targets like personal-site's — govgraph serves no `/metrics`,
+so a probe is where a 5xx shows), CronJob `govgraph-refresh` with no success within 26h
+(including never-succeeded), Deployment `web` available replicas. Runbook:
+[govgraph.md](govgraph.md). Cache-hit / origin-egress alerts from ADR 0019 Rev D
+condition 6 are not in this rule file (they need Cloudflare analytics).
 
 ## Dashboards as code (ADR 0017 PR 2)
 
