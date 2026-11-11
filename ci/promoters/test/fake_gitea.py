@@ -23,8 +23,9 @@ class H(BaseHTTPRequestHandler):
         n = int(self.headers.get("Content-Length", 0))
         req = json.loads(self.rfile.read(n))
         mode = int(open(f"{W}/mode").read().strip())
+        # One line per POST: "<mode> <payload-json>" so tests can check head/title/body.
         with open(f"{W}/posts", "a") as f:
-            f.write(f"{mode} {req['head']}\n")
+            f.write(f"{mode} {json.dumps(req)}\n")
         if mode == 201:
             prs = json.load(open(f"{W}/prs.json"))
             prs.append({"number": len(prs) + 1, "head": {"ref": req["head"]}})

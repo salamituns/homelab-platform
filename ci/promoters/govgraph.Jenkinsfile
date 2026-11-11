@@ -1,7 +1,8 @@
 // GHCR -> lab promoter for govgraph (ADR 0019 D4, Phase 2).
 //
 // Same contract as personal-site-promoter: timer on the docker agent, promote-ghcr.sh
-// does the work. Per-app env: GHCR_IMAGE, DEST_IMAGE, overlay path, branch prefix.
+// does the work. Per-app env: GHCR_IMAGE, GHCR_WORKFLOW, DEST_IMAGE, overlay path,
+// branch prefix, PROMOTE_APP (IMAGE_NAME is derived from DEST_IMAGE by the script).
 // The GitHub source repo name arrives from govgraph-source-repo and is never echoed.
 pipeline {
   agent { label 'docker' }
@@ -20,18 +21,26 @@ pipeline {
           string(credentialsId: 'cosign-password', variable: 'COSIGN_PASS'),
           usernamePassword(credentialsId: 'gitea-ci-promote', usernameVariable: 'PROMOTE_USER', passwordVariable: 'PROMOTE_TOKEN'),
         ]) {
+          // Jenkins runs sh steps with /bin/sh (dash on the agent): POSIX only, no <<< or [[ ]].
           sh '''
             set -eu
+            # Registry auth for crane / syft / cosign / trivy lives in a per-build
+            # DOCKER_CONFIG, deleted on exit, so the Nexus push password never outlives
+            # the build in the agent's ~/.docker/config.json.
             DOCKER_CONFIG="$(mktemp -d "${WORKSPACE_TMP:-/tmp}/docker-config.XXXXXX")"
             export DOCKER_CONFIG
             trap 'rm -rf "$DOCKER_CONFIG"' EXIT
             printf '%s' "$NEXUS_PASSWORD" | docker login registry.home.arpa -u "$NEXUS_USER" --password-stdin >/dev/null
-            SOURCE_REPO="$(printf '%s' "$SOURCE_REPO" | tr -d ' \t\r\n')"
+            # The credential is read from a one-line file and keeps its trailing newline.
+            SOURCE_REPO="$(printf '%s' "$SOURCE_REPO" | tr -d ' \\t\\r\\n')"
             export SOURCE_REPO
+            # The package lab-release.yml pushes: ghcr.io/<owner>/govgraph.
             export GHCR_IMAGE=govgraph
+            # The workflow whose keyless identity the promoter verifies, on refs/heads/main.
+            export GHCR_WORKFLOW=lab-release.yml
+            # IMAGE_NAME defaults to DEST_IMAGE in the script; no separate export.
             export DEST_IMAGE=registry.home.arpa/govgraph/web
             export OVERLAY_DIR=apps/govgraph/overlays/staging
-            export IMAGE_NAME=registry.home.arpa/govgraph/web
             export PROMOTE_APP=govgraph
             export PROMOTE_BRANCH_PREFIX=govgraph
             export COSIGN_KEY="$COSIGN_KEY_FILE" COSIGN_PASSWORD="$COSIGN_PASS"

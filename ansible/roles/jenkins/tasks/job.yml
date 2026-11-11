@@ -48,6 +48,19 @@
   register: jenkins_job_xml_govgraph
   when: jenkins_has_gitea_token | bool
 
+- name: Warn when the govgraph promoter job is skipped because its credentials are missing
+  # Without these the job's withCredentials would fail every build, so the apply loop
+  # below never creates it. The secrets tasks already warn per credential; this names
+  # the consequence for the job.
+  ansible.builtin.debug:
+    msg: >-
+      Skipping the govgraph-promoter job: govgraph-source-repo (gitignored
+      private/govgraph-source-repo) and/or nexus-push-govgraph
+      (/etc/nexus/secrets/push-govgraph on nexus) are missing.
+  when:
+    - jenkins_has_gitea_token | bool
+    - not (jenkins_has_govgraph_source_repo | bool and jenkins_has_nexus_push_govgraph | bool)
+
 # curl reads the admin login from stdin (-K -), so the password is never in a process list.
 # Password logins need a CSRF crumb from the same session, hence the cookie jar.
 # A job is POSTed only when it does not exist yet or its XML changed; otherwise "unchanged".
@@ -84,7 +97,9 @@
       enabled: true
     - name: govgraph-promoter
       changed: "{{ jenkins_job_xml_govgraph is changed }}"
-      enabled: true
+      # Gate on the govgraph credential facts the secrets tasks compute; personal-site
+      # stays enabled unconditionally (its credentials are already live in the lab).
+      enabled: "{{ jenkins_has_govgraph_source_repo | bool and jenkins_has_nexus_push_govgraph | bool }}"
   when:
     - not ansible_check_mode
     - jenkins_has_gitea_token | bool
