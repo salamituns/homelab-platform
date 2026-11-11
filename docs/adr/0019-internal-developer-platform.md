@@ -1,10 +1,11 @@
 # ADR 0019: Internal developer platform — hosting real apps from the lab
 
 - Status: **Accepted on merge** (owner answered the open questions 2026-11-07; see Rev B).
-  Phase 1 gate passed 2026-11-09 (see Rev C and the Phase 1 gate evidence)
+  Phase 1 gate passed 2026-11-09 (see Rev C and the Phase 1 gate evidence).
+  Phase 2 (govgraph) hosting decision recorded 2026-11-11 (see Rev D)
 - Date: 2026-11-07
 - Owner: owner
-- Last reviewed: 9 Nov 2026
+- Last reviewed: 11 Nov 2026
 - Next review: after each phase gate (next: Phase 2, govgraph)
 
 ## Revision history
@@ -14,6 +15,7 @@
 | A | 7 Nov 2026 | Initial proposal from the three app repos, the live cluster and the 7 Nov hardening state |
 | B | 7 Nov 2026 | Owner decisions: protexa prod on a managed host (lab = pipeline + staging; protexa is demo/pilot, no live customers); govgraph DB is Supabase Postgres (moved from Neon by the owner); move both Vercel-DNS domains to Cloudflare |
 | C | 9 Nov 2026 | Phase 1 (personal site) done: cut-over record and gate evidence added; runbooks [edge-public.md](../runbooks/edge-public.md) and [promoter.md](../runbooks/promoter.md) |
+| D | 11 Nov 2026 | Phase 2 (govgraph) hosting decision: why govgraph exhausted Vercel's free tier, the app-side fix, traffic-spike behaviour behind Cloudflare, lab vs Vercel trade-offs, and the conditions before DNS cut-over. Corrects Phase 2 egress: web pods reach Supabase Postgres only (`:5432`/`:6543`); the refresh runs as a separate CronJob with HTTPS, Postgres and web-pod `:3000` access |
 
 ## Scope
 
@@ -185,7 +187,7 @@ but idle as the documented fallback for each app until its first 30 days on the 
 |---|---|---|
 | **0. Platform prerequisites** | `workernode3` (D2); `nexus-pull` via ESO everywhere (closes ROADMAP item); Nexus `platform` repo + per-app repos/users; tenant kit (D1); `apps` AppProject + ApplicationSet (D5); OpenBao per-app paths + roles (D6) | A dummy app onboarded to `demo-staging` with one PR each; cross-tenant secret read denied; cross-namespace traffic denied |
 | **1. personal-site** | static profile; staging behind Access; `edge-public` + `public-gateway` + tunnel (D7); outside uptime check; cut DNS from Vercel | Public URL served from the lab; admin hostnames unreachable through the tunnel (tested); WAF on; 7 days green. **Done 2026-11-09** — see the Phase 1 gate evidence below |
-| **2. govgraph** | `next` profile; secrets from OpenBao; Supabase Postgres egress (session `:5432`); cron → `CronJob` with `CRON_SECRET`; DNS to Cloudflare | Page renders with live data; cron ran; SLO + logs per tenant; 7 days green |
+| **2. govgraph** | Edge rules first (cache, bots, rate limit; see Rev D); `next` profile; secrets from OpenBao; web pods egress to Supabase Postgres only (`:5432` session or `:6543` transaction pooler; the app uses `:6543` with `prepare: false`); refresh as its own `CronJob` with `CRON_SECRET`, HTTPS, Postgres and web-pod `:3000` access; revalidate every pod, then purge Cloudflare, then warm the top pages; staging refresh suspended; CPU/memory quota per govgraph namespace, staging + prod together sized to the node; DNS to Cloudflare | Page renders with live data; cron ran and the purge followed; edge cache hit ratio ≥ 90 % on HTML and graph data, measured over 7 days (the post-refresh cold start is included); SLO + logs per tenant; 7 days green |
 | **3. protexa** | staging in the lab behind Access (demo data only); prod pipeline deploys to the managed host; `VITE_AXXESS_API_KEY` moved server-side first; kletraq DNS to Cloudflare | Staging behind Access, both brands by host; managed prod deployed from the signed pipeline |
 | **4. Platform drills** | tunnel down, apps node loss, per-tenant secret rotation, onboard a 4th app in < 1 h | Postmortems like Week 8 |
 
@@ -224,6 +226,101 @@ The personal site is live from the lab. Full records: [edge-public.md](../runboo
 - Before cut-over the site on Vercel returned 402 DEPLOYMENT_DISABLED, so the cut-over restored it.
 - The gate's 7-days-green window runs from the 2026-11-09 cut-over to 2026-11-16; the checks above
   are the day-zero evidence.
+
+## Phase 2 hosting decision: govgraph (11 Nov 2026, Rev D)
+
+### Why govgraph exhausted Vercel's free tier
+
+Vercel reported 27.84 GB of origin transfer in one cycle against the free tier's 10 GB, and the
+account is now blocked (no builds, no deployments). The cause was in the app, not the platform:
+
+- The homepage read `searchParams`, which made it dynamic: every visit rendered on a function and
+  sent about 1.56 MB of HTML that was never cached.
+- The root layout embedded the whole graph (976 nodes, 1,704 edges, about 1.2 MB of JSON) in every
+  page, so entity pages were about 1.57 MB each, and ISR re-rendered them every 6 hours as well as
+  after the daily refresh.
+
+Fixed in the app repo (PR #75, merged 11 Nov 2026): pages are static or ISR with a daily backstop;
+the homepage reads `layer`/`days` on the client; the graph is served once from a content-addressed,
+immutable URL (`/api/graph/<digest16>`, `max-age=31536000, immutable`) that browsers and the CDN
+keep until the data changes; a failed database read throws, so Next keeps the last good page.
+Measured: homepage HTML 1.56 MB → 75 KB, entity HTML 1.57 MB → 92 KB, graph about 239 KB gzip,
+downloaded once per data version. The repo carries `scripts/check-page-cache.mjs` (cache headers,
+page budget, no embedded graph) and `scripts/check-regeneration-failure.mjs` (outage keeps the
+last good page) as regression checks.
+
+### How the lab behaves under a traffic spike
+
+```
+visitor -> Cloudflare edge --HIT--> served by Cloudflare (lab not involved)
+                           --MISS-> tunnel -> public-gateway -> govgraph pods -> Supabase
+                                    (home upload link, apps-node CPU)
+```
+
+| Spike | Reaches the lab | Expected outcome |
+|---|---|---|
+| Real readers (news story, viral post) | About one fetch per page per edge location (and per web pod, since each pod caches separately) per cache lifetime | Absorbed by the edge |
+| Crawlers walking every entity page | Each unique page once per edge location and per pod, then cached; about 1,000 pages × 92 KB is under 100 MB per pass, multiplied by locations and pods, and reset by each daily purge | Absorbed, at a few hundred MB a day at most |
+| Cache-busting traffic (random query strings, random paths such as unknown entity slugs or `/api/graph/<random>`) | Every request | The real risk: bounded by the home uplink, Node CPU and Supabase. Mitigations: cache keys that ignore unknown query strings, short edge caching of 404s, Bot Fight Mode, AI-crawler blocking and one rate-limit rule. Random-path floods are bounded only by the rate limit and the quota |
+
+**Daily cold start.** The 04:00 Africa/Lagos refresh invalidates every pod's cache and purges the
+whole Cloudflare zone at the same moment, so for a few minutes every page is a miss everywhere and
+all pods regenerate from Supabase together. This is accepted because of the hour (low traffic in
+Nigeria), and the refresh job warms the most-visited pages (`/ng` and the top entity pages) right
+after the purge. A spike that lands in that window is not absorbed by the edge. The purge is
+zone-wide (`purge_everything`), so the zone must hold govgraph hostnames only, and the staging
+refresh stays suspended (it shares the zone, see `docs/runbooks/govgraph.md`).
+
+Vercel scales out and bills (or blocks) under load. The lab has fixed capacity: under overload it
+slows or drops requests but never produces a bill. During an origin outage the edge serves only
+what it still holds: pages cached since the last purge. Cloudflare free serves stale content only
+in limited cases, so availability during an outage is best effort; right after the daily purge it
+is close to none. `stale-if-error` on HTML responses and Always Online are follow-ups for the app,
+not guarantees.
+
+### Options
+
+| | Vercel (free once unblocked, or Pro) | Lab behind Cloudflare (chosen) |
+|---|---|---|
+| Cost | Metered; a spike or bad build blocks the account (as happened). After the fix the same traffic would likely fit the free tier, but that is an estimate, not measured | No usage bill; Cloudflare free does not meter bandwidth |
+| Scaling | Automatic | Fixed; the edge cache does the scaling |
+| Availability | Provider-run | One host on a home connection (D9); uncached requests fail during power or ISP outages, and little is cached in the first minutes after each daily purge |
+| Operations | Revalidation and CDN purge are built in | We own the order: revalidate every pod, then purge the edge |
+| Isolation | Separate from the lab | Shares `workernode3` with other tenants; needs a quota so a spike cannot starve them |
+| Security | Provider's surface | Home network becomes internet-facing for app traffic (tunnel, no open ports, NetworkPolicy, read-only root filesystem) |
+| Learning value | Low | High: caching, edge rules, secrets, CronJobs, per-tenant SLOs |
+
+**Decision:** host govgraph in the lab behind Cloudflare. With the app fix, a spike costs the lab less
+than it cost Vercel, and the move is the purpose of Phase 2. Vercel stays configured as the fallback
+(D9) once the account is unblocked.
+
+### Conditions before DNS cut-over
+
+1. **Edge rules are live before traffic moves.** Cache rules for HTML and the graph data (cache key
+   ignores unknown query strings), Bot Fight Mode, AI-crawler blocking, and one rate-limit rule on
+   uncacheable paths. Without them the lab takes every request.
+2. **Refresh ordering.** The refresh `CronJob` writes the snapshot, revalidates every web pod (each
+   pod has its own cache in an `emptyDir`; the revalidation Service sets `publishNotReadyAddresses`
+   so a briefly NotReady pod is not skipped), waits until each pod confirms the invalidation is
+   durable, then purges Cloudflare (`purge_everything` on a govgraph-only zone), then warms the top
+   pages. Purging first would let the edge re-cache stale pages. The purge token lives in OpenBao.
+   Only prod refreshes on schedule; staging is suspended because it shares the zone.
+3. **Split egress.** Web pods reach Supabase Postgres only (`:5432`/`:6543`, IP-wide with private,
+   CGNAT and link-local ranges excepted, since the CNI cannot match hostnames). The refresh pod gets
+   HTTPS for its sources and the Cloudflare API, Postgres, and `:3000` to the web pods, and the web
+   pods admit the refresh pod on `:3000`.
+4. **Build without database credentials.** CI builds the image without `DATABASE_URL`, and pages are
+   generated on first request in the cluster. A build that can reach production data, or fails when
+   it cannot, is avoided. This lands with the app's lab-container change (app repo PR #76), not PR
+   #75; until it is merged, an image from the app's `main` cannot meet conditions 2 and 4.
+5. **Tenant quota.** A ResourceQuota on each govgraph namespace (`govgraph-staging`,
+   `govgraph-prod`), with the two together sized to leave `workernode3`'s other tenants their share,
+   so an uncached flood degrades govgraph only.
+6. **Outside check and alerts.** An outside uptime check (D8), an alert on edge cache hit ratio
+   below 90 %, and an alert on origin egress above a daily threshold.
+
+Residual risk: some residential ISP terms forbid hosting servers. The tunnel with edge-served
+traffic keeps the origin's footprint small; the owner checks the ISP's terms.
 
 ## Consequences
 
