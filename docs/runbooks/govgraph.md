@@ -171,10 +171,16 @@ spec:
       securityContext:
         runAsNonRoot: true
         runAsUser: 1001
+        runAsGroup: 1001
         fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: web
           image: registry.home.arpa/govgraph/web  # digest-pinned in the overlay
+          # start.mjs empties both cache mounts, then loads server.js, so a restart
+          # never serves entries whose in-memory invalidation tags were lost.
+          command: ["node", "start.mjs"]
           ports:
             - containerPort: 3000
               name: http
@@ -184,9 +190,13 @@ spec:
           securityContext:
             readOnlyRootFilesystem: true
             allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           volumeMounts:
             - name: next-cache
               mountPath: /app/.next/cache
+            - name: route-cache            # Next 16.4.6 ISR output; never mount over .next/server/app
+              mountPath: /app/.next/server/route-cache
           readinessProbe:
             httpGet:
               path: /healthz
@@ -197,7 +207,11 @@ spec:
               port: http
       volumes:
         - name: next-cache
-          emptyDir: {}
+          emptyDir:
+            sizeLimit: 128Mi
+        - name: route-cache
+          emptyDir:
+            sizeLimit: 1Gi
 ```
 
 #### Service + headless Service
@@ -236,7 +250,7 @@ spec:
 ```
 
 Refresh uses `REVALIDATE_HOST=web-headless` (or `web-headless.<ns>.svc`) and
-`REVALIDATE_PORT=3000` so every pod's `emptyDir` ISR cache is busted. Put those two
+`REVALIDATE_PORT=3000` so every pod's `emptyDir` ISR cache (`.next/cache` + `.next/server/route-cache`) is busted. Put those two
 in the CronJob env; do not put them in OpenBao.
 
 #### CronJob (refresh)
@@ -263,7 +277,10 @@ spec:
           securityContext:
             runAsNonRoot: true
             runAsUser: 1001
+            runAsGroup: 1001
             fsGroup: 1001
+            seccompProfile:
+              type: RuntimeDefault
           containers:
             - name: refresh
               image: registry.home.arpa/govgraph/web  # same digest as web
@@ -286,6 +303,8 @@ spec:
               securityContext:
                 readOnlyRootFilesystem: true
                 allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
 ```
 
 Order inside `refresh.mjs`: revalidate every web pod, **then** purge Cloudflare
