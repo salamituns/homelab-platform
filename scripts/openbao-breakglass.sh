@@ -12,9 +12,9 @@
 # and decodes client-side (unpadded-base64 XOR with the OTP, the same math the CLI does).
 #
 # The mint runs ON sectools; the root token never reaches the Mac or any terminal output.
-# Unseal shares, the SMTP app password, the OIDC client credentials, and the
-# healthchecks.io ping URL are read with `read -rs` locally and travel to sectools
-# over ssh stdin (never argv, never echoed). The ping URL is a SECRET.
+# Unseal shares, the SMTP app password, the OIDC client credentials, the healthchecks.io
+# ping URL, and the govgraph database/Cloudflare values are read with `read -rs` locally
+# and travel to sectools over ssh stdin (never argv, never echoed). The ping URL is a SECRET.
 #
 # Usage (owner, from the Mac):
 #   scripts/openbao-breakglass.sh apply-config            # once: playbook + unseal
@@ -26,8 +26,10 @@
 #   scripts/openbao-breakglass.sh root-run tenant <app> <env>  # per-tenant policy + role (ADR 0019 D6)
 #   scripts/openbao-breakglass.sh root-run cloudflared-token  # tunnel token for edge-public (ADR 0019 D7)
 #   scripts/openbao-breakglass.sh root-run public-site-probes  # public apex+staging URLs for blackbox (never in git)
+#   scripts/openbao-breakglass.sh root-run govgraph-secrets <staging|prod>  # govgraph app (+prod cloudflare) secrets (ADR 0019)
 #   scripts/openbao-breakglass.sh root-run -- <cmd...>    # anything else with the token
-#   everything also accepts --dry-run (and root-run alertmanager/oidc: --overwrite)
+#   everything also accepts --dry-run (and root-run alertmanager/oidc/nexus-pull/cloudflared-token/
+#   public-site-probes/govgraph-secrets: --overwrite)
 #
 # `apply-config` runs (and prints) exactly:
 #   cd ansible && ansible-playbook playbooks/openbao.yml --limit sectools --check --diff
@@ -65,6 +67,11 @@
 #   # role/policy are shared by every oidc consumer - delete only after removing ALL of them:
 #   curl -qsS -H "X-Vault-Token: <token>" -X DELETE "$ADDR/v1/auth/kubernetes/role/oidc"
 #   curl -qsS -H "X-Vault-Token: <token>" -X DELETE "$ADDR/v1/sys/policies/acl/oidc-read"
+#
+# Undo of what `root-run govgraph-secrets <env>` writes (KV v2: deleting the metadata path
+# drops every version; the prod cloudflare path only exists for prod):
+#   curl -qsS -H "X-Vault-Token: <token>" -X DELETE "$ADDR/v1/secret/metadata/apps/govgraph/<env>/app"
+#   curl -qsS -H "X-Vault-Token: <token>" -X DELETE "$ADDR/v1/secret/metadata/apps/govgraph/prod/cloudflare"
 #
 # Requires an ssh alias `sectools` (e.g. HostName 192.168.1.95, User tunsadmin) or the
 # BREAKGLASS_SSH override. Test-only overrides (used by openbao-breakglass-test.sh):
@@ -155,7 +162,7 @@ unseal_loop() {
 # root-run
 # ---------------------------------------------------------------------------
 cmd_root_run() {
-  local mode="exec" cmd_args=() OIDC_CONSUMER="" TENANT_APP="" TENANT_ENV=""
+  local mode="exec" cmd_args=() OIDC_CONSUMER="" TENANT_APP="" TENANT_ENV="" GOVGRAPH_ENV=""
   local args=()
   [[ $# -gt 0 ]] || die "root-run needs a command: 'root-run alertmanager' or 'root-run -- <cmd...>'"
   # Named modes: `root-run <mode> ...`. An arbitrary command needs an explicit `--` BEFORE it:
@@ -187,6 +194,13 @@ cmd_root_run() {
   elif [[ "${args[0]}" == "public-site-probes" ]]; then
     mode="publicsite"
     [[ ${#args[@]} -gt 1 ]] && die "root-run public-site-probes takes no extra arguments (flags: --overwrite --dry-run)"
+  elif [[ "${args[0]}" == "govgraph-secrets" ]]; then
+    mode="govgraph"
+    [[ ${#args[@]} -eq 2 ]] || die "root-run govgraph-secrets takes exactly <staging|prod> (flags: --overwrite --dry-run)"
+    case "${args[1]}" in
+      staging|prod) GOVGRAPH_ENV="${args[1]}" ;;
+      *) die "unknown govgraph-secrets environment: ${args[1]} (staging|prod)" ;;
+    esac
   elif [[ "${args[0]}" == "tenant" ]]; then
     mode="tenant"
     [[ ${#args[@]} -eq 3 ]] || die "root-run tenant takes exactly <app> <env>"
@@ -205,7 +219,8 @@ cmd_root_run() {
   else
     die "unknown root-run mode '${args[0]}' (nothing asked, nothing minted).
     Known modes: alertmanager, watchdog-url, nexus-pull, cloudflared-token, tenant <app> <env>,
-    oidc <consumer>. A mode from a recently merged PR? Run 'git pull' first.
+    oidc <consumer>, public-site-probes, govgraph-secrets <staging|prod>. A mode from a recently
+    merged PR? Run 'git pull' first.
     To run an arbitrary command with the token: root-run -- <cmd...>"
   fi
 
@@ -270,6 +285,13 @@ cmd_root_run() {
     else
       payload=$(publicsite_prompt_and_extend "$payload")
     fi
+  elif [[ "$mode" == "govgraph" ]]; then
+    if [[ "$DRY_RUN" == true ]]; then
+      payload=$(jq -cn --argjson p "$payload" --arg e "$GOVGRAPH_ENV" \
+        '$p + {govgraph: {env: $e, database_url: "<hidden>", zone_id: "<hidden>", api_token: "<hidden>"}, overwrite: false}')
+    else
+      payload=$(govgraph_prompt_and_extend "$payload" "$GOVGRAPH_ENV")
+    fi
   elif [[ "$mode" == "watchdog" ]]; then
     if [[ "$DRY_RUN" == true ]]; then
       payload=$(jq -cn --argjson p "$payload" \
@@ -285,6 +307,18 @@ cmd_root_run() {
     payload=$(jq -cn --arg c "$cmd_quoted" --argjson p "$payload" '$p + {cmd: $c}')
     say "command that will run on sectools with the root token: ${cmd_quoted% }"
     note "its output is printed as-is - do not run commands that print secret values"
+  fi
+
+  if [[ "$DRY_RUN" == true && "$mode" == "govgraph" ]]; then
+    say "govgraph-secrets plan ($GOVGRAPH_ENV):"
+    note "write secret/apps/govgraph/$GOVGRAPH_ENV/app - keys: DATABASE_URL (prompted hidden, shape-checked locally),"
+    note "CRON_SECRET (generated on sectools: 32 random bytes, hex - never prompted, never printed)"
+    if [[ "$GOVGRAPH_ENV" == "prod" ]]; then
+      note "write secret/apps/govgraph/prod/cloudflare - keys: CF_ZONE_ID (32 hex), CF_API_TOKEN (both prompted hidden)"
+    else
+      note "no cloudflare object (staging does not purge)"
+    fi
+    note "existing objects are kept without --overwrite; with it CRON_SECRET is regenerated"
   fi
 
   if [[ "$DRY_RUN" == true ]]; then
@@ -307,7 +341,7 @@ set -euo pipefail
 umask 077
 P="${BREAKGLASS_PAYLOAD:?}"
 ADDR=$(jq -r .addr <<<"$P")
-MODE=$(jq -r 'if .cmd then "exec" elif .oidc then "oidc" elif .watchdog then "watchdog" elif .nexuspull then "nexuspull" elif .tenant then "tenant" elif .cloudflared then "cloudflared" elif .publicsite then "publicsite" else "alertmanager" end' <<<"$P")
+MODE=$(jq -r 'if .cmd then "exec" elif .oidc then "oidc" elif .watchdog then "watchdog" elif .nexuspull then "nexuspull" elif .tenant then "tenant" elif .cloudflared then "cloudflared" elif .publicsite then "publicsite" elif .govgraph then "govgraph" else "alertmanager" end' <<<"$P")
 
 echo "    [remote] health check"
 curl -q -s "$ADDR/v1/sys/health" | jq -e '.initialized and (.sealed | not)' >/dev/null \
@@ -564,6 +598,53 @@ elif [[ "$MODE" == "publicsite" ]]; then
     echo "    [remote] stored (apex $AN chars, staging $SN chars)"
   fi
   echo "    [remote] public-site-probes setup complete"
+elif [[ "$MODE" == "govgraph" ]]; then
+  # ---- govgraph app (+prod Cloudflare) secrets (ADR 0019; argv-free on both sides) ----
+  ENVN=$(jq -r '.govgraph.env' <<<"$P")
+  [[ "$ENVN" == "staging" || "$ENVN" == "prod" ]] || { echo "ERROR: govgraph-secrets env must be staging or prod" >&2; exit 1; }
+  OVER=$(jq -r '.overwrite // false' <<<"$P")
+  KV="apps/govgraph/$ENVN/app"
+  EXISTS=$(curl -q -s --config "$CFG" -o /dev/null -w '%{http_code}' "$ADDR/v1/secret/metadata/$KV")
+  if [[ "$EXISTS" == "200" && "$OVER" != "true" ]]; then
+    echo "    [remote] secret/$KV already exists (pass --overwrite to replace; CRON_SECRET kept so web and refresh stay in agreement)"
+  else
+    # CRON_SECRET is generated HERE on sectools (32 random bytes, hex): never prompted,
+    # never on the Mac, never printed. It reaches curl via jq's environment and stdin;
+    # DATABASE_URL arrives in the payload (ssh stdin). Nothing rides argv on this side.
+    CRON_SECRET=$(python3 -c 'import secrets; print(secrets.token_hex(32))')
+    echo "    [remote] writing secret/$KV (DATABASE_URL from the payload, CRON_SECRET generated on sectools; values never printed)"
+    CODE=$(CRON_SECRET="$CRON_SECRET" jq -c '{data: {DATABASE_URL: .govgraph.database_url, CRON_SECRET: env.CRON_SECRET}}' <<<"$P" \
+      | curl -q -s --config "$CFG" -o /dev/null -w '%{http_code}' -X POST --data-binary @- "$ADDR/v1/secret/data/$KV")
+    unset CRON_SECRET
+    [[ "$CODE" == "200" || "$CODE" == "204" ]] \
+      || { echo "ERROR: writing secret/$KV failed (HTTP $CODE)" >&2; exit 1; }
+    curl -q -s --config "$CFG" "$ADDR/v1/secret/data/$KV" \
+      | jq -e '.data.data | (keys | sort == ["CRON_SECRET","DATABASE_URL"]) and (.CRON_SECRET | test("^[0-9a-f]{64}$"))' >/dev/null \
+      || { echo "ERROR: secret/$KV does not hold exactly DATABASE_URL + a 64-hex CRON_SECRET" >&2; exit 1; }
+  fi
+  VERSION=$(curl -q -s --config "$CFG" "$ADDR/v1/secret/metadata/$KV" | jq -r '.data.current_version')
+  echo "    [remote] secret/$KV keys: DATABASE_URL, CRON_SECRET (version $VERSION)"
+  if [[ "$ENVN" == "prod" ]]; then
+    KVCF="apps/govgraph/prod/cloudflare"
+    EX=$(curl -q -s --config "$CFG" -o /dev/null -w '%{http_code}' "$ADDR/v1/secret/metadata/$KVCF")
+    if [[ "$EX" == "200" && "$OVER" != "true" ]]; then
+      echo "    [remote] secret/$KVCF already exists (pass --overwrite to replace)"
+    else
+      echo "    [remote] writing secret/$KVCF (CF_ZONE_ID, CF_API_TOKEN from the payload; values never printed)"
+      CODE=$(jq -c '{data: {CF_ZONE_ID: .govgraph.zone_id, CF_API_TOKEN: .govgraph.api_token}}' <<<"$P" \
+        | curl -q -s --config "$CFG" -o /dev/null -w '%{http_code}' -X POST --data-binary @- "$ADDR/v1/secret/data/$KVCF")
+      [[ "$CODE" == "200" || "$CODE" == "204" ]] \
+        || { echo "ERROR: writing secret/$KVCF failed (HTTP $CODE)" >&2; exit 1; }
+      curl -q -s --config "$CFG" "$ADDR/v1/secret/data/$KVCF" \
+        | jq -e '.data.data | keys | sort == ["CF_API_TOKEN","CF_ZONE_ID"]' >/dev/null \
+        || { echo "ERROR: secret/$KVCF does not hold exactly CF_ZONE_ID + CF_API_TOKEN" >&2; exit 1; }
+    fi
+    VERSIONCF=$(curl -q -s --config "$CFG" "$ADDR/v1/secret/metadata/$KVCF" | jq -r '.data.current_version')
+    echo "    [remote] secret/$KVCF keys: CF_ZONE_ID, CF_API_TOKEN (version $VERSIONCF)"
+  else
+    echo "    [remote] staging: no cloudflare object (staging does not purge)"
+  fi
+  echo "    [remote] govgraph-secrets setup complete ($ENVN)"
 elif [[ "$MODE" == "watchdog" ]]; then
   # PATCH only watchdog_url on the existing SMTP secret. Never rewrite username/password/from/to.
   KV=monitoring/alertmanager
@@ -792,6 +873,66 @@ except ValueError:
       --argjson an "${#apex}" --argjson sn "${#staging}" \
       '$p + {publicsite: {apex_url: env.PUBLICSITE_APEX, staging_url: env.PUBLICSITE_STAGING, apex_nchars: $an, staging_nchars: $sn}, overwrite: $overwrite}'
   unset apex staging PUBLICSITE_APEX PUBLICSITE_STAGING PUBLICSITE_URL
+}
+
+# Hidden prompts for the govgraph tenant secrets. DATABASE_URL is shape-checked locally
+# (postgres scheme, a host, port 5432/6543) without echoing it; prod also prompts hidden
+# for CF_ZONE_ID (32 hex) and CF_API_TOKEN (non-empty, no whitespace). CRON_SECRET is NOT
+# prompted: it is generated on sectools by the remote step. Values travel local variable ->
+# jq environment -> ssh stdin payload, never argv, and are never printed. Stdout is ONLY
+# the payload JSON (this runs inside $( )).
+govgraph_prompt_and_extend() {  # $1 payload-so-far, $2 staging|prod -> full payload on stdout
+  local payload="$1" envn="$2" db zone token overwrite=false
+  [[ "$OVERWRITE" == true ]] && overwrite=true
+  echo "==> govgraph $envn secrets (never printed; never argv)" >&2
+  if [[ -t 0 ]]; then
+    read -rs -p "    DATABASE_URL (hidden): " db
+    echo >&2
+  else
+    IFS= read -r db
+  fi
+  db="${db//[$' \t\r\n']/}"
+  [[ -n "$db" ]] || die "DATABASE_URL must not be empty (nothing stored)"
+  GOV_DATABASE_URL="$db" python3 -I -c '
+import os, sys
+from urllib.parse import urlparse
+u = os.environ["GOV_DATABASE_URL"]
+if not (u.startswith("postgres://") or u.startswith("postgresql://")):
+    sys.exit(1)
+try:
+    p = urlparse(u)
+except ValueError:
+    sys.exit(1)
+if not p.netloc or not p.hostname or p.port is None:
+    sys.exit(1)
+if p.port not in (5432, 6543):
+    sys.exit(1)
+' || die "DATABASE_URL must be postgres:// or postgresql:// with a host and port 5432 or 6543 (nothing stored)"
+  if [[ "$envn" == "prod" ]]; then
+    if [[ -t 0 ]]; then
+      read -rs -p "    CF_ZONE_ID (hidden, 32 hex characters): " zone
+      echo >&2
+      read -rs -p "    CF_API_TOKEN (hidden): " token
+      echo >&2
+    else
+      IFS= read -r zone
+      IFS= read -r token
+    fi
+    zone="${zone//[$' \t\r\n']/}"
+    [[ "$zone" =~ ^[0-9a-fA-F]{32}$ ]] || die "CF_ZONE_ID must be 32 hex characters (nothing stored)"
+    token="${token//[$' \t\r\n']/}"
+    [[ -n "$token" ]] || die "CF_API_TOKEN must not be empty (nothing stored)"
+    [[ "$token" != *[[:space:]]* ]] || die "CF_API_TOKEN must not contain whitespace (nothing stored)"
+    GOV_DATABASE_URL="$db" GOV_ZONE_ID="$zone" GOV_API_TOKEN="$token" \
+      jq -cn --argjson p "$payload" --arg e "$envn" --argjson overwrite "$overwrite" \
+        '$p + {govgraph: {env: $e, database_url: env.GOV_DATABASE_URL, zone_id: env.GOV_ZONE_ID, api_token: env.GOV_API_TOKEN}, overwrite: $overwrite}'
+    unset zone token
+  else
+    GOV_DATABASE_URL="$db" \
+      jq -cn --argjson p "$payload" --arg e "$envn" --argjson overwrite "$overwrite" \
+        '$p + {govgraph: {env: $e, database_url: env.GOV_DATABASE_URL}, overwrite: $overwrite}'
+  fi
+  unset db
 }
 
 watchdog_prompt_and_extend() {  # $1 payload-so-far -> full payload on stdout

@@ -47,16 +47,22 @@ script (tenant mode) is read on `secret/data/apps/govgraph/<env>/*` and
 `secret/data/apps/govgraph/<env>` itself is not granted, and a read of it is 403.
 Details: [tenant-secrets.md](tenant-secrets.md).
 
-Then write the child objects (never print values; never commit them). `bao kv put`
-omits the `data/` segment that the policy path includes:
+Then write the child objects with `root-run govgraph-secrets` (never print values; never
+commit them). `DATABASE_URL` is prompted hidden and shape-checked locally (postgres scheme,
+a host, port 5432/6543) before anything is contacted; `CRON_SECRET` is **generated on
+sectools** (32 random bytes, hex) — never prompted, never on the Mac, never printed. Prod
+additionally prompts hidden for `CF_ZONE_ID` (32 hex characters) and `CF_API_TOKEN` and
+writes the cloudflare object; staging writes no cloudflare object. Re-running without
+`--overwrite` refuses the existing objects and keeps `CRON_SECRET`, so web and refresh
+stay in agreement; `--overwrite` regenerates it. Values travel local variable → jq stdin
+→ ssh stdin payload → remote environment, never argv on either side, and the command
+prints only the key names written plus each path's version:
 
 ```sh
-scripts/openbao-breakglass.sh root-run -- bao kv put secret/apps/govgraph/staging/app \
-  DATABASE_URL='<value>' CRON_SECRET='<value>'
-scripts/openbao-breakglass.sh root-run -- bao kv put secret/apps/govgraph/prod/app \
-  DATABASE_URL='<value>' CRON_SECRET='<value>'
-scripts/openbao-breakglass.sh root-run -- bao kv put secret/apps/govgraph/prod/cloudflare \
-  CF_ZONE_ID='<value>' CF_API_TOKEN='<value>'
+scripts/openbao-breakglass.sh root-run govgraph-secrets staging --dry-run
+scripts/openbao-breakglass.sh root-run govgraph-secrets staging
+scripts/openbao-breakglass.sh root-run govgraph-secrets prod --dry-run
+scripts/openbao-breakglass.sh root-run govgraph-secrets prod
 ```
 
 | KV object (`secret/` prefix) | Keys | Read by |

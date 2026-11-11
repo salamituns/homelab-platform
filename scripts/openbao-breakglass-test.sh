@@ -23,7 +23,12 @@
 #   10. the root-run -- <cmd> passthrough works with BAO_TOKEN set;
 #   10b. root-run watchdog-url PATCHes only watchdog_url (SMTP keys kept), prints stored (N chars),
 #       never prints the URL; a bad prefix is rejected before minting;
-#   11. the written objects have the right shape (keys only, never values).
+#   11. the written objects have the right shape (keys only, never values);
+#   15. root-run govgraph-secrets: staging/prod writes (DATABASE_URL hidden-prompted,
+#       CRON_SECRET generated on the "remote" side, 64 hex), re-run skips without
+#       --overwrite and regenerates CRON_SECRET with it, prod also writes the cloudflare
+#       object, bad values die before minting, --dry-run prompts nothing (stdin closed),
+#       and the secret values never appear in the ssh boundary's argv log or any transcript.
 #
 # Nothing touches sectools: the "remote" side runs on this Mac via BREAKGLASS_SSH.
 # Test shares/password are throwaway. No secret values are printed; the harness prints
@@ -215,6 +220,20 @@ if grep -q "revocation" "$TD/dry6.out"; then
   ok "root-run public-site-probes --dry-run prints the flow, prompted for nothing"
 else
   bad "root-run public-site-probes --dry-run"; cat "$TD/dry6.out"
+fi
+"$SCRIPT" root-run --dry-run govgraph-secrets staging </dev/null >"$TD/dry7.out" 2>&1
+if grep -q "revocation" "$TD/dry7.out" && grep -q "secret/apps/govgraph/staging/app" "$TD/dry7.out" \
+  && grep -q "generated on sectools" "$TD/dry7.out" && grep -qi "no cloudflare object" "$TD/dry7.out"; then
+  ok "root-run govgraph-secrets staging --dry-run prints the plan, prompts nothing (stdin was closed)"
+else
+  bad "root-run govgraph-secrets staging --dry-run"; cat "$TD/dry7.out"
+fi
+"$SCRIPT" root-run --dry-run govgraph-secrets prod </dev/null >"$TD/dry8.out" 2>&1
+if grep -q "revocation" "$TD/dry8.out" && grep -q "secret/apps/govgraph/prod/app" "$TD/dry8.out" \
+  && grep -q "secret/apps/govgraph/prod/cloudflare" "$TD/dry8.out" && grep -q "generated on sectools" "$TD/dry8.out"; then
+  ok "root-run govgraph-secrets prod --dry-run prints both paths, prompts nothing (stdin was closed)"
+else
+  bad "root-run govgraph-secrets prod --dry-run"; cat "$TD/dry8.out"
 fi
 
 echo "== 5. root-run alertmanager through the local-shell override (the full flow)"
@@ -587,6 +606,174 @@ BAO_TOKEN="$RT" bao policy read public-site-probes-read | grep -q 'secret/data/m
   && [[ "$(BAO_TOKEN="$RT" bao policy read public-site-probes-read | grep -c '^path')" == 1 ]] \
   && ok "policy public-site-probes-read grants exactly the probe-URL path"
 unset RT
+
+echo "== 15. root-run govgraph-secrets: argv-free writes, overwrite, validation"
+# An argv-logging shim on the ssh boundary: it records every argv word that crosses the
+# boundary (stdin is never argv), so the test can prove no secret value ever rides argv.
+# The log path is baked into the shim: $TD is not exported into the shim's environment.
+cat >"$TD/ssh-shim" <<SHIM
+#!/usr/bin/env bash
+printf '%s\n' "\$@" >>"$TD/ssh-argv.log"
+exec "\$@"
+SHIM
+chmod +x "$TD/ssh-shim"
+run_flow_shim() {  # like run_flow, but the ssh boundary logs its argv
+  local out="$1"; shift
+  BREAKGLASS_SSH="$TD/ssh-shim bash -c" BREAKGLASS_BAO_ADDR="$ADDR" "$SCRIPT" "$@" >"$out" 2>&1
+}
+GG_DB='postgres://ggtest:throwaway@127.0.0.1:6543/postgres'
+GG_BAD_PORT='postgres://ggtest:throwaway@127.0.0.1:5433/postgres'
+GG_ZONE='a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6'
+GG_TOKEN='cf-api-token-throwaway'
+feed_govgraph() {  # $@ = every prompt line after the 2 shares
+  local f; f=$(mktemp "$TD/answers.XXXXXX")
+  jq -r '.unseal_keys_b64[0,1]' "$TD/init.json" >"$f"
+  printf '%s\n' "$@" >>"$f"
+  echo "$f"
+}
+
+echo "== 15a. bad DATABASE_URL port and bad CF_ZONE_ID die before minting (nothing written)"
+RT="$(jq -r .root_token "$TD/init.json")"
+Fgga=$(feed_govgraph "$GG_BAD_PORT")
+if run_flow "$TD/run-gg-badport.out" root-run govgraph-secrets staging <"$Fgga"; then
+  bad "bad DATABASE_URL port accepted"
+else
+  ok "bad DATABASE_URL port rejected (nonzero exit)"
+fi
+if grep -q "port 5432 or 6543" "$TD/run-gg-badport.out"; then
+  ok "bad port error names the allowed ports"
+else
+  bad "bad port error missing"; cat "$TD/run-gg-badport.out"
+fi
+if grep -q "minting the root token" "$TD/run-gg-badport.out"; then
+  bad "bad port minted a root token (should die locally first)"
+else
+  ok "bad port died before minting"
+fi
+Fggb=$(feed_govgraph "$GG_DB" 'zz-not-32-hex' "$GG_TOKEN")
+if run_flow "$TD/run-gg-badzone.out" root-run govgraph-secrets prod <"$Fggb"; then
+  bad "bad CF_ZONE_ID accepted"
+else
+  ok "bad CF_ZONE_ID rejected (nonzero exit)"
+fi
+if grep -q "32 hex" "$TD/run-gg-badzone.out"; then
+  ok "bad CF_ZONE_ID error names the expected shape"
+else
+  bad "bad zone error missing"; cat "$TD/run-gg-badzone.out"
+fi
+if grep -q "minting the root token" "$TD/run-gg-badzone.out"; then
+  bad "bad zone minted a root token (should die locally first)"
+else
+  ok "bad zone died before minting"
+fi
+if BAO_TOKEN="$RT" bao read -format=json secret/data/apps/govgraph/staging/app >/dev/null 2>&1; then
+  bad "the rejected staging run WROTE an object"
+else
+  ok "no staging object exists after the rejected runs"
+fi
+if BAO_TOKEN="$RT" bao read -format=json secret/data/apps/govgraph/prod/cloudflare >/dev/null 2>&1; then
+  bad "the rejected prod run WROTE an object"
+else
+  ok "no prod object exists after the rejected runs"
+fi
+
+echo "== 15b. staging write: both keys, remotely generated CRON_SECRET, argv and transcript clean"
+Fggc=$(feed_govgraph "$GG_DB")
+if run_flow_shim "$TD/run-ggs.out" root-run govgraph-secrets staging <"$Fggc"; then
+  ok "root-run govgraph-secrets staging exited 0"
+else
+  bad "root-run govgraph-secrets staging failed"; cat "$TD/run-ggs.out"; exit 1
+fi
+if grep -q "govgraph-secrets setup complete (staging)" "$TD/run-ggs.out"; then ok "staging app object written"; else bad "staging completion line missing"; fi
+if [[ -s "$TD/ssh-argv.log" ]] && grep -q "BREAKGLASS_PAYLOAD" "$TD/ssh-argv.log"; then
+  ok "ssh-boundary argv logger captured the boundary traffic (positive control)"
+else
+  bad "ssh-boundary argv log is missing/empty - the argv checks are vacuous"
+fi
+if grep -q "keys: DATABASE_URL, CRON_SECRET (version 1)" "$TD/run-ggs.out"; then ok "prints only key names + version 1"; else bad "key/version line missing"; fi
+if grep -q "revocation verified" "$TD/run-ggs.out"; then ok "staging run revoked its token"; else bad "staging revocation missing"; fi
+if grep -qF "$GG_DB" "$TD/ssh-argv.log"; then
+  bad "DATABASE_URL APPEARED IN THE SSH BOUNDARY'S ARGV"
+else
+  ok "DATABASE_URL never crosses the ssh boundary on argv"
+fi
+if grep -qF "$GG_DB" "$TD/run-ggs.out"; then
+  bad "DATABASE_URL WAS PRINTED INTO THE TRANSCRIPT"
+else
+  ok "DATABASE_URL never printed"
+fi
+GG_CRON_1="$(BAO_TOKEN="$RT" bao read -format=json secret/data/apps/govgraph/staging/app | jq -r .data.data.CRON_SECRET)"
+if [[ "$GG_CRON_1" =~ ^[0-9a-f]{64}$ ]]; then
+  ok "CRON_SECRET is 64 hex characters (generated on sectools; the feed supplied no value for it)"
+else
+  bad "CRON_SECRET is not 64 hex characters"
+fi
+BAO_TOKEN="$RT" bao read -format=json secret/data/apps/govgraph/staging/app \
+  | jq -e --arg db "$GG_DB" '.data.data | (keys | sort == ["CRON_SECRET","DATABASE_URL"]) and .DATABASE_URL == $db' >/dev/null \
+  && ok "staging object holds exactly the prompted DATABASE_URL + the generated CRON_SECRET"
+if BAO_TOKEN="$RT" bao read -format=json secret/data/apps/govgraph/staging/cloudflare >/dev/null 2>&1; then
+  bad "STAGING WROTE A CLOUDFLARE OBJECT"
+else
+  ok "staging wrote no cloudflare object"
+fi
+
+echo "== 15c. re-run refuses without --overwrite (CRON_SECRET kept); --overwrite regenerates it"
+Fggd=$(feed_govgraph "$GG_DB")
+run_flow_shim "$TD/run-ggs2.out" root-run govgraph-secrets staging <"$Fggd" || true
+if grep -q "already exists" "$TD/run-ggs2.out"; then
+  ok "second staging run refuses the existing object"
+else
+  bad "second staging run did not refuse"; cat "$TD/run-ggs2.out"
+fi
+GG_CRON_2="$(BAO_TOKEN="$RT" bao read -format=json secret/data/apps/govgraph/staging/app | jq -r .data.data.CRON_SECRET)"
+if [[ "$GG_CRON_2" == "$GG_CRON_1" ]]; then
+  ok "CRON_SECRET kept (web and refresh stay in agreement)"
+else
+  bad "CRON_SECRET CHANGED WITHOUT --overwrite"
+fi
+Fgge=$(feed_govgraph "$GG_DB")
+if run_flow_shim "$TD/run-ggs3.out" root-run govgraph-secrets staging --overwrite <"$Fgge"; then
+  ok "staging --overwrite exited 0"
+else
+  bad "staging --overwrite failed"; cat "$TD/run-ggs3.out"; exit 1
+fi
+GG_CRON_3="$(BAO_TOKEN="$RT" bao read -format=json secret/data/apps/govgraph/staging/app | jq -r .data.data.CRON_SECRET)"
+if [[ "$GG_CRON_3" =~ ^[0-9a-f]{64}$ && "$GG_CRON_3" != "$GG_CRON_1" ]]; then
+  ok "--overwrite regenerated CRON_SECRET (still 64 hex)"
+else
+  bad "--overwrite did not regenerate CRON_SECRET"
+fi
+if grep -q "keys: DATABASE_URL, CRON_SECRET (version 2)" "$TD/run-ggs3.out"; then ok "--overwrite prints version 2"; else bad "--overwrite version line missing"; fi
+
+echo "== 15d. prod writes both objects; values never in argv or transcripts"
+Fggf=$(feed_govgraph "$GG_DB" "$GG_ZONE" "$GG_TOKEN")
+if run_flow_shim "$TD/run-ggp.out" root-run govgraph-secrets prod <"$Fggf"; then
+  ok "root-run govgraph-secrets prod exited 0"
+else
+  bad "root-run govgraph-secrets prod failed"; cat "$TD/run-ggp.out"; exit 1
+fi
+if grep -q "govgraph-secrets setup complete (prod)" "$TD/run-ggp.out"; then ok "prod run completed"; else bad "prod completion line missing"; fi
+if grep -q "secret/apps/govgraph/prod/app keys: DATABASE_URL, CRON_SECRET (version 1)" "$TD/run-ggp.out"; then ok "prod app object written, key names + version printed"; else bad "prod app key/version line missing"; fi
+if grep -q "secret/apps/govgraph/prod/cloudflare keys: CF_ZONE_ID, CF_API_TOKEN (version 1)" "$TD/run-ggp.out"; then ok "prod cloudflare object written, key names + version printed"; else bad "prod cloudflare key/version line missing"; fi
+if grep -qF "$GG_DB" "$TD/ssh-argv.log" || grep -qF "$GG_TOKEN" "$TD/ssh-argv.log" || grep -qF "$GG_ZONE" "$TD/ssh-argv.log"; then
+  bad "A GOVGRAPH SECRET APPEARED IN THE SSH BOUNDARY'S ARGV"
+else
+  ok "prod secrets never cross the ssh boundary on argv"
+fi
+if grep -qF "$GG_DB" "$TD/run-ggp.out" || grep -qF "$GG_TOKEN" "$TD/run-ggp.out" || grep -qF "$GG_ZONE" "$TD/run-ggp.out"; then
+  bad "A GOVGRAPH SECRET WAS PRINTED INTO THE TRANSCRIPT"
+else
+  ok "prod secrets never printed"
+fi
+BAO_TOKEN="$RT" bao read -format=json secret/data/apps/govgraph/prod/app \
+  | jq -e --arg db "$GG_DB" '.data.data | (keys | sort == ["CRON_SECRET","DATABASE_URL"]) and .DATABASE_URL == $db' >/dev/null \
+  && ok "prod app object holds the prompted DATABASE_URL + a generated CRON_SECRET"
+BAO_TOKEN="$RT" bao read -format=json secret/data/apps/govgraph/prod/cloudflare \
+  | jq -e --arg z "$GG_ZONE" --arg t "$GG_TOKEN" \
+    '.data.data | (keys | sort == ["CF_API_TOKEN","CF_ZONE_ID"]) and .CF_ZONE_ID == $z and .CF_API_TOKEN == $t' >/dev/null \
+  && ok "prod cloudflare object holds the prompted CF_ZONE_ID + CF_API_TOKEN"
+if grep -q "revocation verified" "$TD/run-ggp.out"; then ok "prod run revoked its token"; else bad "prod revocation missing"; fi
+unset RT GG_CRON_1 GG_CRON_2 GG_CRON_3 GG_DB GG_BAD_PORT GG_ZONE GG_TOKEN
 
 echo ""
 echo "result: $PASS passed, $FAIL failed"
