@@ -27,9 +27,10 @@
 #   scripts/openbao-breakglass.sh root-run cloudflared-token  # tunnel token for edge-public (ADR 0019 D7)
 #   scripts/openbao-breakglass.sh root-run public-site-probes  # public apex+staging URLs for blackbox (never in git)
 #   scripts/openbao-breakglass.sh root-run govgraph-secrets <staging|prod>  # govgraph app (+prod cloudflare) secrets (ADR 0019)
+#   scripts/openbao-breakglass.sh root-run govgraph-probes  # govgraph probe URLs, PATCHed into the shared probe object
 #   scripts/openbao-breakglass.sh root-run -- <cmd...>    # anything else with the token
 #   everything also accepts --dry-run (and root-run alertmanager/oidc/nexus-pull/cloudflared-token/
-#   public-site-probes/govgraph-secrets: --overwrite)
+#   public-site-probes/govgraph-secrets/govgraph-probes: --overwrite)
 #
 # `apply-config` runs (and prints) exactly:
 #   cd ansible && ansible-playbook playbooks/openbao.yml --limit sectools --check --diff
@@ -72,6 +73,11 @@
 # drops every version; the prod cloudflare path only exists for prod):
 #   curl -qsS -H "X-Vault-Token: <token>" -X DELETE "$ADDR/v1/secret/metadata/apps/govgraph/<env>/app"
 #   curl -qsS -H "X-Vault-Token: <token>" -X DELETE "$ADDR/v1/secret/metadata/apps/govgraph/prod/cloudflare"
+#
+# Undo of what `root-run govgraph-probes` writes (never DELETE the metadata: that drops the
+# public-site URLs too - GET the object, remove the two govgraph keys, POST the rest):
+#   GET secret/data/monitoring/public-site-probes, drop govgraph_apex_url + govgraph_staging_url,
+#   POST the remaining keys.
 #
 # Requires an ssh alias `sectools` (e.g. HostName 192.168.1.95, User tunsadmin) or the
 # BREAKGLASS_SSH override. Test-only overrides (used by openbao-breakglass-test.sh):
@@ -201,6 +207,9 @@ cmd_root_run() {
       staging|prod) GOVGRAPH_ENV="${args[1]}" ;;
       *) die "unknown govgraph-secrets environment: ${args[1]} (staging|prod)" ;;
     esac
+  elif [[ "${args[0]}" == "govgraph-probes" ]]; then
+    mode="govgraphprobes"
+    [[ ${#args[@]} -gt 1 ]] && die "root-run govgraph-probes takes no extra arguments (flags: --overwrite --dry-run)"
   elif [[ "${args[0]}" == "tenant" ]]; then
     mode="tenant"
     [[ ${#args[@]} -eq 3 ]] || die "root-run tenant takes exactly <app> <env>"
@@ -219,8 +228,8 @@ cmd_root_run() {
   else
     die "unknown root-run mode '${args[0]}' (nothing asked, nothing minted).
     Known modes: alertmanager, watchdog-url, nexus-pull, cloudflared-token, tenant <app> <env>,
-    oidc <consumer>, public-site-probes, govgraph-secrets <staging|prod>. A mode from a recently
-    merged PR? Run 'git pull' first.
+    oidc <consumer>, public-site-probes, govgraph-secrets <staging|prod>, govgraph-probes.
+    A mode from a recently merged PR? Run 'git pull' first.
     To run an arbitrary command with the token: root-run -- <cmd...>"
   fi
 
@@ -292,6 +301,13 @@ cmd_root_run() {
     else
       payload=$(govgraph_prompt_and_extend "$payload" "$GOVGRAPH_ENV")
     fi
+  elif [[ "$mode" == "govgraphprobes" ]]; then
+    if [[ "$DRY_RUN" == true ]]; then
+      payload=$(jq -cn --argjson p "$payload" \
+        '$p + {govgraphprobes: {apex_url: "<hidden>", staging_url: "<hidden>", apex_nchars: 0, staging_nchars: 0}, overwrite: false}')
+    else
+      payload=$(govgraphprobes_prompt_and_extend "$payload")
+    fi
   elif [[ "$mode" == "watchdog" ]]; then
     if [[ "$DRY_RUN" == true ]]; then
       payload=$(jq -cn --argjson p "$payload" \
@@ -320,6 +336,12 @@ cmd_root_run() {
     fi
     note "existing objects are kept without --overwrite; with it CRON_SECRET is regenerated"
   fi
+  if [[ "$DRY_RUN" == true && "$mode" == "govgraphprobes" ]]; then
+    say "govgraph-probes plan:"
+    note "PATCH secret/monitoring/public-site-probes - add keys: govgraph_apex_url, govgraph_staging_url"
+    note "(both prompted hidden, https, trailing slash)"
+    note "existing apex_url/staging_url are kept untouched; existing govgraph keys are refused without --overwrite"
+  fi
 
   if [[ "$DRY_RUN" == true ]]; then
     say "--dry-run: nothing contacted. One ssh session would have:"
@@ -341,7 +363,7 @@ set -euo pipefail
 umask 077
 P="${BREAKGLASS_PAYLOAD:?}"
 ADDR=$(jq -r .addr <<<"$P")
-MODE=$(jq -r 'if .cmd then "exec" elif .oidc then "oidc" elif .watchdog then "watchdog" elif .nexuspull then "nexuspull" elif .tenant then "tenant" elif .cloudflared then "cloudflared" elif .publicsite then "publicsite" elif .govgraph then "govgraph" else "alertmanager" end' <<<"$P")
+MODE=$(jq -r 'if .cmd then "exec" elif .oidc then "oidc" elif .watchdog then "watchdog" elif .nexuspull then "nexuspull" elif .tenant then "tenant" elif .cloudflared then "cloudflared" elif .publicsite then "publicsite" elif .govgraph then "govgraph" elif .govgraphprobes then "govgraphprobes" else "alertmanager" end' <<<"$P")
 
 echo "    [remote] health check"
 curl -q -s "$ADDR/v1/sys/health" | jq -e '.initialized and (.sealed | not)' >/dev/null \
@@ -576,25 +598,35 @@ elif [[ "$MODE" == "publicsite" ]]; then
     | curl -q -s -o /dev/null --config "$CFG" -X POST --data-binary @- "$ADDR/v1/auth/kubernetes/role/public-site-probes"
   EXISTS=$(curl -q -s --config "$CFG" -o /dev/null -w '%{http_code}' "$ADDR/v1/secret/metadata/$KV")
   OVER=$(jq -r '.overwrite // false' <<<"$P")
+  # The object is shared with the govgraph probe URLs (govgraph-probes PATCHes its two
+  # keys into it), so this mode merges instead of blind-putting: apex_url/staging_url are
+  # replaced (or created) and any govgraph keys are carried over untouched. Both modes
+  # accept each other's keys, so neither can clobber the other.
+  EXISTING='{}'
+  if [[ "$EXISTS" == "200" ]]; then
+    EXISTING=$(curl -q -s --config "$CFG" "$ADDR/v1/secret/data/$KV" | jq -c '.data.data')
+    jq -e 'has("apex_url") and has("staging_url")
+      and (has("govgraph_apex_url") == has("govgraph_staging_url"))' <<<"$EXISTING" >/dev/null \
+      || { echo "ERROR: existing secret/$KV must hold apex_url+staging_url (govgraph keys only as a pair)" >&2; exit 1; }
+  fi
   if [[ "$EXISTS" == "200" && "$OVER" != "true" ]]; then
     echo "    [remote] secret/$KV already exists (pass --overwrite to replace)"
-    curl -q -s --config "$CFG" "$ADDR/v1/secret/data/$KV" \
-      | jq -e '.data.data | keys == ["apex_url","staging_url"]' >/dev/null \
-      || { echo "ERROR: existing secret/$KV does not hold exactly apex_url+staging_url" >&2; exit 1; }
   else
-    echo "    [remote] writing secret/$KV (apex_url, staging_url; values never printed)"
-    CODE=$(jq -c '{data: {apex_url: .publicsite.apex_url, staging_url: .publicsite.staging_url}}' <<<"$P" \
+    echo "    [remote] writing secret/$KV (apex_url, staging_url; govgraph keys kept if present; values never printed)"
+    CODE=$(jq -c --argjson ex "$EXISTING" '{data: ($ex + {apex_url: .publicsite.apex_url, staging_url: .publicsite.staging_url})}' <<<"$P" \
       | curl -q -s --config "$CFG" -o /dev/null -w '%{http_code}' -X POST --data-binary @- "$ADDR/v1/secret/data/$KV")
     [[ "$CODE" == "200" || "$CODE" == "204" ]] \
       || { echo "ERROR: writing secret/$KV failed (HTTP $CODE)" >&2; exit 1; }
     AN=$(jq -r '.publicsite.apex_nchars' <<<"$P")
     SN=$(jq -r '.publicsite.staging_nchars' <<<"$P")
     curl -q -s --config "$CFG" "$ADDR/v1/secret/data/$KV" \
-      | jq -e --argjson a "$AN" --argjson s "$SN" \
-        '(.data.data | keys == ["apex_url","staging_url"])
+      | jq -e --argjson a "$AN" --argjson s "$SN" --argjson ex "$EXISTING" \
+        '(.data.data | ((keys | sort) == ["apex_url","staging_url"] or (keys | sort) == ["apex_url","govgraph_apex_url","govgraph_staging_url","staging_url"]))
          and ((.data.data.apex_url | length) == $a)
-         and ((.data.data.staging_url | length) == $s)' >/dev/null \
-      || { echo "ERROR: secret/$KV does not hold apex_url+staging_url of the expected lengths" >&2; exit 1; }
+         and ((.data.data.staging_url | length) == $s)
+         and (.data.data.govgraph_apex_url == $ex.govgraph_apex_url)
+         and (.data.data.govgraph_staging_url == $ex.govgraph_staging_url)' >/dev/null \
+      || { echo "ERROR: secret/$KV does not hold apex_url+staging_url of the expected lengths with the govgraph keys intact" >&2; exit 1; }
     echo "    [remote] stored (apex $AN chars, staging $SN chars)"
   fi
   echo "    [remote] public-site-probes setup complete"
@@ -645,6 +677,54 @@ elif [[ "$MODE" == "govgraph" ]]; then
     echo "    [remote] staging: no cloudflare object (staging does not purge)"
   fi
   echo "    [remote] govgraph-secrets setup complete ($ENVN)"
+elif [[ "$MODE" == "govgraphprobes" ]]; then
+  # ---- govgraph probe URLs: PATCH two keys into the SHARED public-site object ----
+  # Never a blind put: apex_url/staging_url (public-site-probes' keys) are carried over
+  # untouched, exactly as govgraph-probes carries this mode's keys. The object must exist:
+  # public-site-probes creates it (policy/role/SecretStore follow that mode).
+  KV=monitoring/public-site-probes
+  echo "    [remote] checking mounts (kv v2 at secret/)"
+  curl -q -s --config "$CFG" "$ADDR/v1/sys/mounts" | jq -e '.["secret/"].options.version == "2"' >/dev/null \
+    || { echo "ERROR: kv v2 is not mounted at secret/" >&2; exit 1; }
+  HTTP=$(curl -q -s --config "$CFG" -o "$CFG.body" -w '%{http_code}' "$ADDR/v1/secret/data/$KV")
+  [[ "$HTTP" == "200" ]] || { echo "ERROR: secret/$KV missing (HTTP $HTTP) - run root-run public-site-probes first" >&2; rm -f "$CFG.body"; exit 1; }
+  EXISTING=$(jq -c '.data.data' "$CFG.body")
+  rm -f "$CFG.body"
+  jq -e 'has("apex_url") and has("staging_url")
+    and (has("govgraph_apex_url") == has("govgraph_staging_url"))' <<<"$EXISTING" >/dev/null \
+    || { echo "ERROR: existing secret/$KV must hold apex_url+staging_url (govgraph keys only as a pair)" >&2; exit 1; }
+  OVER=$(jq -r '.overwrite // false' <<<"$P")
+  if jq -e 'has("govgraph_apex_url") or has("govgraph_staging_url")' <<<"$EXISTING" >/dev/null && [[ "$OVER" != "true" ]]; then
+    echo "    [remote] govgraph probe URLs already exist in secret/$KV (pass --overwrite to replace)"
+  else
+    echo "    [remote] PATCHing secret/$KV (govgraph_apex_url + govgraph_staging_url; apex_url/staging_url untouched; values never printed)"
+    CODE=$(jq -c --argjson ex "$EXISTING" \
+      '{data: ($ex + {govgraph_apex_url: .govgraphprobes.apex_url, govgraph_staging_url: .govgraphprobes.staging_url})}' <<<"$P" \
+      | curl -q -s --config "$CFG" -o /dev/null -w '%{http_code}' -X POST --data-binary @- "$ADDR/v1/secret/data/$KV")
+    [[ "$CODE" == "200" || "$CODE" == "204" ]] \
+      || { echo "ERROR: PATCHing secret/$KV failed (HTTP $CODE)" >&2; exit 1; }
+  fi
+  curl -q -s --config "$CFG" "$ADDR/v1/secret/data/$KV" \
+    | jq -e --argjson ex "$EXISTING" \
+      '(.data.data | (keys | sort) == ["apex_url","govgraph_apex_url","govgraph_staging_url","staging_url"])
+       and (.data.data.apex_url == $ex.apex_url)
+       and (.data.data.staging_url == $ex.staging_url)
+       and (.data.data.govgraph_apex_url | length > 0)
+       and (.data.data.govgraph_staging_url | length > 0)' >/dev/null \
+    || { echo "ERROR: secret/$KV does not hold both govgraph probe URLs with apex_url/staging_url intact" >&2; exit 1; }
+  if jq -e 'has("govgraph_apex_url")' <<<"$EXISTING" >/dev/null && [[ "$OVER" != "true" ]]; then
+    echo "    [remote] kept (existing govgraph probe URLs; apex_url/staging_url untouched)"
+  else
+    AN=$(jq -r '.govgraphprobes.apex_nchars' <<<"$P")
+    SN=$(jq -r '.govgraphprobes.staging_nchars' <<<"$P")
+    curl -q -s --config "$CFG" "$ADDR/v1/secret/data/$KV" \
+      | jq -e --argjson a "$AN" --argjson s "$SN" \
+        '((.data.data.govgraph_apex_url | length) == $a)
+         and ((.data.data.govgraph_staging_url | length) == $s)' >/dev/null \
+      || { echo "ERROR: govgraph probe URLs in secret/$KV are not the prompted lengths" >&2; exit 1; }
+    echo "    [remote] stored (govgraph apex $AN chars, staging $SN chars; apex_url/staging_url untouched)"
+  fi
+  echo "    [remote] govgraph-probes setup complete"
 elif [[ "$MODE" == "watchdog" ]]; then
   # PATCH only watchdog_url on the existing SMTP secret. Never rewrite username/password/from/to.
   KV=monitoring/alertmanager
@@ -933,6 +1013,56 @@ if p.port not in (5432, 6543):
         '$p + {govgraph: {env: $e, database_url: env.GOV_DATABASE_URL}, overwrite: $overwrite}'
   fi
   unset db
+}
+
+# Hidden prompts for the two govgraph public-path probe URLs. Same shape rules as
+# publicsite_prompt_and_extend (https, a DNS hostname, no embedded credentials) plus a
+# required trailing slash (the runbook's canonical probe paths end in /). Stdout is ONLY
+# the payload JSON. Values are never printed, never argv; the remote step PATCHes them
+# into the shared monitoring/public-site-probes object.
+govgraphprobes_prompt_and_extend() {  # $1 payload-so-far -> full payload on stdout
+  local payload="$1" apex staging overwrite=false
+  [[ "$OVERWRITE" == true ]] && overwrite=true
+  echo "==> govgraph probe URLs (never printed; never argv)" >&2
+  if [[ -t 0 ]]; then
+    read -rs -p "    govgraph apex URL (hidden, https, trailing slash): " apex
+    echo >&2
+    read -rs -p "    govgraph staging URL (hidden, https, trailing slash): " staging
+    echo >&2
+  else
+    IFS= read -r apex
+    IFS= read -r staging
+  fi
+  apex="${apex//[$' \t\r\n']/}"
+  staging="${staging//[$' \t\r\n']/}"
+  [[ -n "$apex" && -n "$staging" ]] || die "both probe URLs must be non-empty (nothing stored)"
+  [[ "$apex" == */ && "$staging" == */ ]] \
+    || die "both probe URLs must end in a slash (the canonical probe paths; nothing stored)"
+  for u in "$apex" "$staging"; do
+    GOV_PS_URL="$u" python3 -I -c '
+import ipaddress, os, sys
+from urllib.parse import urlparse
+u = os.environ["GOV_PS_URL"]
+if not u.startswith("https://"):
+    sys.exit(1)
+p = urlparse(u)
+if p.scheme != "https" or not p.netloc or p.username or p.password:
+    sys.exit(1)
+host = p.hostname or ""
+if "." not in host:
+    sys.exit(1)
+try:
+    ipaddress.ip_address(host)
+    sys.exit(1)
+except ValueError:
+    pass
+' || die "each probe URL must be https://<hostname>/... with a DNS name, not an IP (nothing stored)"
+  done
+  GOV_PS_APEX="$apex" GOV_PS_STAGING="$staging" \
+    jq -cn --argjson p "$payload" --argjson overwrite "$overwrite" \
+      --argjson an "${#apex}" --argjson sn "${#staging}" \
+      '$p + {govgraphprobes: {apex_url: env.GOV_PS_APEX, staging_url: env.GOV_PS_STAGING, apex_nchars: $an, staging_nchars: $sn}, overwrite: $overwrite}'
+  unset apex staging GOV_PS_APEX GOV_PS_STAGING GOV_PS_URL
 }
 
 watchdog_prompt_and_extend() {  # $1 payload-so-far -> full payload on stdout

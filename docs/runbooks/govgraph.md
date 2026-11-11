@@ -94,15 +94,20 @@ Gitea group `govgraph-dev` must exist; the tenant RoleBinding subjects that grou
 public paths, like personal-site's. The two govgraph URLs live in the existing
 `monitoring/public-site-probes` KV object (keys `govgraph_apex_url`,
 `govgraph_staging_url`) so the SecretStore, ServiceAccount and OpenBao role are reused.
-Write them with the raw breakglass mode **before the platform PR merges** — ESO renders
-all four target files from that one object, so until both keys exist the probe-targets
-ExternalSecret cannot sync; the git bootstrap keeps `[]` for govgraph, so its alerts stay
-silent, not wrong:
+Write them with `root-run govgraph-probes`, ideally **before the platform PR merges**; if
+it has already merged, the probe-targets ExternalSecret simply sits unsynced until this
+runs, and this is what unblocks it — ESO renders all four target files from that one
+object, so until both keys exist the ExternalSecret cannot sync; the git bootstrap keeps
+`[]` for govgraph, so its alerts stay silent, not wrong. The mode PATCHes only the two
+govgraph keys into the shared object (created by `root-run public-site-probes`), keeping
+`apex_url`/`staging_url` untouched, and refuses existing govgraph keys without
+`--overwrite`; `public-site-probes` likewise carries the govgraph keys over on its
+writes, so the two modes cannot clobber each other. Both URLs are prompted hidden, must
+be `https` and end in a slash, and are verified by key set and length, never printed:
 
 ```sh
-scripts/openbao-breakglass.sh root-run -- bao kv patch secret/monitoring/public-site-probes \
-  govgraph_apex_url='https://<govgraph-host>/' \
-  govgraph_staging_url='https://<govgraph-staging-host>/'
+scripts/openbao-breakglass.sh root-run govgraph-probes --dry-run
+scripts/openbao-breakglass.sh root-run govgraph-probes
 ```
 
 ### 2. Platform PR (this repo)

@@ -28,7 +28,12 @@
 #       CRON_SECRET generated on the "remote" side, 64 hex), re-run skips without
 #       --overwrite and regenerates CRON_SECRET with it, prod also writes the cloudflare
 #       object, bad values die before minting, --dry-run prompts nothing (stdin closed),
-#       and the secret values never appear in the ssh boundary's argv log or any transcript.
+#       and the secret values never appear in the ssh boundary's argv log or any transcript;
+#   16. root-run govgraph-probes: PATCHes govgraph_apex_url+govgraph_staging_url into the
+#       shared public-site-probes object (all four keys afterwards, public keys untouched),
+#       refuses without --overwrite, public-site-probes --overwrite afterwards KEEPS the
+#       govgraph keys, a missing trailing slash dies before minting, --dry-run prompts
+#       nothing (stdin closed), and no probe URL rides argv or any transcript.
 #
 # Nothing touches sectools: the "remote" side runs on this Mac via BREAKGLASS_SSH.
 # Test shares/password are throwaway. No secret values are printed; the harness prints
@@ -234,6 +239,13 @@ if grep -q "revocation" "$TD/dry8.out" && grep -q "secret/apps/govgraph/prod/app
   ok "root-run govgraph-secrets prod --dry-run prints both paths, prompts nothing (stdin was closed)"
 else
   bad "root-run govgraph-secrets prod --dry-run"; cat "$TD/dry8.out"
+fi
+"$SCRIPT" root-run --dry-run govgraph-probes </dev/null >"$TD/dry9.out" 2>&1
+if grep -q "revocation" "$TD/dry9.out" && grep -q "secret/monitoring/public-site-probes" "$TD/dry9.out" \
+  && grep -q "govgraph_apex_url" "$TD/dry9.out" && grep -qi "kept untouched" "$TD/dry9.out"; then
+  ok "root-run govgraph-probes --dry-run prints the PATCH plan, prompts nothing (stdin was closed)"
+else
+  bad "root-run govgraph-probes --dry-run"; cat "$TD/dry9.out"
 fi
 
 echo "== 5. root-run alertmanager through the local-shell override (the full flow)"
@@ -774,6 +786,110 @@ BAO_TOKEN="$RT" bao read -format=json secret/data/apps/govgraph/prod/cloudflare 
   && ok "prod cloudflare object holds the prompted CF_ZONE_ID + CF_API_TOKEN"
 if grep -q "revocation verified" "$TD/run-ggp.out"; then ok "prod run revoked its token"; else bad "prod revocation missing"; fi
 unset RT GG_CRON_1 GG_CRON_2 GG_CRON_3 GG_DB GG_BAD_PORT GG_ZONE GG_TOKEN
+
+echo "== 16. root-run govgraph-probes: PATCH into the shared probe object"
+GG_PS_APEX='https://govgraph.example/'
+GG_PS_STAGING='https://govgraph-staging.example/'
+GG_PS_APEX2='https://govgraph-2.example/'
+GG_PS_STAGING2='https://govgraph-staging-2.example/'
+feed_ggprobes() {  # $1/$2 = the two hidden prompt answers (defaults to the first pair)
+  local f; f=$(mktemp "$TD/answers.XXXXXX")
+  jq -r '.unseal_keys_b64[0,1]' "$TD/init.json" >"$f"
+  printf '%s\n' "${1:-$GG_PS_APEX}" "${2:-$GG_PS_STAGING}" >>"$f"
+  echo "$f"
+}
+
+echo "== 16a. a probe URL without a trailing slash dies before minting"
+F16a=$(feed_ggprobes 'https://govgraph.example' "$GG_PS_STAGING")
+if run_flow "$TD/run-ggp-slash.out" root-run govgraph-probes <"$F16a"; then
+  bad "URL without a trailing slash accepted"
+else
+  ok "URL without a trailing slash rejected (nonzero exit)"
+fi
+if grep -q "must end in a slash" "$TD/run-ggp-slash.out"; then
+  ok "missing-slash error names the required slash"
+else
+  bad "missing-slash error missing"; cat "$TD/run-ggp-slash.out"
+fi
+if grep -q "minting the root token" "$TD/run-ggp-slash.out"; then
+  bad "missing-slash run minted a root token (should die locally first)"
+else
+  ok "missing-slash run died before minting"
+fi
+
+echo "== 16b. govgraph-probes PATCHes the object public-site-probes wrote: all four keys, public keys untouched"
+RT="$(jq -r .root_token "$TD/init.json")"
+F16b=$(feed_ggprobes)
+if run_flow_shim "$TD/run-ggp2.out" root-run govgraph-probes <"$F16b"; then
+  ok "root-run govgraph-probes exited 0"
+else
+  bad "root-run govgraph-probes failed"; cat "$TD/run-ggp2.out"; exit 1
+fi
+if grep -q "stored (govgraph apex ${#GG_PS_APEX} chars, staging ${#GG_PS_STAGING} chars; apex_url/staging_url untouched)" "$TD/run-ggp2.out"; then
+  ok "prints stored (N chars) + untouched note only"
+else
+  bad "govgraph-probes stored line missing"; cat "$TD/run-ggp2.out"
+fi
+if grep -q "govgraph-probes setup complete" "$TD/run-ggp2.out"; then ok "govgraph-probes run completed"; else bad "govgraph-probes completion line missing"; fi
+if grep -q "revocation verified" "$TD/run-ggp2.out"; then ok "govgraph-probes run revoked its token"; else bad "govgraph-probes revocation missing"; fi
+BAO_TOKEN="$RT" bao read -format=json secret/data/monitoring/public-site-probes \
+  | jq -e --arg a "$PS_APEX" --arg s "$PS_STAGING" --arg ga "$GG_PS_APEX" --arg gs "$GG_PS_STAGING" \
+    '.data.data | ((keys | sort) == ["apex_url","govgraph_apex_url","govgraph_staging_url","staging_url"])
+     and .apex_url == $a and .staging_url == $s
+     and .govgraph_apex_url == $ga and .govgraph_staging_url == $gs' >/dev/null \
+  && ok "all four probe keys present; public-site URLs unchanged, govgraph URLs stored"
+if grep -qF "$GG_PS_APEX" "$TD/ssh-argv.log" || grep -qF "$GG_PS_STAGING" "$TD/ssh-argv.log"; then
+  bad "A GOVGRAPH PROBE URL APPEARED IN THE SSH BOUNDARY'S ARGV"
+else
+  ok "govgraph probe URLs never cross the ssh boundary on argv"
+fi
+if grep -qF "$GG_PS_APEX" "$TD/run-ggp2.out" || grep -qF "$GG_PS_STAGING" "$TD/run-ggp2.out"; then
+  bad "A GOVGRAPH PROBE URL WAS PRINTED INTO THE TRANSCRIPT"
+else
+  ok "govgraph probe URLs never printed"
+fi
+
+echo "== 16c. re-run refuses without --overwrite; --overwrite replaces just the govgraph keys"
+F16c=$(feed_ggprobes)
+run_flow_shim "$TD/run-ggp3.out" root-run govgraph-probes <"$F16c" || true
+if grep -q "already exist" "$TD/run-ggp3.out"; then
+  ok "second govgraph-probes run refuses the existing keys"
+else
+  bad "second govgraph-probes run did not refuse"; cat "$TD/run-ggp3.out"
+fi
+BAO_TOKEN="$RT" bao read -format=json secret/data/monitoring/public-site-probes \
+  | jq -e --arg ga "$GG_PS_APEX" --arg gs "$GG_PS_STAGING" --arg a "$PS_APEX" --arg s "$PS_STAGING" \
+    '.data.data | .govgraph_apex_url == $ga and .govgraph_staging_url == $gs and .apex_url == $a and .staging_url == $s' >/dev/null \
+  && ok "the refused run changed nothing (all four values intact)"
+F16d=$(feed_ggprobes "$GG_PS_APEX2" "$GG_PS_STAGING2")
+if run_flow_shim "$TD/run-ggp4.out" root-run govgraph-probes --overwrite <"$F16d"; then
+  ok "govgraph-probes --overwrite exited 0"
+else
+  bad "govgraph-probes --overwrite failed"; cat "$TD/run-ggp4.out"; exit 1
+fi
+BAO_TOKEN="$RT" bao read -format=json secret/data/monitoring/public-site-probes \
+  | jq -e --arg ga "$GG_PS_APEX2" --arg gs "$GG_PS_STAGING2" --arg a "$PS_APEX" --arg s "$PS_STAGING" \
+    '.data.data | ((keys | sort) == ["apex_url","govgraph_apex_url","govgraph_staging_url","staging_url"])
+     and .govgraph_apex_url == $ga and .govgraph_staging_url == $gs
+     and .apex_url == $a and .staging_url == $s' >/dev/null \
+  && ok "--overwrite replaced only the govgraph keys; public-site URLs still intact"
+
+echo "== 16d. public-site-probes --overwrite afterwards KEEPS the govgraph keys (patch, not put)"
+F16e=$(feed_publicsite)
+if run_flow_shim "$TD/run-ps3.out" root-run public-site-probes --overwrite <"$F16e"; then
+  ok "public-site-probes --overwrite exited 0"
+else
+  bad "public-site-probes --overwrite failed"; cat "$TD/run-ps3.out"; exit 1
+fi
+BAO_TOKEN="$RT" bao read -format=json secret/data/monitoring/public-site-probes \
+  | jq -e --arg a "$PS_APEX" --arg s "$PS_STAGING" --arg ga "$GG_PS_APEX2" --arg gs "$GG_PS_STAGING2" \
+    '.data.data | ((keys | sort) == ["apex_url","govgraph_apex_url","govgraph_staging_url","staging_url"])
+     and .apex_url == $a and .staging_url == $s
+     and .govgraph_apex_url == $ga and .govgraph_staging_url == $gs' >/dev/null \
+  && ok "public-site-probes --overwrite kept both govgraph keys (the modes cannot clobber each other)"
+if grep -q "public-site-probes setup complete" "$TD/run-ps3.out"; then ok "public-site-probes run completed"; else bad "public-site-probes completion line missing"; fi
+if grep -q "revocation verified" "$TD/run-ps3.out"; then ok "public-site-probes overwrite run revoked its token"; else bad "public-site-probes overwrite revocation missing"; fi
+unset RT GG_PS_APEX GG_PS_STAGING GG_PS_APEX2 GG_PS_STAGING2
 
 echo ""
 echo "result: $PASS passed, $FAIL failed"
