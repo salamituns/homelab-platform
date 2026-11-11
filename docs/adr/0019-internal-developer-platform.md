@@ -15,7 +15,7 @@
 | A | 7 Nov 2026 | Initial proposal from the three app repos, the live cluster and the 7 Nov hardening state |
 | B | 7 Nov 2026 | Owner decisions: protexa prod on a managed host (lab = pipeline + staging; protexa is demo/pilot, no live customers); govgraph DB is Supabase Postgres (moved from Neon by the owner); move both Vercel-DNS domains to Cloudflare |
 | C | 9 Nov 2026 | Phase 1 (personal site) done: cut-over record and gate evidence added; runbooks [edge-public.md](../runbooks/edge-public.md) and [promoter.md](../runbooks/promoter.md) |
-| D | 11 Nov 2026 | Phase 2 (govgraph) hosting decision: why govgraph exhausted Vercel's free tier, the app-side fix, traffic-spike behaviour behind Cloudflare, lab vs Vercel trade-offs, and the conditions before DNS cut-over. Corrects Phase 2 egress: web pods reach Supabase only; the refresh runs as a separate CronJob |
+| D | 11 Nov 2026 | Phase 2 (govgraph) hosting decision: why govgraph exhausted Vercel's free tier, the app-side fix, traffic-spike behaviour behind Cloudflare, lab vs Vercel trade-offs, and the conditions before DNS cut-over. Corrects Phase 2 egress: web pods reach Supabase Postgres only (`:5432`/`:6543`); the refresh runs as a separate CronJob with HTTPS, Postgres and web-pod `:3000` access |
 
 ## Scope
 
@@ -187,7 +187,7 @@ but idle as the documented fallback for each app until its first 30 days on the 
 |---|---|---|
 | **0. Platform prerequisites** | `workernode3` (D2); `nexus-pull` via ESO everywhere (closes ROADMAP item); Nexus `platform` repo + per-app repos/users; tenant kit (D1); `apps` AppProject + ApplicationSet (D5); OpenBao per-app paths + roles (D6) | A dummy app onboarded to `demo-staging` with one PR each; cross-tenant secret read denied; cross-namespace traffic denied |
 | **1. personal-site** | static profile; staging behind Access; `edge-public` + `public-gateway` + tunnel (D7); outside uptime check; cut DNS from Vercel | Public URL served from the lab; admin hostnames unreachable through the tunnel (tested); WAF on; 7 days green. **Done 2026-11-09** — see the Phase 1 gate evidence below |
-| **2. govgraph** | Edge rules first (cache, bots, rate limit; see Rev D); `next` profile; secrets from OpenBao; web pods egress to Supabase Postgres only (session `:5432`); refresh as its own `CronJob` with `CRON_SECRET` and HTTPS egress; revalidate every pod, then purge Cloudflare; tenant CPU/memory quota; DNS to Cloudflare | Page renders with live data; cron ran and the purge followed; edge cache hit ratio ≥ 90 % on HTML and graph data; SLO + logs per tenant; 7 days green |
+| **2. govgraph** | Edge rules first (cache, bots, rate limit; see Rev D); `next` profile; secrets from OpenBao; web pods egress to Supabase Postgres only (`:5432` session or `:6543` transaction pooler; the app uses `:6543` with `prepare: false`); refresh as its own `CronJob` with `CRON_SECRET`, HTTPS, Postgres and web-pod `:3000` access; revalidate every pod, then purge Cloudflare, then warm the top pages; staging refresh suspended; CPU/memory quota per govgraph namespace, staging + prod together sized to the node; DNS to Cloudflare | Page renders with live data; cron ran and the purge followed; edge cache hit ratio ≥ 90 % on HTML and graph data, measured over 7 days (the post-refresh cold start is included); SLO + logs per tenant; 7 days green |
 | **3. protexa** | staging in the lab behind Access (demo data only); prod pipeline deploys to the managed host; `VITE_AXXESS_API_KEY` moved server-side first; kletraq DNS to Cloudflare | Staging behind Access, both brands by host; managed prod deployed from the signed pipeline |
 | **4. Platform drills** | tunnel down, apps node loss, per-tenant secret rotation, onboard a 4th app in < 1 h | Postmortems like Week 8 |
 
@@ -259,13 +259,24 @@ visitor -> Cloudflare edge --HIT--> served by Cloudflare (lab not involved)
 
 | Spike | Reaches the lab | Expected outcome |
 |---|---|---|
-| Real readers (news story, viral post) | About one fetch per page per edge location per cache lifetime | Absorbed by the edge |
-| Crawlers walking every entity page | Each unique page once, then cached (about 1,000 pages × 92 KB, under 100 MB) | Absorbed |
-| Cache-busting traffic (random query strings, `/api` floods) | Every request | The real risk: bounded by the home uplink and Node CPU; mitigated by cache keys that ignore unknown query strings, Bot Fight Mode, AI-crawler blocking and one rate-limit rule |
+| Real readers (news story, viral post) | About one fetch per page per edge location (and per web pod, since each pod caches separately) per cache lifetime | Absorbed by the edge |
+| Crawlers walking every entity page | Each unique page once per edge location and per pod, then cached; about 1,000 pages × 92 KB is under 100 MB per pass, multiplied by locations and pods, and reset by each daily purge | Absorbed, at a few hundred MB a day at most |
+| Cache-busting traffic (random query strings, random paths such as unknown entity slugs or `/api/graph/<random>`) | Every request | The real risk: bounded by the home uplink, Node CPU and Supabase. Mitigations: cache keys that ignore unknown query strings, short edge caching of 404s, Bot Fight Mode, AI-crawler blocking and one rate-limit rule. Random-path floods are bounded only by the rate limit and the quota |
+
+**Daily cold start.** The 04:00 Africa/Lagos refresh invalidates every pod's cache and purges the
+whole Cloudflare zone at the same moment, so for a few minutes every page is a miss everywhere and
+all pods regenerate from Supabase together. This is accepted because of the hour (low traffic in
+Nigeria), and the refresh job warms the most-visited pages (`/ng` and the top entity pages) right
+after the purge. A spike that lands in that window is not absorbed by the edge. The purge is
+zone-wide (`purge_everything`), so the zone must hold govgraph hostnames only, and the staging
+refresh stays suspended (it shares the zone, see `docs/runbooks/govgraph.md`).
 
 Vercel scales out and bills (or blocks) under load. The lab has fixed capacity: under overload it
-slows or drops requests but never produces a bill, and the edge keeps serving cached pages,
-including during short origin outages.
+slows or drops requests but never produces a bill. During an origin outage the edge serves only
+what it still holds: pages cached since the last purge. Cloudflare free serves stale content only
+in limited cases, so availability during an outage is best effort; right after the daily purge it
+is close to none. `stale-if-error` on HTML responses and Always Online are follow-ups for the app,
+not guarantees.
 
 ### Options
 
@@ -273,7 +284,7 @@ including during short origin outages.
 |---|---|---|
 | Cost | Metered; a spike or bad build blocks the account (as happened). After the fix the same traffic would likely fit the free tier, but that is an estimate, not measured | No usage bill; Cloudflare free does not meter bandwidth |
 | Scaling | Automatic | Fixed; the edge cache does the scaling |
-| Availability | Provider-run | One host on a home connection (D9); uncached requests fail during power or ISP outages |
+| Availability | Provider-run | One host on a home connection (D9); uncached requests fail during power or ISP outages, and little is cached in the first minutes after each daily purge |
 | Operations | Revalidation and CDN purge are built in | We own the order: revalidate every pod, then purge the edge |
 | Isolation | Separate from the lab | Shares `workernode3` with other tenants; needs a quota so a spike cannot starve them |
 | Security | Provider's surface | Home network becomes internet-facing for app traffic (tunnel, no open ports, NetworkPolicy, read-only root filesystem) |
@@ -288,16 +299,23 @@ than it cost Vercel, and the move is the purpose of Phase 2. Vercel stays config
 1. **Edge rules are live before traffic moves.** Cache rules for HTML and the graph data (cache key
    ignores unknown query strings), Bot Fight Mode, AI-crawler blocking, and one rate-limit rule on
    uncacheable paths. Without them the lab takes every request.
-2. **Refresh ordering.** The refresh `CronJob` revalidates every web pod (each pod has its own ISR
-   cache in an `emptyDir`), then purges Cloudflare. Purging first would let the edge re-cache stale
-   pages. The purge token lives in OpenBao.
-3. **Split egress.** Web pods reach Supabase Postgres only. The refresh pod alone gets HTTPS egress
-   for its sources and the Cloudflare API.
+2. **Refresh ordering.** The refresh `CronJob` writes the snapshot, revalidates every web pod (each
+   pod has its own cache in an `emptyDir`; the revalidation Service sets `publishNotReadyAddresses`
+   so a briefly NotReady pod is not skipped), waits until each pod confirms the invalidation is
+   durable, then purges Cloudflare (`purge_everything` on a govgraph-only zone), then warms the top
+   pages. Purging first would let the edge re-cache stale pages. The purge token lives in OpenBao.
+   Only prod refreshes on schedule; staging is suspended because it shares the zone.
+3. **Split egress.** Web pods reach Supabase Postgres only (`:5432`/`:6543`, IP-wide with private,
+   CGNAT and link-local ranges excepted, since the CNI cannot match hostnames). The refresh pod gets
+   HTTPS for its sources and the Cloudflare API, Postgres, and `:3000` to the web pods, and the web
+   pods admit the refresh pod on `:3000`.
 4. **Build without database credentials.** CI builds the image without `DATABASE_URL`, and pages are
    generated on first request in the cluster. A build that can reach production data, or fails when
-   it cannot, is avoided.
-5. **Tenant quota.** CPU and memory limits on the govgraph namespace so an uncached flood degrades
-   govgraph only.
+   it cannot, is avoided. This lands with the app's lab-container change (app repo PR #76), not PR
+   #75; until it is merged, an image from the app's `main` cannot meet conditions 2 and 4.
+5. **Tenant quota.** A ResourceQuota on each govgraph namespace (`govgraph-staging`,
+   `govgraph-prod`), with the two together sized to leave `workernode3`'s other tenants their share,
+   so an uncached flood degrades govgraph only.
 6. **Outside check and alerts.** An outside uptime check (D8), an alert on edge cache hit ratio
    below 90 %, and an alert on origin egress above a daily threshold.
 
