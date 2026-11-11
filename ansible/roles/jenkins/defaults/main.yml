@@ -81,6 +81,14 @@ jenkins_promoter_watchdog_url_src: "{{ jenkins_private_dir }}/promoter-watchdog-
 # Push identity scoped to the personal-site Nexus repo only (created by the nexus role).
 jenkins_nexus_push_personal_site_user: push-personal-site
 jenkins_nexus_push_personal_site_src: /etc/nexus/secrets/push-personal-site
+# GHCR -> lab promoter for govgraph (same script, per-app env). Source repo name
+# may contain a domain: gitignored private/, never in git. Watchdog URL is a
+# separate healthchecks check so a personal-site failure does not page as govgraph.
+jenkins_govgraph_script_path: ci/promoters/govgraph.Jenkinsfile
+jenkins_govgraph_source_repo_src: "{{ jenkins_private_dir }}/govgraph-source-repo"
+jenkins_govgraph_promoter_watchdog_url_src: "{{ jenkins_private_dir }}/govgraph-promoter-watchdog-url"
+jenkins_nexus_push_govgraph_user: push-govgraph
+jenkins_nexus_push_govgraph_src: /etc/nexus/secrets/push-govgraph
 
 # Top-level plugins plus required deps from the LTS update center (core 2.580.2).
 # job-dsl removed 2026-10-31: the BelleShop job is created through the REST API (tasks/job.yml),

@@ -38,6 +38,16 @@
   register: jenkins_job_xml_personal_site
   when: jenkins_has_gitea_token | bool
 
+- name: Render the govgraph promoter job definition
+  ansible.builtin.template:
+    src: job-govgraph-promoter.xml.j2
+    dest: "{{ jenkins_job_dir }}/govgraph-promoter.xml"
+    owner: root
+    group: jenkins
+    mode: "0640"
+  register: jenkins_job_xml_govgraph
+  when: jenkins_has_gitea_token | bool
+
 # curl reads the admin login from stdin (-K -), so the password is never in a process list.
 # Password logins need a CSRF crumb from the same session, hence the cookie jar.
 # A job is POSTed only when it does not exist yet or its XML changed; otherwise "unchanged".
@@ -71,6 +81,9 @@
       enabled: "{{ jenkins_belleshop_owner | length > 0 }}"
     - name: personal-site-promoter
       changed: "{{ jenkins_job_xml_personal_site is changed }}"
+      enabled: true
+    - name: govgraph-promoter
+      changed: "{{ jenkins_job_xml_govgraph is changed }}"
       enabled: true
   when:
     - not ansible_check_mode

@@ -1,0 +1,44 @@
+# Refresh CronJob pods: HTTPS to the public internet (sources + Cloudflare purge API),
+# TCP 5432 to Supabase, TCP 3000 to web pods in this namespace (ISR revalidate).
+# RFC1918 is except'd on the 443 rule so a mis-aimed packet cannot walk the LAN.
+# 10.0.0.0/8 already covers the pod (10.244.0.0/16) and Service (10.96.0.0/12)
+# ranges; do not list those CIDRs again (overlapping except is rejected).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  name: govgraph-refresh-egress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: govgraph
+      app.kubernetes.io/component: refresh
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - { protocol: TCP, port: 443 }
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - { protocol: TCP, port: 5432 }
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: govgraph
+              app.kubernetes.io/component: web
+      ports:
+        - { protocol: TCP, port: 3000 }

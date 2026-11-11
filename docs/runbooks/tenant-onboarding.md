@@ -45,10 +45,11 @@ kubectl kustomize k8s/tenants/demo/staging
 kubectl kustomize k8s/platform/tenants
 ```
 
-**Public tenants** (proven with `personal-site`, live 2026-11-09; see
-`k8s/tenants/personal-site/` for the real overlay): also set the Namespace label
-`homelab.arpa/exposure: public` (the kit base defaults to `internal`) and include
-`../../_kit/public-ingress`, which admits `public-gateway-nginx` on 8080. Do **not** set
+**Public tenants** (proven with `personal-site`, live 2026-11-09; `govgraph` is the
+Phase 2 tenant — see `k8s/tenants/govgraph/` and [govgraph.md](govgraph.md)): also set
+the Namespace label `homelab.arpa/exposure: public` (the kit base defaults to
+`internal`) and include `../../_kit/public-ingress`, which admits
+`public-gateway-nginx` (patch the port if the app is not 8080). Do **not** set
 `homelab.arpa/gateway-routes` — that label admits the namespace to `homelab-gateway`.
 
 ### 3. Deploy PR (`apps-deploy`)

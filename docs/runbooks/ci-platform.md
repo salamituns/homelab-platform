@@ -3,8 +3,8 @@
 Design: [ADR 0011](../adr/0011-ci-platform-rebuild.md). Per-app registry repos and identities: [ADR 0019](../adr/0019-internal-developer-platform.md) D4.
 Roles: `ansible/roles/{nexus,sonarqube,jenkins,ci_agent,lab_ca_trust,containerd_registry}`.
 Playbooks: `ansible/playbooks/{nexus,sonarqube,jenkins,k8s-registry-trust}.yml`.
-Gates: `ci/gates/README.md`. GHCR → lab promoter (Jenkins job
-`personal-site-promoter`): [promoter.md](promoter.md). First draft: 2026-10-29.
+Gates: `ci/gates/README.md`. GHCR → lab promoter (Jenkins jobs
+`personal-site-promoter`, `govgraph-promoter`): [promoter.md](promoter.md). First draft: 2026-10-29.
 
 ## 1. What runs where
 
@@ -102,8 +102,8 @@ the host itself or by the owner by hand; nothing secret is in git.
 | Nexus admin password | `nexus:/root/nexus-admin-password` (0600) | `nexus` role (first-start rotation) | Owner login; later playbook runs. If you change it in the UI, update the file too |
 | `ci-push` registry password | `nexus:/etc/nexus/secrets/ci-push` (0600) | `nexus` role (`openssl rand`, on the host) | Copied onto `jenkins:/etc/jenkins/secrets/nexus-ci-push` (0640) -> Jenkins credential `nexus-ci-push` |
 | `k8s-pull` registry password | `nexus:/etc/nexus/secrets/k8s-pull` (0600) | `nexus` role | The k8s `imagePullSecret`. Nothing in this repo creates it yet; do it by hand (unverified) |
-| Per-app push passwords (`push-platform`, `push-personal-site`, `push-govgraph`, `push-protexa`) | `nexus:/etc/nexus/secrets/<user>` (0600) | `nexus` role (same on-host `openssl rand` mechanism as `ci-push`) | `push-personal-site` is copied onto `jenkins:/etc/jenkins/secrets/nexus-push-personal-site` -> Jenkins credential `nexus-push-personal-site`, used by the GHCR->lab promoter job (`ci/promoters/`, ADR 0019 D4). The other apps' job wiring is still future work |
-| Promoter dead-man ping URL | Mac: `private/promoter-watchdog-url` (gitignored) → `jenkins:/etc/jenkins/secrets/promoter-watchdog-url` (0640) | Owner (healthchecks.io check; period 15m) | JCasC credential `promoter-watchdog-url`. `personal-site-promoter` pings on success and `{url}/fail` after 3 consecutive failures ([public-site-alerts.md](public-site-alerts.md)). A UI-created credential would be wiped on the next `playbooks/jenkins.yml` run. No Jenkins prometheus plugin is installed |
+| Per-app push passwords (`push-platform`, `push-personal-site`, `push-govgraph`, `push-protexa`) | `nexus:/etc/nexus/secrets/<user>` (0600) | `nexus` role (same on-host `openssl rand` mechanism as `ci-push`) | `push-personal-site` / `push-govgraph` are copied onto Jenkins as `nexus-push-personal-site` / `nexus-push-govgraph` for the GHCR→lab promoter jobs (`ci/promoters/`, ADR 0019 D4). `push-protexa` / `push-platform` job wiring is still future work |
+| Promoter dead-man ping URL | Mac: `private/promoter-watchdog-url` and `private/govgraph-promoter-watchdog-url` (gitignored) → `jenkins:/etc/jenkins/secrets/` (0640) | Owner (healthchecks.io checks; period 15m; one check per job) | JCasC credentials `promoter-watchdog-url` and `govgraph-promoter-watchdog-url`. Each promoter pings on success and `{url}/fail` after 3 consecutive failures. A UI-created credential would be wiped on the next `playbooks/jenkins.yml` run. No Jenkins prometheus plugin is installed |
 | SonarQube admin password | `sonarqube:/root/sonarqube-initial-admin-password` (0600) | `sonarqube` role (rotates built-in `admin/admin`) | Owner login, and `tasks/integration.yml` reads it on every run: keep it (change it in the UI = update the file) |
 | SonarQube DB password | `sonarqube:/etc/sonarqube/secrets/db_password` (0640 root:sonar) | `sonarqube` role, on the host | `sonar.properties`; handed to `psql` on stdin, never argv |
 | SonarQube token for Jenkins | `sonarqube:/etc/sonarqube/secrets/jenkins-token` (0600) | `sonarqube` role (integration) | Copied onto `jenkins:/etc/jenkins/secrets/sonarqube-token` -> JCasC credential |

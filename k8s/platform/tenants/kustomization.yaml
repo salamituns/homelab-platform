@@ -9,3 +9,5 @@ resources:
   - ../../tenants/demo/staging
   - ../../tenants/personal-site/staging
   - ../../tenants/personal-site/prod
+  - ../../tenants/govgraph/staging
+  - ../../tenants/govgraph/prod

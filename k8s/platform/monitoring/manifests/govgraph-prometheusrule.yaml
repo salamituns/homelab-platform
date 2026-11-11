@@ -1,0 +1,54 @@
+# Govgraph tenant health (Phase 2). Live ruleSelector is {}
+# (ruleSelectorNilUsesHelmValues: false). Keep in lockstep with
+# k8s/platform/monitoring/rules/govgraph.rules.yaml.
+#
+# 5xx series appear only after apps-deploy scrapes the web pods. Missing series
+# do not fire (same pattern as public-edge probe alerts).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: govgraph-rules
+  namespace: monitoring
+  labels:
+    release: prometheus-stack
+spec:
+  groups:
+    - name: govgraph.health
+      rules:
+        - alert: GovgraphProd5xxRatioHigh
+          expr: |
+            (
+              sum(rate(http_requests_total{namespace="govgraph-prod",code=~"5.."}[5m]))
+              /
+              sum(rate(http_requests_total{namespace="govgraph-prod"}[5m]))
+            ) > 0.05
+          for: 10m
+          labels:
+            severity: critical
+            tenant: govgraph
+          annotations:
+            summary: "govgraph prod 5xx ratio is above 5%"
+            description: "More than 5% of scraped HTTP requests in govgraph-prod are 5xx for 10m (value {{ $value }}). See docs/runbooks/govgraph.md."
+            runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/govgraph.md
+        - alert: GovgraphRefreshStale
+          expr: |
+            (time() - kube_cronjob_status_last_successful_time{namespace="govgraph-prod",cronjob="govgraph-refresh"}) > 93600
+          for: 15m
+          labels:
+            severity: critical
+            tenant: govgraph
+          annotations:
+            summary: "govgraph-refresh last success is older than 26h"
+            description: "CronJob govgraph-prod/govgraph-refresh last succeeded {{ $value }} seconds ago (schedule 04:00 Africa/Lagos). See docs/runbooks/govgraph.md."
+            runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/govgraph.md
+        - alert: GovgraphProdUnavailable
+          expr: |
+            kube_deployment_status_replicas_available{namespace="govgraph-prod",deployment="web"} < 1
+          for: 2m
+          labels:
+            severity: critical
+            tenant: govgraph
+          annotations:
+            summary: "govgraph prod web Deployment has no available replicas"
+            description: "govgraph-prod/web has {{ $value }} available replicas (want 1). apps-deploy must name the Deployment web. See docs/runbooks/govgraph.md."
+            runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/govgraph.md

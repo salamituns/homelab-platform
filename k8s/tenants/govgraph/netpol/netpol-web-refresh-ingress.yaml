@@ -1,0 +1,23 @@
+# Refresh pods revalidate ISR on every web pod :3000 (each emptyDir cache).
+# Public-gateway ingress is the kit policy, patched to port 3000 and web pods.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  name: govgraph-web-refresh-ingress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: govgraph
+      app.kubernetes.io/component: web
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: govgraph
+              app.kubernetes.io/component: refresh
+      ports:
+        - { protocol: TCP, port: 3000 }

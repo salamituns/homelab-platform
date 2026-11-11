@@ -141,8 +141,14 @@ if [[ -z "${KUSTOMIZE_CMD:-}" ]]; then
 	ci_require_cmd docker
 fi
 
+# Per-app destinations. Defaults keep personal-site-promoter unchanged; govgraph-promoter
+# sets GHCR_IMAGE, DEST_IMAGE, OVERLAY_DIR, IMAGE_NAME, PROMOTE_APP, PROMOTE_BRANCH_PREFIX.
 DEST_IMAGE="${DEST_IMAGE:-registry.home.arpa/personal-site/site}"
 DEST_REF="${DEST_IMAGE}@${DIGEST}"
+PROMOTE_APP="${PROMOTE_APP:-personal-site}"
+PROMOTE_BRANCH_PREFIX="${PROMOTE_BRANCH_PREFIX:-site}"
+[[ "${PROMOTE_APP}" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] || ci_die "PROMOTE_APP is not a valid app id"
+[[ "${PROMOTE_BRANCH_PREFIX}" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] || ci_die "PROMOTE_BRANCH_PREFIX is not a valid branch prefix"
 
 [[ -n "${GITEA_PROMOTE_USER:-}" ]] || ci_die "GITEA_PROMOTE_USER is unset"
 [[ -n "${GITEA_PROMOTE_TOKEN:-}" ]] || ci_die "GITEA_PROMOTE_TOKEN is unset"
@@ -184,7 +190,7 @@ PY
 
 DEPLOY_REPO="${DEPLOY_REPO:-apps-deploy}"
 OVERLAY_DIR="${OVERLAY_DIR:-apps/personal-site/overlays/staging}"
-IMAGE_NAME="${IMAGE_NAME:-registry.home.arpa/personal-site/site}"
+IMAGE_NAME="${IMAGE_NAME:-${DEST_IMAGE}}"
 KUSTOMIZE_IMAGE="${KUSTOMIZE_IMAGE:-registry.k8s.io/kustomize/kustomize:v5.8.3@sha256:429eda4a1c76a7de458d0c4ca3ded9b5d764899ff6bdaeccc1d98b1b6ee873e4}"
 PROMOTE_REMOTE="${PROMOTE_REMOTE:-${GITEA_URL}/${GITEA_OWNER}/${DEPLOY_REPO}.git}"
 api="${GITEA_URL}/api/v1/repos/${GITEA_OWNER}/${DEPLOY_REPO}/pulls"
@@ -260,7 +266,7 @@ run_kustomize() {
 
 short="${DIGEST#sha256:}"
 short="${short:0:12}"
-BRANCH="promote/site-${short}"
+BRANCH="promote/${PROMOTE_BRANCH_PREFIX}-${short}"
 
 rm -rf "${DEPLOY_REPO}"
 git_auth clone "${PROMOTE_REMOTE}" "${DEPLOY_REPO}" || ci_die "cannot clone ${DEPLOY_REPO}"
@@ -308,7 +314,7 @@ else
 	git add "${OVERLAY_DIR}/kustomization.yaml"
 	git diff --cached --quiet && ci_die "kustomize wrote no change, but the overlay did not pin ${DIGEST}"
 	git -c user.name=ci-promote -c user.email=ci-promote@home.arpa \
-		commit -m "promote personal-site ${short}" || ci_die "git commit failed"
+		commit -m "promote ${PROMOTE_APP} ${short}" || ci_die "git commit failed"
 	git_auth push -u origin "${BRANCH}" || ci_die "git push failed"
 fi
 
@@ -338,10 +344,10 @@ fi
 
 pr_json="$(mktemp "${TMPDIR:-/tmp}/promote-pr.XXXXXX")"
 tmpfiles+=("${pr_json}")
-python3 - "${DIGEST}" "${DEST_REF}" "${pr_json}" <<'PY'
+python3 - "${DIGEST}" "${DEST_REF}" "${pr_json}" "${PROMOTE_APP}" "${PROMOTE_BRANCH_PREFIX}" <<'PY'
 import json, os, sys
 
-digest, dest_ref, path = sys.argv[1], sys.argv[2], sys.argv[3]
+digest, dest_ref, path, app, prefix = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
 body = (
     f"image: `{dest_ref}`\n"
     f"Jenkins: {os.environ.get('BUILD_URL', '')}\n"
@@ -350,8 +356,8 @@ body = (
     " re-signed + SPDX attested with the lab key.\n"
 )
 payload = {
-    "title": f"promote personal-site {digest[7:19]}",
-    "head": f"promote/site-{digest[7:19]}",
+    "title": f"promote {app} {digest[7:19]}",
+    "head": f"promote/{prefix}-{digest[7:19]}",
     "base": "main",
     "body": body,
 }

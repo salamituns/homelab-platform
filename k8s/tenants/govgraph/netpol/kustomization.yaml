@@ -1,0 +1,9 @@
+# Split egress/ingress for govgraph (ADR 0019 Rev D condition 3).
+# Included from staging/prod overlays as a Component so kustomize load restrictions
+# do not block a parent-directory resource file.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+resources:
+  - netpol-web-postgres-egress.yaml
+  - netpol-refresh-egress.yaml
+  - netpol-web-refresh-ingress.yaml

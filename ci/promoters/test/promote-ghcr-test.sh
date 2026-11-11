@@ -111,5 +111,31 @@ ok "merged: exits 0"                      '[ "$rc" = 0 ]'
 ok "merged: no writes, no PR"             '[ "$(copies)" = 0 ] && [ "$(signs)" = 0 ] && [ "$(posts | grep -c 201)" = 1 ]'
 ok "merged: says main already pins"       'grep -q "on main already pins" "$W/out.log"'
 ok "repo name never logged"               '! grep -qi "site.example" "$W/out.log"'
+
+# Second app: GHCR_IMAGE=govgraph, dest registry.home.arpa/govgraph/web (personal-site defaults stay).
+mkdir -p "$W/seed/apps/govgraph/overlays/staging"
+cat >"$W/seed/apps/govgraph/overlays/staging/kustomization.yaml" <<'EOF'
+images:
+  - name: registry.home.arpa/govgraph/web
+    newName: registry.home.arpa/govgraph/web
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+EOF
+(cd "$W/seed" && git add -A && git -c user.name=t -c user.email=t@t commit -qm govgraph-overlay && git push -q origin main)
+echo '[]' >"$W/prs.json"
+echo 201 >"$W/mode"
+: >"$W/posts"
+export GHCR_IMAGE=govgraph DEST_IMAGE=registry.home.arpa/govgraph/web
+export OVERLAY_DIR=apps/govgraph/overlays/staging IMAGE_NAME=registry.home.arpa/govgraph/web
+export PROMOTE_APP=govgraph PROMOTE_BRANCH_PREFIX=govgraph
+rc=$(run --dry-run)
+ok "govgraph dry-run exits 0"             '[ "$rc" = 0 ]'
+ok "govgraph dry-run: GHCR package is govgraph, not personal-site" 'grep -q "crane digest ghcr.io/owner/govgraph:main" "$CALLS"'
+ok "govgraph dry-run: no copy"            '[ "$(copies)" = 0 ]'
+rc=$(run)
+ok "govgraph promote exits 0"             '[ "$rc" = 0 ]'
+ok "govgraph copied once"                 '[ "$(copies)" = 1 ]'
+ok "govgraph branch prefix is govgraph"   'git -C "$W/remote.git" show promote/govgraph-aaaaaaaaaaaa:apps/govgraph/overlays/staging/kustomization.yaml | grep -q "$DIG"'
+ok "govgraph commit names the app"        'git -C "$W/remote.git" log promote/govgraph-aaaaaaaaaaaa -1 --format=%s | grep -q "promote govgraph"'
+ok "govgraph repo name never logged"      '! grep -qi "site.example" "$W/out.log"'
 echo "TOTAL pass=$pass fail=$fail"
 [ "$fail" = 0 ] || { echo "--- last out.log"; cat "$W/out.log"; }
