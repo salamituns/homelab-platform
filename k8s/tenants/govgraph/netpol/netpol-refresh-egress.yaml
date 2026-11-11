@@ -1,5 +1,5 @@
 # Refresh CronJob pods: HTTPS to the public internet (sources + Cloudflare purge API),
-# TCP 5432 to Supabase, TCP 3000 to web pods in this namespace (ISR revalidate).
+# TCP 5432/6543 to Supabase, TCP 3000 to web pods in this namespace (ISR revalidate).
 # RFC1918 is except'd on the 443 rule so a mis-aimed packet cannot walk the LAN.
 # 10.0.0.0/8 already covers the pod (10.244.0.0/16) and Service (10.96.0.0/12)
 # ranges; do not list those CIDRs again (overlapping except is rejected).
@@ -35,6 +35,7 @@ spec:
               - 192.168.0.0/16
       ports:
         - { protocol: TCP, port: 5432 }
+        - { protocol: TCP, port: 6543 }
     - to:
         - podSelector:
             matchLabels:

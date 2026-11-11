@@ -1,7 +1,8 @@
-# Web pods: DNS is tenant-dns-egress (all pods). Extra egress is TCP 5432 only.
+# Web pods: DNS is tenant-dns-egress (all pods). Extra egress is TCP 5432 (session) and 6543 (transaction pooler) only.
 # kube-network-policies v1.1.2 is post-DNAT and cannot match a hostname, so this
 # is an IP-wide :5432 rule with RFC1918 except'd (LAN Postgres stays closed).
-# Supabase session port is 5432 (ADR 0019 owner decision 2).
+# ADR 0019 owner decision 2: session :5432, or transaction pooler :6543 with
+# prepare:false (the app sets prepare:false and its URL uses :6543).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -25,3 +26,4 @@ spec:
               - 192.168.0.0/16
       ports:
         - { protocol: TCP, port: 5432 }
+        - { protocol: TCP, port: 6543 }

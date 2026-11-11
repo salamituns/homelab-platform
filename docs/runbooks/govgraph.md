@@ -34,9 +34,9 @@ share. Raise in the overlay if the app needs more; do not remove the quota.
 ## Split egress
 
 kube-network-policies v1.1.2 is **post-DNAT** and cannot match a hostname, so
-Supabase is an IP-wide TCP `:5432` allow with RFC1918 except'd (LAN Postgres stays
+Supabase is an IP-wide TCP `:5432` + `:6543` allow with RFC1918 except'd (LAN Postgres stays
 closed). Web pods have no `:443`. Refresh pods get `:443` except RFC1918 (and
-therefore except the cluster pod/Service ranges under `10.0.0.0/8`), `:5432` the same
+therefore except the cluster pod/Service ranges under `10.0.0.0/8`), `:5432`/`:6543` the same
 way, and TCP 3000 to web pods. Public-gateway ingress is the kit policy, patched to
 `component=web` port 3000, plus refresh→web `:3000`.
 
@@ -275,7 +275,7 @@ Do **not** change public DNS until all six are true:
    rule on uncacheable paths.
 2. **Refresh ordering.** CronJob revalidates every web pod, then purges. Purge token
    in OpenBao (`CF_API_TOKEN`).
-3. **Split egress.** Web = DNS + TCP 5432 only. Refresh = HTTPS + 5432 + web:3000.
+3. **Split egress.** Web = DNS + TCP 5432/6543 only (the app URL uses the transaction pooler :6543). Refresh = HTTPS + 5432/6543 + web:3000.
    Proven by the NetworkPolicies in this repo.
 4. **Build without database credentials.** Image build does not receive
    `DATABASE_URL`.
