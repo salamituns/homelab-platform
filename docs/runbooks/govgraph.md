@@ -171,10 +171,24 @@ spec:
       securityContext:
         runAsNonRoot: true
         runAsUser: 1001
+        runAsGroup: 1001
         fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: web
           image: registry.home.arpa/govgraph/web  # digest-pinned in the overlay
+          # start.mjs empties both cache mounts, then loads server.js, so a restart
+          # never serves entries whose in-memory invalidation tags were lost.
+          command: ["node", "/app/start.mjs"]
+          workingDir: /app
+          # Explicit: Kyverno require-requests-limits checks the pod template, which a
+          # LimitRange does not fill. Prod values; staging overlay: requests 150m/256Mi,
+          # limits.memory 768Mi. Fits the quota table above with a rollout surge plus refresh
+          # (prod requests 2 x (300m, 384Mi) + (100m, 384Mi) = 700m / 1152Mi <= 1 / 1536Mi).
+          resources:
+            requests: { cpu: 300m, memory: 384Mi }
+            limits: { memory: 1536Mi }
           ports:
             - containerPort: 3000
               name: http
@@ -184,9 +198,13 @@ spec:
           securityContext:
             readOnlyRootFilesystem: true
             allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           volumeMounts:
             - name: next-cache
               mountPath: /app/.next/cache
+            - name: route-cache            # ISR output, per the app contract (docs/lab-container.md); never mount over .next/server/app
+              mountPath: /app/.next/server/route-cache
           readinessProbe:
             httpGet:
               path: /healthz
@@ -197,7 +215,14 @@ spec:
               port: http
       volumes:
         - name: next-cache
-          emptyDir: {}
+          emptyDir:
+            sizeLimit: 128Mi
+        - name: route-cache
+          emptyDir:
+            # Exceeding a sizeLimit makes the kubelet EVICT the pod (not a failed write).
+            # Size is bounded by the route count (entries overwrite per route); take the
+            # measured value from the app contract x2, never below 2Gi.
+            sizeLimit: 2Gi
 ```
 
 #### Service + headless Service
@@ -222,9 +247,10 @@ metadata:
   name: web-headless
 spec:
   clusterIP: None
-  # Include NotReady pods: revalidation must reach them too — a pod that is still
-  # starting up has an unbusted ISR cache and would serve stale HTML once it turns
-  # Ready. Without this, headless DNS omits it and refresh.mjs never revalidates it.
+  # Include NotReady pods: a running pod that briefly fails readiness during the
+  # refresh keeps its cache files and in-memory tags; headless DNS would omit it,
+  # refresh.mjs would skip it, and it would serve stale HTML once Ready again.
+  # (A freshly started pod is safe: start.mjs empties its caches.)
   publishNotReadyAddresses: true
   ports:
     - name: http
@@ -236,7 +262,9 @@ spec:
 ```
 
 Refresh uses `REVALIDATE_HOST=web-headless` (or `web-headless.<ns>.svc`) and
-`REVALIDATE_PORT=3000` so every pod's `emptyDir` ISR cache is busted. Put those two
+`REVALIDATE_PORT=3000` so every pod expires its cache tags (in memory; the files under
+`.next/cache` and `.next/server/route-cache` stay on disk and are regenerated on the next
+request; only `start.mjs` deletes them). Put those two
 in the CronJob env; do not put them in OpenBao.
 
 #### CronJob (refresh)
@@ -263,11 +291,18 @@ spec:
           securityContext:
             runAsNonRoot: true
             runAsUser: 1001
+            runAsGroup: 1001
             fsGroup: 1001
+            seccompProfile:
+              type: RuntimeDefault
           containers:
             - name: refresh
               image: registry.home.arpa/govgraph/web  # same digest as web
-              command: ["node", "refresh.mjs"]
+              command: ["node", "/app/refresh.mjs"]
+              workingDir: /app
+              resources:                  # prod; staging overlay: 100m/256Mi, limit 512Mi
+                requests: { cpu: 100m, memory: 384Mi }
+                limits: { memory: 768Mi }
               envFrom:
                 - secretRef:
                     name: govgraph-refresh
@@ -286,6 +321,15 @@ spec:
               securityContext:
                 readOnlyRootFilesystem: true
                 allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+              volumeMounts:                # scratch only; the app contract states whether refresh writes anywhere
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: tmp
+              emptyDir:
+                sizeLimit: 64Mi
 ```
 
 Order inside `refresh.mjs`: revalidate every web pod, **then** purge Cloudflare
