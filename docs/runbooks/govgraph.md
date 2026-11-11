@@ -49,12 +49,19 @@ Details: [tenant-secrets.md](tenant-secrets.md).
 
 Then write the child objects with `root-run govgraph-secrets` (never print values; never
 commit them). `DATABASE_URL` is prompted hidden and shape-checked locally (postgres scheme,
-a host, port 5432/6543) before anything is contacted; `CRON_SECRET` is **generated on
-sectools** (32 random bytes, hex) — never prompted, never on the Mac, never printed. Prod
-additionally prompts hidden for `CF_ZONE_ID` (32 hex characters) and `CF_API_TOKEN` and
-writes the cloudflare object; staging writes no cloudflare object. Re-running without
-`--overwrite` refuses the existing objects and keeps `CRON_SECRET`, so web and refresh
-stay in agreement; `--overwrite` regenerates it. Values travel local variable → jq stdin
+a host, port 5432/6543) before anything is contacted, and internal whitespace is refused —
+only leading/trailing whitespace is trimmed — so a bad paste is never silently stored as a
+different value; `CRON_SECRET` is **generated on sectools** (32 random bytes, hex) — never
+prompted, never on the Mac, never printed. Prod additionally prompts hidden for
+`CF_ZONE_ID` (32 hex characters) and `CF_API_TOKEN` and writes the cloudflare object;
+staging writes no cloudflare object. Re-running without `--overwrite` refuses the existing
+objects and keeps `CRON_SECRET`, so web and refresh stay in agreement, and the skip path
+verifies what is actually stored (key set + `CRON_SECRET` shape, not just that the path
+exists); `--overwrite` replaces both objects, regenerating `CRON_SECRET`;
+`--overwrite-app` rotates only the app object, and `--overwrite-cloudflare` (prod only)
+rotates only the Cloudflare object while keeping `CRON_SECRET` byte-for-byte — use that one
+for a token rotation so the web and refresh cron secrets stay in agreement. Exactly one of
+the three flags may be passed. Values travel local variable → jq environment
 → ssh stdin payload → remote environment, never argv on either side, and the command
 prints only the key names written plus each path's version:
 
@@ -100,9 +107,14 @@ runs, and this is what unblocks it — ESO renders all four target files from th
 object, so until both keys exist the ExternalSecret cannot sync; the git bootstrap keeps
 `[]` for govgraph, so its alerts stay silent, not wrong. The mode PATCHes only the two
 govgraph keys into the shared object (created by `root-run public-site-probes`), keeping
-`apex_url`/`staging_url` untouched, and refuses existing govgraph keys without
-`--overwrite`; `public-site-probes` likewise carries the govgraph keys over on its
-writes, so the two modes cannot clobber each other. Both URLs are prompted hidden, must
+`apex_url`/`staging_url` untouched, and writes with a KV v2 check-and-set on the version
+it just read — if another writer races the run, the write fails and re-running is safe.
+It refuses existing govgraph keys without `--overwrite`, and it refuses before writing
+anything a stray key (either mode does; a human must remove it) or a lone govgraph key
+(`--overwrite` repairs a lone key; a missing `apex_url`/`staging_url` base pair is
+repaired by `root-run public-site-probes --overwrite`). `public-site-probes` likewise
+carries the govgraph keys over on its writes, so the two modes cannot clobber each
+other. Both URLs are prompted hidden, must
 be `https` and end in a slash, and are verified by key set and length, never printed:
 
 ```sh
