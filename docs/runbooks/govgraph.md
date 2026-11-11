@@ -78,25 +78,24 @@ env, properties matching `ExternalSecret/govgraph`:
 
 | Key | Used by |
 |---|---|
-| `DATABASE_URL` | Secret `govgraph` (web) and `govgraph-refresh` |
-| `CRON_SECRET` | Secret `govgraph` (web) and `govgraph-refresh` |
-| `CF_ZONE_ID` | Secret `govgraph-refresh` only |
-| `CF_API_TOKEN` | Secret `govgraph-refresh` only |
+| `DATABASE_URL` | Secret `govgraph` (web) and `govgraph-refresh`, both envs |
+| `CRON_SECRET` | Secret `govgraph` (web) and `govgraph-refresh`, both envs |
+| `CF_ZONE_ID` | Prod Secret `govgraph-refresh` only |
+| `CF_API_TOKEN` | Prod Secret `govgraph-refresh` only |
 
 `CF_API_TOKEN` is a Cloudflare API token with **Zone.Cache Purge** on the govgraph
-zone **only** (not account-wide, not DNS edit). Staging and prod may share a token if
-they share a zone.
+zone **only** (not account-wide, not DNS edit). Write it on the prod KV object only.
 
 **Staging does not purge.** Staging and prod sit in the same Cloudflare zone, and a
 purge clears the whole zone, so a staging refresh would also drop prod's edge cache.
 If staging also points at the prod Supabase database, it would write the same
-snapshot twice a day. So the staging CronJob ships with `suspend: true` and no `CF_*` keys in
-`secret/apps/govgraph/staging`. The program requires `CF_ZONE_ID` and `CF_API_TOKEN`
-before it persists anything, so a hand trigger
-(`kubectl create job --from=cronjob/govgraph-refresh`) fails closed on the missing
-keys and does not reach the purge. The staging ExternalSecret still lists those
-properties, so `Secret/govgraph-refresh` does not sync until they exist. Only prod
-refreshes on schedule. There is no `WARM_BASE_URL` in either environment.
+snapshot twice a day. So the staging CronJob ships with `suspend: true`, and the
+staging `ExternalSecret/govgraph-refresh` does not reference `CF_ZONE_ID` or
+`CF_API_TOKEN` (only `DATABASE_URL` and `CRON_SECRET`, so that Secret syncs without
+them). The program still requires the Cloudflare keys before it persists, so a hand
+trigger (`kubectl create job --from=cronjob/govgraph-refresh`) fails closed before
+the purge. Only prod refreshes on schedule. There is no `WARM_BASE_URL` in either
+environment.
 
 Gitea group `govgraph-dev` must exist; the tenant RoleBinding subjects that group.
 
@@ -197,8 +196,8 @@ spec:
           # limits.memory 768Mi. Fits the quota table above with a rollout surge plus refresh
           # (prod requests 2 x (300m, 384Mi) + (100m, 384Mi) = 700m / 1152Mi <= 1 / 1536Mi).
           resources:
-            requests: { cpu: 300m, memory: 384Mi }
-            limits: { memory: 1536Mi }
+            requests: { cpu: 300m, memory: 384Mi, ephemeral-storage: 512Mi }
+            limits: { memory: 1536Mi, ephemeral-storage: 3Gi }
           ports:
             - containerPort: 3000
               name: http
@@ -235,11 +234,11 @@ spec:
             sizeLimit: 2Gi
 ```
 
-The contract also says to budget ephemeral-storage request and limit for both
-cache volumes plus logs. These examples do not. The tenant ResourceQuota does not
-track ephemeral-storage, and the contract's only quantities are the emptyDir
-sizeLimits above (128Mi and 2Gi). No numeric pod ephemeral-storage request is given,
-so none is set.
+Web ephemeral-storage is request 512Mi and limit 3Gi: the 128Mi fetch cache, the
+2Gi route cache, and logs. Refresh is request 64Mi and limit 256Mi (no writable
+mount; the limit is log scratch). The tenant ResourceQuota has no ephemeral-storage
+key, so those requests are not quota. The LimitRange max is cpu and memory only, so
+it does not cap these.
 
 #### Service + headless Service
 
@@ -296,11 +295,13 @@ spec:
   schedule: "0 4 * * *"
   timeZone: Africa/Lagos
   concurrencyPolicy: Forbid
-  # No activeDeadlineSeconds. The contract says a deadline must cover persistence,
-  # the settle interval, both revalidate rounds and warm-up, and it gives no duration.
   suspend: false  # staging overlay: true — staging stays suspended (step 1)
   jobTemplate:
     spec:
+      # 1800s covers persist, two revalidate rounds, the 10s settle, one purge,
+      # and the per-pod warm. backoffLimit 2 stops OnFailure from re-purging forever.
+      activeDeadlineSeconds: 1800
+      backoffLimit: 2
       template:
         metadata:
           labels:
@@ -323,8 +324,8 @@ spec:
               command: ["node", "refresh.mjs"]
               workingDir: /app
               resources:                  # prod; staging overlay: 100m/256Mi, limit 512Mi
-                requests: { cpu: 100m, memory: 384Mi }
-                limits: { memory: 768Mi }
+                requests: { cpu: 100m, memory: 384Mi, ephemeral-storage: 64Mi }
+                limits: { memory: 768Mi, ephemeral-storage: 256Mi }
               envFrom:
                 - secretRef:
                     name: govgraph-refresh
