@@ -61,7 +61,10 @@ exists); `--overwrite` replaces both objects, regenerating `CRON_SECRET`;
 `--overwrite-app` rotates only the app object, and `--overwrite-cloudflare` (prod only)
 rotates only the Cloudflare object while keeping `CRON_SECRET` byte-for-byte — use that one
 for a token rotation so the web and refresh cron secrets stay in agreement. Exactly one of
-the three flags may be passed. Values travel local variable → jq environment
+the three flags may be passed, and each prompts only for the object it writes:
+`--overwrite-app` never asks for the CF values, `--overwrite-cloudflare` never asks for
+`DATABASE_URL`, so no value is read, held or shipped for an object the run does not
+touch. Values travel local variable → jq environment
 → ssh stdin payload → remote environment, never argv on either side, and the command
 prints only the key names written plus each path's version:
 
@@ -110,9 +113,12 @@ govgraph keys into the shared object (created by `root-run public-site-probes`),
 `apex_url`/`staging_url` untouched, and writes with a KV v2 check-and-set on the version
 it just read — if another writer races the run, the write fails and re-running is safe.
 It refuses existing govgraph keys without `--overwrite`, and it refuses before writing
-anything a stray key (either mode does; a human must remove it) or a lone govgraph key
-(`--overwrite` repairs a lone key; a missing `apex_url`/`staging_url` base pair is
-repaired by `root-run public-site-probes --overwrite`). `public-site-probes` likewise
+anything a stray key or a lone govgraph key. With `--overwrite` the write is the
+canonical four-key content: it repairs a lone govgraph key or an empty stored URL and
+drops any stray keys — so removing a stray key never needs a raw, argv-borne
+`bao kv put` (either mode does this; a missing `apex_url`/`staging_url` base pair is
+rebuilt by `root-run public-site-probes --overwrite`, as is a soft-deleted latest
+version — `bao kv delete` without `-versions`). `public-site-probes` likewise
 carries the govgraph keys over on its writes, so the two modes cannot clobber each
 other. Both URLs are prompted hidden, must
 be `https` and end in a slash, and are verified by key set and length, never printed:
