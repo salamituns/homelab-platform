@@ -187,7 +187,8 @@ prometheus:
     ruleSelectorNilUsesHelmValues: false
     serviceMonitorSelectorNilUsesHelmValues: false
     # Public-path blackbox jobs. Targets are file_sd from Secret
-    # public-site-probe-targets (empty [] in git; ESO merges OpenBao URLs).
+    # public-site-probe-targets (empty [] in git; ESO merges OpenBao URLs — one
+    # file per public path, personal-site and govgraph alike).
     # Prometheus itself still has no internet egress — blackbox_exporter does
     # the GET (monitoring-blackbox-public-egress).
     secrets:
@@ -219,6 +220,44 @@ prometheus:
         file_sd_configs:
           - files:
               - /etc/prometheus/secrets/public-site-probe-targets/staging.json
+            refresh_interval: 1m
+        relabel_configs:
+          - source_labels: [__address__]
+            target_label: __param_target
+          - source_labels: [__param_target]
+            target_label: instance
+          - target_label: __address__
+            replacement: blackbox-exporter.monitoring.svc:9115
+      # Govgraph public paths (Phase 2). Same file_sd Secret, separate files:
+      # apex expects 200 (http_2xx_public), staging expects 302 (behind
+      # Cloudflare Access, http_302_public). Govgraph serves no /metrics, so
+      # probe_success is its request-health signal (govgraph-rules).
+      - job_name: govgraph-apex
+        metrics_path: /probe
+        scrape_interval: 30s
+        scrape_timeout: 10s
+        params:
+          module: [http_2xx_public]
+        file_sd_configs:
+          - files:
+              - /etc/prometheus/secrets/public-site-probe-targets/govgraph-apex.json
+            refresh_interval: 1m
+        relabel_configs:
+          - source_labels: [__address__]
+            target_label: __param_target
+          - source_labels: [__param_target]
+            target_label: instance
+          - target_label: __address__
+            replacement: blackbox-exporter.monitoring.svc:9115
+      - job_name: govgraph-staging
+        metrics_path: /probe
+        scrape_interval: 30s
+        scrape_timeout: 10s
+        params:
+          module: [http_302_public]
+        file_sd_configs:
+          - files:
+              - /etc/prometheus/secrets/public-site-probe-targets/govgraph-staging.json
             refresh_interval: 1m
         relabel_configs:
           - source_labels: [__address__]

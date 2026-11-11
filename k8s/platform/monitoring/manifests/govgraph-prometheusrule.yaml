@@ -2,8 +2,14 @@
 # (ruleSelectorNilUsesHelmValues: false). Keep in lockstep with
 # k8s/platform/monitoring/rules/govgraph.rules.yaml.
 #
-# 5xx series appear only after apps-deploy scrapes the web pods. Missing series
-# do not fire (same pattern as public-edge probe alerts).
+# Request health: govgraph serves no /metrics and nothing scrapes the NGF data
+# plane (9113 has no ServiceMonitor), so the request-health signal is the
+# public-path blackbox probe — personal-site's pattern. Jobs govgraph-apex
+# (expect 200) and govgraph-staging (expect 302, behind Cloudflare Access) are
+# file_sd from Secret public-site-probe-targets; a 5xx response fails the
+# http_2xx_public module, so probe_success covers it. With no targets ("[]" in
+# git until OpenBao is filled) the series are absent and the alerts stay silent
+# (same pattern as public-edge probe alerts).
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -15,31 +21,46 @@ spec:
   groups:
     - name: govgraph.health
       rules:
-        - alert: GovgraphProd5xxRatioHigh
+        - alert: GovgraphApexDown
           expr: |
-            (
-              sum(rate(http_requests_total{namespace="govgraph-prod",code=~"5.."}[5m]))
-              /
-              sum(rate(http_requests_total{namespace="govgraph-prod"}[5m]))
-            ) > 0.05
-          for: 10m
+            probe_success{job="govgraph-apex"} == 0
+          for: 2m
           labels:
             severity: critical
             tenant: govgraph
           annotations:
-            summary: "govgraph prod 5xx ratio is above 5%"
-            description: "More than 5% of scraped HTTP requests in govgraph-prod are 5xx for 10m (value {{ $value }}). See docs/runbooks/govgraph.md."
+            summary: "Govgraph public apex probe is failing"
+            description: "probe_success{job=govgraph-apex} is 0 for 2m (expect HTTP 200 through the public path; any 5xx also fails the probe). See docs/runbooks/govgraph.md."
+            runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/govgraph.md
+        - alert: GovgraphStagingDown
+          expr: |
+            probe_success{job="govgraph-staging"} == 0
+          for: 2m
+          labels:
+            severity: critical
+            tenant: govgraph
+          annotations:
+            summary: "Govgraph staging probe is failing"
+            description: "probe_success{job=govgraph-staging} is 0 for 2m (expect HTTP 302 through the public path; govgraph staging sits behind Cloudflare Access). See docs/runbooks/govgraph.md."
             runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/govgraph.md
         - alert: GovgraphRefreshStale
           expr: |
-            (time() - kube_cronjob_status_last_successful_time{namespace="govgraph-prod",cronjob="govgraph-refresh"}) > 93600
+            (
+              time() - kube_cronjob_status_last_successful_time{namespace="govgraph-prod",cronjob="govgraph-refresh"}
+            ) > 93600
+            or
+            (
+              (time() - kube_cronjob_created{namespace="govgraph-prod",cronjob="govgraph-refresh"}) > 93600
+              and on (namespace, cronjob)
+              absent(kube_cronjob_status_last_successful_time{namespace="govgraph-prod",cronjob="govgraph-refresh"})
+            )
           for: 15m
           labels:
             severity: critical
             tenant: govgraph
           annotations:
-            summary: "govgraph-refresh last success is older than 26h"
-            description: "CronJob govgraph-prod/govgraph-refresh last succeeded {{ $value }} seconds ago (schedule 04:00 Africa/Lagos). See docs/runbooks/govgraph.md."
+            summary: "govgraph-refresh has not succeeded within 26h"
+            description: "CronJob govgraph-prod/govgraph-refresh: {{ $value }} seconds since the last success (or since creation if it never succeeded; threshold 26h, schedule 04:00 Africa/Lagos). See docs/runbooks/govgraph.md."
             runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/govgraph.md
         - alert: GovgraphProdUnavailable
           expr: |
