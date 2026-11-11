@@ -1,4 +1,4 @@
-# Runbook: the GHCR → lab promoter (`personal-site-promoter`)
+# Runbook: the GHCR → lab promoter (`personal-site-promoter`, `govgraph-promoter`)
 
 Why and what: [ADR 0019](../adr/0019-internal-developer-platform.md) D4. The personal site
 builds on GitHub Actions and pushes to GHCR, signed keyless with GitHub's OIDC. The lab does
@@ -7,14 +7,24 @@ promoter crosses the trust boundary: it verifies the GitHub identity, re-scans, 
 digest into the lab registry and re-signs it with the lab key.
 
 Script: `ci/promoters/promote-ghcr.sh` (installed at `/opt/ci-gates/promote-ghcr.sh` on
-`ci-agent`). Job wiring: `ci/promoters/personal-site.Jenkinsfile` (Jenkins job
-`personal-site-promoter`, cron `H/15 * * * *`, agent label `docker`). Tests:
-`ci/promoters/test/promote-ghcr-test.sh` (offline harness: stubbed tools, local git remote,
-fake Gitea API).
+`ci-agent`). Same script, per-app env (`GHCR_IMAGE`, `GHCR_WORKFLOW`, `DEST_IMAGE`,
+`OVERLAY_DIR`, `PROMOTE_APP`, `PROMOTE_BRANCH_PREFIX`). Job wiring:
 
-This repo is public. The GitHub source repo name (it contains the site's public domain)
-arrives as the Jenkins credential `personal-site-source-repo` and is **never printed**; logs
-carry digests only.
+| Jenkins job | Jenkinsfile | GHCR package | Nexus dest | Staging overlay | Branch prefix | Source-repo credential | Watchdog credential |
+|---|---|---|---|---|---|---|---|
+| `personal-site-promoter` | `ci/promoters/personal-site.Jenkinsfile` | `personal-site` | `registry.home.arpa/personal-site/site` | `apps/personal-site/overlays/staging` | `site` | `personal-site-source-repo` | `promoter-watchdog-url` |
+| `govgraph-promoter` | `ci/promoters/govgraph.Jenkinsfile` | `govgraph` | `registry.home.arpa/govgraph/web` | `apps/govgraph/overlays/staging` | `govgraph` | `govgraph-source-repo` | `govgraph-promoter-watchdog-url` |
+
+Both: cron `H/15 * * * *`, agent label `docker`. Both release workflows are
+**`lab-release.yml` on `main`** — the promoter verifies that exact workflow identity
+(`GHCR_WORKFLOW`, default `lab-release.yml`, at `refs/heads/main`), so a renamed workflow
+file stops promotion until the env is updated. Tests:
+`ci/promoters/test/promote-ghcr-test.sh` (offline harness: stubbed tools, local git remote,
+fake Gitea API; covers both apps). Watchdog ping values stay in gitignored `private/`.
+
+This repo is public. The GitHub source repo name (the personal site's contains its public
+domain) arrives as the per-app Jenkins source-repo credential and is **never printed**;
+logs carry digests only.
 
 ## How a release flows
 

@@ -9,13 +9,20 @@ trap 'kill $SRV 2>/dev/null; rm -rf "$W"' EXIT
 
 mkdir -p "$W/bin" "$W/opt" "$W/job"
 cp "$SRC/promoters/promote-ghcr.sh" "$SRC/gates/lib.sh" "$W/opt/"
+# Different fake digest per app so payload checks cannot pass on the wrong app.
 DIG=sha256:$(printf 'a%.0s' $(seq 64))
+DIG_GOV=sha256:$(printf 'b%.0s' $(seq 64))
 export CALLS="$W/calls.log"
 for t in crane cosign trivy syft; do
   cat >"$W/bin/$t" <<EOF
 #!/bin/bash
 echo "$t \$*" >>"\$CALLS"
-if [ "$t" = crane ] && [ "\$1" = digest ]; then echo "$DIG"; fi
+if [ "$t" = crane ] && [ "\$1" = digest ]; then
+  case "\$2" in
+    *govgraph*) echo "$DIG_GOV" ;;
+    *) echo "$DIG" ;;
+  esac
+fi
 # Like real cosign 3.x: COSIGN_KEY in the environment acts as --key, and --key plus a
 # keyless identity flag is an error (build #3, 2026-11-09).
 if [ "$t" = cosign ] && [ -n "\${COSIGN_KEY:-}" ] && printf '%s\n' "\$@" | grep -q -- '--certificate-identity'; then
@@ -83,9 +90,16 @@ rc=$(run --dry-run)
 ok "dry-run exits 0"                      '[ "$rc" = 0 ]'
 ok "dry-run: no copy, no sign"            '[ "$(copies)" = 0 ] && [ "$(signs)" = 0 ]'
 ok "dry-run: verify flags use repo claim" 'grep -q -- "--certificate-github-workflow-repository Owner/site.example" "$CALLS"'
+ok "dry-run: verify flags pin the workflow" 'grep -q "lab-release" "$CALLS"'
+ok "dry-run: log names the workflow"      'grep -q "workflow lab-release.yml@main" "$W/out.log"'
 ok "dry-run: ghcr ref = owner (lowercased) + GHCR_IMAGE, not the repo name" 'grep -q "crane digest ghcr.io/owner/personal-site:main" "$CALLS"'
 rc=$(GHCR_IMAGE='' run --dry-run)
 ok "GHCR_IMAGE unset is refused"          '[ "$rc" != 0 ] && grep -q "GHCR_IMAGE is unset" "$W/out.log"'
+rc=$(GHCR_WORKFLOW='Bad_Name.yml' run --dry-run)
+ok "GHCR_WORKFLOW invalid is refused"     '[ "$rc" != 0 ] && grep -q "GHCR_WORKFLOW is not a valid workflow file name" "$W/out.log"'
+rc=$(GHCR_WORKFLOW=govgraph-release.yml run --dry-run)
+ok "custom workflow reaches the identity flags" 'grep -q "workflows/govgraph-release" "$CALLS"'
+ok "custom workflow reaches the log"     'grep -q "workflow govgraph-release.yml@main" "$W/out.log"'
 
 echo 500 >"$W/mode"
 rc=$(run)
@@ -98,6 +112,10 @@ rc=$(run)
 ok "retry: exits 0"                       '[ "$rc" = 0 ]'
 ok "retry: no re-copy, no re-sign"        '[ "$(copies)" = 0 ] && [ "$(signs)" = 0 ]'
 ok "retry: PR created"                    '[ "$(posts | grep -c 201)" = 1 ]'
+ok "site PR head is the pushed branch"    'grep -q "\"head\": \"promote/site-aaaaaaaaaaaa\"" "$W/posts"'
+ok "site PR title names the app"          'grep -q "\"title\": \"promote personal-site aaaaaaaaaaaa\"" "$W/posts"'
+ok "site PR body names the app image"     'grep -q "registry.home.arpa/personal-site/site@$DIG" "$W/posts"'
+ok "site PR body names the workflow"      'grep -q "workflow lab-release.yml@main" "$W/posts"'
 
 rc=$(run)
 ok "PR open: exits 0, no writes"          '[ "$rc" = 0 ] && [ "$(copies)" = 0 ] && [ "$(signs)" = 0 ]'
@@ -111,5 +129,36 @@ ok "merged: exits 0"                      '[ "$rc" = 0 ]'
 ok "merged: no writes, no PR"             '[ "$(copies)" = 0 ] && [ "$(signs)" = 0 ] && [ "$(posts | grep -c 201)" = 1 ]'
 ok "merged: says main already pins"       'grep -q "on main already pins" "$W/out.log"'
 ok "repo name never logged"               '! grep -qi "site.example" "$W/out.log"'
+
+# Second app: GHCR_IMAGE=govgraph, dest registry.home.arpa/govgraph/web (personal-site defaults stay).
+mkdir -p "$W/seed/apps/govgraph/overlays/staging"
+cat >"$W/seed/apps/govgraph/overlays/staging/kustomization.yaml" <<'EOF'
+images:
+  - name: registry.home.arpa/govgraph/web
+    newName: registry.home.arpa/govgraph/web
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+EOF
+(cd "$W/seed" && git add -A && git -c user.name=t -c user.email=t@t commit -qm govgraph-overlay && git push -q origin main)
+echo '[]' >"$W/prs.json"
+echo 201 >"$W/mode"
+: >"$W/posts"
+export GHCR_IMAGE=govgraph DEST_IMAGE=registry.home.arpa/govgraph/web
+export OVERLAY_DIR=apps/govgraph/overlays/staging
+export PROMOTE_APP=govgraph PROMOTE_BRANCH_PREFIX=govgraph
+rc=$(run --dry-run)
+ok "govgraph dry-run exits 0"             '[ "$rc" = 0 ]'
+ok "govgraph dry-run: GHCR package is govgraph, not personal-site" 'grep -q "crane digest ghcr.io/owner/govgraph:main" "$CALLS"'
+ok "govgraph dry-run: no copy"           '[ "$(copies)" = 0 ]'
+ok "govgraph digest differs from personal-site" '[ "$DIG" != "$DIG_GOV" ]'
+rc=$(run)
+ok "govgraph promote exits 0"            '[ "$rc" = 0 ]'
+ok "govgraph copied once"                '[ "$(copies)" = 1 ]'
+ok "govgraph branch prefix is govgraph"  'git -C "$W/remote.git" show promote/govgraph-bbbbbbbbbbbb:apps/govgraph/overlays/staging/kustomization.yaml | grep -q "$DIG_GOV"'
+ok "govgraph commit names the app"       'git -C "$W/remote.git" log promote/govgraph-bbbbbbbbbbbb -1 --format=%s | grep -q "promote govgraph"'
+ok "govgraph PR head is the pushed branch" 'grep -q "\"head\": \"promote/govgraph-bbbbbbbbbbbb\"" "$W/posts"'
+ok "govgraph PR title names the app"     'grep -q "\"title\": \"promote govgraph bbbbbbbbbbbb\"" "$W/posts"'
+ok "govgraph PR body names the app image" 'grep -q "registry.home.arpa/govgraph/web@$DIG_GOV" "$W/posts"'
+ok "govgraph PR body names the workflow" 'grep -q "workflow lab-release.yml@main" "$W/posts"'
+ok "govgraph repo name never logged"     '! grep -qi "site.example" "$W/out.log"'
 echo "TOTAL pass=$pass fail=$fail"
 [ "$fail" = 0 ] || { echo "--- last out.log"; cat "$W/out.log"; }

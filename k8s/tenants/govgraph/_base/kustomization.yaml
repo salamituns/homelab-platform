@@ -1,0 +1,60 @@
+# Govgraph tenant shared base (ADR 0019 D1, Phase 2). Both env overlays (staging/,
+# prod/) include this component; an env overlay sets ONLY its namespace, OpenBao
+# role, ExternalSecret key path (the ENV placeholder in externalsecret-app.yaml)
+# and quota. Everything app-level lives here: the kit includes, the public
+# exposure label, the developer group and the gateway-ingress podSelector/port.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+resources:
+  - externalsecret-app.yaml
+components:
+  - ../../_kit/base
+  - ../../_kit/public-ingress
+  - ../netpol
+patches:
+  - target:
+      version: v1
+      kind: Namespace
+      name: tenant
+    patch: |-
+      - op: add
+        path: /metadata/labels/homelab.arpa~1tenant
+        value: govgraph
+      - op: replace
+        path: /metadata/labels/homelab.arpa~1exposure
+        value: public
+  - target:
+      group: rbac.authorization.k8s.io
+      version: v1
+      kind: RoleBinding
+      name: tenant-developer
+    patch: |-
+      - op: replace
+        path: /subjects/0/name
+        value: govgraph-dev
+  - target:
+      kind: NetworkPolicy
+      name: tenant-public-gateway-ingress
+    patch: |-
+      - op: replace
+        path: /spec/podSelector
+        value:
+          matchLabels:
+            app.kubernetes.io/name: govgraph
+            app.kubernetes.io/component: web
+      - op: replace
+        path: /spec/ingress/0/ports/0/port
+        value: 3000
+  - target:
+      kind: NetworkPolicy
+      name: tenant-gateway-ingress
+    patch: |-
+      - op: replace
+        path: /spec/podSelector
+        value:
+          matchLabels:
+            app.kubernetes.io/name: govgraph
+            app.kubernetes.io/component: web
+      - op: replace
+        path: /spec/ingress/0/ports/0/port
+        value: 3000

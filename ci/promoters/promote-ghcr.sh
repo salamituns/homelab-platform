@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
-# GHCR -> lab promoter (ADR 0019 D4, Phase 1 package B).
+# GHCR -> lab promoter (ADR 0019 D4; personal-site since Phase 1, govgraph Phase 2 —
+# per-app destinations and workflow are env, see GHCR_IMAGE / GHCR_WORKFLOW below).
 #
-# GitHub Actions builds the personal site and pushes it to GHCR, signed keyless with
-# GitHub's OIDC (Fulcio cert, Rekor log). The lab does not trust GitHub's keyless
-# identity for admission - Kyverno verifies the LAB Cosign key - so this script is
-# what crosses the trust boundary, on a 15-minute timer, for images not a pipeline:
+# GitHub Actions builds the app (personal site, govgraph) and pushes it to GHCR, signed
+# keyless with GitHub's OIDC (Fulcio cert, Rekor log). The lab does not trust GitHub's
+# keyless identity for admission - Kyverno verifies the LAB Cosign key - so this script
+# is what crosses the trust boundary, on a 15-minute timer, for images not a pipeline:
 #
 #   1. resolve ghcr.io/<owner>/<GHCR_IMAGE>:main to a digest (anonymous, package is public)
 #   2. cosign verify: Fulcio issuer + workflow identity + repository claim must all
-#      match <owner>/<repo>'s .github/workflows/lab-release.yml on refs/heads/main
+#      match <owner>/<repo>'s .github/workflows/<GHCR_WORKFLOW> on refs/heads/main
 #   3. same again for the SPDX SBOM attestation (cosign verify-attestation)
 #   4. Trivy re-scan of that exact digest (HIGH/CRITICAL with a fix available = stop)
 #   5. crane copy into the per-app Nexus repo PRESERVING the digest
@@ -18,9 +19,10 @@
 #
 # --dry-run stops after step 4: verify only, no copy, no sign, no PR.
 #
-# The GitHub repo name contains the site's public domain. It arrives via SOURCE_REPO
-# (Jenkins credential personal-site-source-repo) and is never printed: logs carry
-# digests only, and tool output goes to ${REPORT_DIR} or is checked by exit code.
+# The GitHub repo name can contain a public domain (the personal site's does). It
+# arrives via SOURCE_REPO (the per-app source-repo Jenkins credential) and is never
+# printed: logs carry digests only, and tool output goes to ${REPORT_DIR} or is
+# checked by exit code.
 
 # Installed at /opt/ci-gates (flat, next to the gates) or run from ci/promoters/
 # in a checkout, where the gates live at ../gates.
@@ -64,7 +66,7 @@ ci_require_cmd trivy
 # Strip whitespace: a credential read from a one-line file keeps its trailing newline,
 # which the anchored name checks below would (correctly) refuse.
 SOURCE_REPO="$(printf '%s' "${SOURCE_REPO:-}" | tr -d ' \t\r\n')"
-[[ -n "${SOURCE_REPO}" ]] || ci_die "SOURCE_REPO is unset (Jenkins credential personal-site-source-repo)"
+[[ -n "${SOURCE_REPO}" ]] || ci_die "SOURCE_REPO is unset (Jenkins credential <app>-source-repo)"
 OWNER="${SOURCE_REPO%%/*}"
 REPO="${SOURCE_REPO##*/}"
 # GitHub usernames are [A-Za-z0-9-] and repo names [A-Za-z0-9._-]; anything else is a
@@ -74,18 +76,27 @@ REPO="${SOURCE_REPO##*/}"
 [[ "${REPO}" =~ ^[A-Za-z0-9._-]+$ ]] || ci_die "SOURCE_REPO repo is not a GitHub repository name"
 
 GHCR_TAG="${GHCR_TAG:-main}"
-# The package name is what the release workflow pushes (ghcr.io/<owner>/<GHCR_IMAGE>), which
-# is NOT the repo name (lab-release.yml pushes "personal-site"). Set by the Jenkinsfile;
-# it carries no domain, so it may live in git. GHCR image paths are lowercase.
+# The package name is what the release workflow pushes (ghcr.io/<owner>/<GHCR_IMAGE>),
+# which is NOT the repo name (personal-site's lab-release.yml pushes "personal-site").
+# Set by the Jenkinsfile; it carries no domain, so it may live in git. GHCR image paths
+# are lowercase.
 [[ -n "${GHCR_IMAGE:-}" ]] || ci_die "GHCR_IMAGE is unset (the GHCR package name the release workflow pushes)"
 [[ "${GHCR_IMAGE}" =~ ^[a-z0-9]+([._/-][a-z0-9]+)*$ ]] || ci_die "GHCR_IMAGE is not a valid lowercase image name"
 GHCR_REF="ghcr.io/$(printf '%s' "${OWNER}" | tr '[:upper:]' '[:lower:]')/${GHCR_IMAGE}"
+
+# The release workflow file whose keyless identity this run verifies
+# (.github/workflows/<GHCR_WORKFLOW> on refs/heads/main). Both apps use lab-release.yml.
+# Same strictness as GHCR_IMAGE; the value is interpolated into a regexp below, so its
+# only regexp metacharacter ('.') is escaped first.
+GHCR_WORKFLOW="${GHCR_WORKFLOW:-lab-release.yml}"
+[[ "${GHCR_WORKFLOW}" =~ ^[a-z0-9]+([._/-][a-z0-9]+)*$ ]] || ci_die "GHCR_WORKFLOW is not a valid workflow file name"
+GHCR_WORKFLOW_RE="${GHCR_WORKFLOW//./\\.}"
 
 # Keyless identity: Fulcio issuer + the workflow in the SAN + the repository claim in
 # the OIDC token. The regexp keeps <owner> pinned but tolerates a renamed repo; the
 # repository flag then rejects any other repo outright.
 ID_ISSUER="https://token.actions.githubusercontent.com"
-ID_REGEXP="^https://github\\.com/${OWNER}/[^/]+/\\.github/workflows/lab-release\\.yml@refs/heads/main$"
+ID_REGEXP="^https://github\\.com/${OWNER}/[^/]+/\\.github/workflows/${GHCR_WORKFLOW_RE}@refs/heads/main$"
 VERIFY_FLAGS=(
 	--certificate-oidc-issuer "${ID_ISSUER}"
 	--certificate-identity-regexp "${ID_REGEXP}"
@@ -106,7 +117,7 @@ ci_log "promote: ${GHCR_TAG} is ${DIGEST}"
 # 2. Keyless signature must come from the release workflow on main.
 keyless verify "${VERIFY_FLAGS[@]}" "${SOURCE_REF}" \
 	>"${REPORT_DIR}/ghcr-signature.json" || ci_die "keyless signature verification failed"
-ci_log "promote: keyless signature verified (issuer ${ID_ISSUER}, workflow lab-release.yml@main)"
+ci_log "promote: keyless signature verified (issuer ${ID_ISSUER}, workflow ${GHCR_WORKFLOW}@main)"
 
 # 3. SPDX attestation, same identity. cosign prints the verified attestations to stdout.
 keyless verify-attestation --type spdxjson "${VERIFY_FLAGS[@]}" "${SOURCE_REF}" \
@@ -141,8 +152,14 @@ if [[ -z "${KUSTOMIZE_CMD:-}" ]]; then
 	ci_require_cmd docker
 fi
 
+# Per-app destinations. Defaults keep personal-site-promoter unchanged; govgraph-promoter
+# sets GHCR_IMAGE, DEST_IMAGE, OVERLAY_DIR, IMAGE_NAME, PROMOTE_APP, PROMOTE_BRANCH_PREFIX.
 DEST_IMAGE="${DEST_IMAGE:-registry.home.arpa/personal-site/site}"
 DEST_REF="${DEST_IMAGE}@${DIGEST}"
+PROMOTE_APP="${PROMOTE_APP:-personal-site}"
+PROMOTE_BRANCH_PREFIX="${PROMOTE_BRANCH_PREFIX:-site}"
+[[ "${PROMOTE_APP}" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] || ci_die "PROMOTE_APP is not a valid app id"
+[[ "${PROMOTE_BRANCH_PREFIX}" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] || ci_die "PROMOTE_BRANCH_PREFIX is not a valid branch prefix"
 
 [[ -n "${GITEA_PROMOTE_USER:-}" ]] || ci_die "GITEA_PROMOTE_USER is unset"
 [[ -n "${GITEA_PROMOTE_TOKEN:-}" ]] || ci_die "GITEA_PROMOTE_TOKEN is unset"
@@ -184,7 +201,7 @@ PY
 
 DEPLOY_REPO="${DEPLOY_REPO:-apps-deploy}"
 OVERLAY_DIR="${OVERLAY_DIR:-apps/personal-site/overlays/staging}"
-IMAGE_NAME="${IMAGE_NAME:-registry.home.arpa/personal-site/site}"
+IMAGE_NAME="${IMAGE_NAME:-${DEST_IMAGE}}"
 KUSTOMIZE_IMAGE="${KUSTOMIZE_IMAGE:-registry.k8s.io/kustomize/kustomize:v5.8.3@sha256:429eda4a1c76a7de458d0c4ca3ded9b5d764899ff6bdaeccc1d98b1b6ee873e4}"
 PROMOTE_REMOTE="${PROMOTE_REMOTE:-${GITEA_URL}/${GITEA_OWNER}/${DEPLOY_REPO}.git}"
 api="${GITEA_URL}/api/v1/repos/${GITEA_OWNER}/${DEPLOY_REPO}/pulls"
@@ -260,7 +277,7 @@ run_kustomize() {
 
 short="${DIGEST#sha256:}"
 short="${short:0:12}"
-BRANCH="promote/site-${short}"
+BRANCH="promote/${PROMOTE_BRANCH_PREFIX}-${short}"
 
 rm -rf "${DEPLOY_REPO}"
 git_auth clone "${PROMOTE_REMOTE}" "${DEPLOY_REPO}" || ci_die "cannot clone ${DEPLOY_REPO}"
@@ -308,7 +325,7 @@ else
 	git add "${OVERLAY_DIR}/kustomization.yaml"
 	git diff --cached --quiet && ci_die "kustomize wrote no change, but the overlay did not pin ${DIGEST}"
 	git -c user.name=ci-promote -c user.email=ci-promote@home.arpa \
-		commit -m "promote personal-site ${short}" || ci_die "git commit failed"
+		commit -m "promote ${PROMOTE_APP} ${short}" || ci_die "git commit failed"
 	git_auth push -u origin "${BRANCH}" || ci_die "git push failed"
 fi
 
@@ -338,20 +355,21 @@ fi
 
 pr_json="$(mktemp "${TMPDIR:-/tmp}/promote-pr.XXXXXX")"
 tmpfiles+=("${pr_json}")
-python3 - "${DIGEST}" "${DEST_REF}" "${pr_json}" <<'PY'
+# $BRANCH is built once above and passed in; the payload must never rebuild it.
+python3 - "${DIGEST}" "${DEST_REF}" "${pr_json}" "${PROMOTE_APP}" "${BRANCH}" "${GHCR_WORKFLOW}" <<'PY'
 import json, os, sys
 
-digest, dest_ref, path = sys.argv[1], sys.argv[2], sys.argv[3]
+digest, dest_ref, path, app, branch, workflow = sys.argv[1:7]
 body = (
     f"image: `{dest_ref}`\n"
     f"Jenkins: {os.environ.get('BUILD_URL', '')}\n"
-    "Verified keyless (issuer token.actions.githubusercontent.com, workflow"
-    " lab-release.yml@main), Trivy re-scan clean, copied digest-preserving,"
+    f"Verified keyless (issuer token.actions.githubusercontent.com, workflow"
+    f" {workflow}@main), Trivy re-scan clean, copied digest-preserving,"
     " re-signed + SPDX attested with the lab key.\n"
 )
 payload = {
-    "title": f"promote personal-site {digest[7:19]}",
-    "head": f"promote/site-{digest[7:19]}",
+    "title": f"promote {app} {digest[7:19]}",
+    "head": branch,
     "base": "main",
     "body": body,
 }

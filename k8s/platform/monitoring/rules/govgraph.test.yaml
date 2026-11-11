@@ -1,0 +1,161 @@
+# promtool test rules for govgraph tenant alerts. Rule file is extracted from the PrometheusRule CR.
+# Probe instance URLs are fake (apex.example): hostnames never belong in git.
+rule_files:
+  - govgraph.rules.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - name: healthy govgraph prod does not fire
+    interval: 1m
+    input_series:
+      - series: 'probe_success{job="govgraph-apex",instance="https://govgraph.example/"}'
+        values: "1x20"
+      - series: 'probe_success{job="govgraph-staging",instance="https://staging-govgraph.example/"}'
+        values: "1x20"
+      - series: 'kube_cronjob_status_last_successful_time{namespace="govgraph-prod",cronjob="govgraph-refresh"}'
+        values: "1x20"
+      - series: 'kube_deployment_status_replicas_available{namespace="govgraph-prod",deployment="web",job="kube-state-metrics"}'
+        values: "1x20"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: GovgraphApexDown
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: GovgraphStagingDown
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: GovgraphRefreshStale
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: GovgraphProdUnavailable
+        exp_alerts: []
+
+  - name: missing series do not fire
+    interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="personal-site-prod",deployment="personal-site",job="kube-state-metrics"}'
+        values: "1x20"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: GovgraphApexDown
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: GovgraphStagingDown
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: GovgraphRefreshStale
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: GovgraphProdUnavailable
+        exp_alerts: []
+
+  - name: failed govgraph probes page after 2m
+    interval: 1m
+    input_series:
+      - series: 'probe_success{job="govgraph-apex",instance="https://govgraph.example/"}'
+        values: "0x10"
+      - series: 'probe_success{job="govgraph-staging",instance="https://staging-govgraph.example/"}'
+        values: "0x10"
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: GovgraphApexDown
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: GovgraphApexDown
+        exp_alerts:
+          - exp_labels:
+              alertname: GovgraphApexDown
+              severity: critical
+              tenant: govgraph
+              job: govgraph-apex
+              instance: "https://govgraph.example/"
+            exp_annotations:
+              summary: "Govgraph public apex probe is failing"
+              description: "probe_success{job=govgraph-apex} is 0 for 2m (expect HTTP 200 through the public path; any 5xx also fails the probe). See docs/runbooks/govgraph.md."
+              runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/govgraph.md
+      - eval_time: 3m
+        alertname: GovgraphStagingDown
+        exp_alerts:
+          - exp_labels:
+              alertname: GovgraphStagingDown
+              severity: critical
+              tenant: govgraph
+              job: govgraph-staging
+              instance: "https://staging-govgraph.example/"
+            exp_annotations:
+              summary: "Govgraph staging probe is failing"
+              description: "probe_success{job=govgraph-staging} is 0 for 2m (expect HTTP 302 through the public path; govgraph staging sits behind Cloudflare Access). See docs/runbooks/govgraph.md."
+              runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/govgraph.md
+
+  - name: refresh last success older than 26h pages after 15m
+    interval: 1m
+    input_series:
+      - series: 'kube_cronjob_status_last_successful_time{namespace="govgraph-prod",cronjob="govgraph-refresh"}'
+        values: "0x1600"
+    alert_rule_test:
+      - eval_time: 25h
+        alertname: GovgraphRefreshStale
+        exp_alerts: []
+      - eval_time: 26h16m
+        alertname: GovgraphRefreshStale
+        exp_alerts:
+          - exp_labels:
+              alertname: GovgraphRefreshStale
+              severity: critical
+              tenant: govgraph
+              namespace: govgraph-prod
+              cronjob: govgraph-refresh
+            exp_annotations:
+              summary: "govgraph-refresh has not succeeded within 26h"
+              description: "CronJob govgraph-prod/govgraph-refresh: 94560 seconds since the last success (or since creation if it never succeeded; threshold 26h, schedule 04:00 Africa/Lagos). See docs/runbooks/govgraph.md."
+              runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/govgraph.md
+
+  - name: refresh that never succeeded pages after 26h of existing
+    # kube_cronjob_status_last_successful_time is absent until the first success;
+    # the alert must still fire once the CronJob has existed for 26h.
+    interval: 1m
+    input_series:
+      - series: 'kube_cronjob_created{namespace="govgraph-prod",cronjob="govgraph-refresh"}'
+        values: "0x1600"
+    alert_rule_test:
+      - eval_time: 25h
+        alertname: GovgraphRefreshStale
+        exp_alerts: []
+      - eval_time: 26h16m
+        alertname: GovgraphRefreshStale
+        exp_alerts:
+          - exp_labels:
+              alertname: GovgraphRefreshStale
+              severity: critical
+              tenant: govgraph
+              namespace: govgraph-prod
+              cronjob: govgraph-refresh
+            exp_annotations:
+              summary: "govgraph-refresh has not succeeded within 26h"
+              description: "CronJob govgraph-prod/govgraph-refresh: 94560 seconds since the last success (or since creation if it never succeeded; threshold 26h, schedule 04:00 Africa/Lagos). See docs/runbooks/govgraph.md."
+              runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/govgraph.md
+
+  - name: web pods not ready page after 2m
+    interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="govgraph-prod",deployment="web",job="kube-state-metrics"}'
+        values: "0x10"
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: GovgraphProdUnavailable
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: GovgraphProdUnavailable
+        exp_alerts:
+          - exp_labels:
+              alertname: GovgraphProdUnavailable
+              severity: critical
+              tenant: govgraph
+              namespace: govgraph-prod
+              deployment: web
+              job: kube-state-metrics
+            exp_annotations:
+              summary: "govgraph prod web Deployment has no available replicas"
+              description: "govgraph-prod/web has 0 available replicas (want 1). apps-deploy must name the Deployment web. See docs/runbooks/govgraph.md."
+              runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/govgraph.md

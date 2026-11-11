@@ -88,6 +88,15 @@ blackbox jobs (`public-site-apex` / `public-site-staging`), and OpenBao
 Prometheus has **no** internet egress; only blackbox_exporter is allowed TCP 443
 with RFC1918 except'd.
 
+## Govgraph tenant (Phase 2)
+
+PrometheusRule `govgraph-rules`: public-path probe failures (jobs `govgraph-apex` /
+`govgraph-staging`, file_sd targets like personal-site's — govgraph serves no `/metrics`,
+so a probe is where a 5xx shows), CronJob `govgraph-refresh` with no success within 26h
+(including never-succeeded), Deployment `web` available replicas. Runbook:
+[govgraph.md](govgraph.md). Cache-hit / origin-egress alerts from ADR 0019 Rev D
+condition 6 are not in this rule file (they need Cloudflare analytics).
+
 ## Dashboards as code (ADR 0017 PR 2)
 
 Grafana 13.1.3 loads dashboards from ConfigMaps labelled `grafana_dashboard=1` via the

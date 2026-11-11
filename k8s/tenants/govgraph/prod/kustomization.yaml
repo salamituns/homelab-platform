@@ -1,0 +1,111 @@
+# Govgraph tenant prod (ADR 0019 D1, Phase 2). Shared shape (kit includes, app
+# patches, ExternalSecrets) lives in ../_base; this overlay sets only the namespace,
+# OpenBao role, key path and quota. Promotion to prod is a human PR in apps-deploy
+# (staging digest copied to the prod overlay). OpenBao role tenant-govgraph-prod and
+# group govgraph-dev are owner steps (docs/runbooks/govgraph.md).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: govgraph-prod
+components:
+  - ../_base
+patches:
+  - target:
+      version: v1
+      kind: Namespace
+      name: tenant
+    patch: |-
+      - op: replace
+        path: /metadata/name
+        value: govgraph-prod
+      - op: add
+        path: /metadata/labels/homelab.arpa~1env
+        value: prod
+  - target:
+      group: external-secrets.io
+      version: v1
+      kind: SecretStore
+      name: openbao
+    patch: |-
+      - op: replace
+        path: /spec/provider/vault/auth/kubernetes/role
+        value: tenant-govgraph-prod
+  - target:
+      group: external-secrets.io
+      version: v1
+      kind: ExternalSecret
+      name: govgraph
+    patch: |-
+      - op: replace
+        path: /spec/data/0/remoteRef/key
+        value: apps/govgraph/prod
+      - op: replace
+        path: /spec/data/1/remoteRef/key
+        value: apps/govgraph/prod
+  - target:
+      group: external-secrets.io
+      version: v1
+      kind: ExternalSecret
+      name: govgraph-refresh
+    patch: |-
+      - op: replace
+        path: /spec/data/0/remoteRef/key
+        value: apps/govgraph/prod
+      - op: replace
+        path: /spec/data/1/remoteRef/key
+        value: apps/govgraph/prod
+      - op: replace
+        path: /spec/data/2/remoteRef/key
+        value: apps/govgraph/prod
+      - op: replace
+        path: /spec/data/3/remoteRef/key
+        value: apps/govgraph/prod
+  - target:
+      version: v1
+      kind: ResourceQuota
+      name: tenant-quota
+    # limits.memory fits 2 web pods (rollout surge) at the LimitRange max container
+    # limit (1536Mi) plus 1 refresh pod at the default limit (768Mi): 2*1536+768 =
+    # 3840Mi (was 3Gi = 3072Mi = exactly 2*1536, so the refresh pod did not fit).
+    # Arithmetic: docs/runbooks/govgraph.md.
+    patch: |-
+      - op: replace
+        path: /spec/hard/pods
+        value: "8"
+      - op: replace
+        path: /spec/hard/services
+        value: "6"
+      - op: replace
+        path: /spec/hard/requests.cpu
+        value: "1"
+      - op: replace
+        path: /spec/hard/requests.memory
+        value: 1536Mi
+      - op: replace
+        path: /spec/hard/limits.cpu
+        value: "2"
+      - op: replace
+        path: /spec/hard/limits.memory
+        value: 3840Mi
+  - target:
+      version: v1
+      kind: LimitRange
+      name: tenant-limits
+    patch: |-
+      - op: replace
+        path: /spec/limits/0/default/cpu
+        value: 500m
+      - op: replace
+        path: /spec/limits/0/default/memory
+        value: 768Mi
+      - op: replace
+        path: /spec/limits/0/defaultRequest/cpu
+        value: 200m
+      - op: replace
+        path: /spec/limits/0/defaultRequest/memory
+        value: 384Mi
+      - op: replace
+        path: /spec/limits/0/max/cpu
+        value: "1"
+      - op: replace
+        path: /spec/limits/0/max/memory
+        value: 1536Mi

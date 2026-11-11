@@ -1,0 +1,75 @@
+# Govgraph tenant health (Phase 2). Live ruleSelector is {}
+# (ruleSelectorNilUsesHelmValues: false). Keep in lockstep with
+# k8s/platform/monitoring/rules/govgraph.rules.yaml.
+#
+# Request health: govgraph serves no /metrics and nothing scrapes the NGF data
+# plane (9113 has no ServiceMonitor), so the request-health signal is the
+# public-path blackbox probe — personal-site's pattern. Jobs govgraph-apex
+# (expect 200) and govgraph-staging (expect 302, behind Cloudflare Access) are
+# file_sd from Secret public-site-probe-targets; a 5xx response fails the
+# http_2xx_public module, so probe_success covers it. With no targets ("[]" in
+# git until OpenBao is filled) the series are absent and the alerts stay silent
+# (same pattern as public-edge probe alerts).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: govgraph-rules
+  namespace: monitoring
+  labels:
+    release: prometheus-stack
+spec:
+  groups:
+    - name: govgraph.health
+      rules:
+        - alert: GovgraphApexDown
+          expr: |
+            probe_success{job="govgraph-apex"} == 0
+          for: 2m
+          labels:
+            severity: critical
+            tenant: govgraph
+          annotations:
+            summary: "Govgraph public apex probe is failing"
+            description: "probe_success{job=govgraph-apex} is 0 for 2m (expect HTTP 200 through the public path; any 5xx also fails the probe). See docs/runbooks/govgraph.md."
+            runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/govgraph.md
+        - alert: GovgraphStagingDown
+          expr: |
+            probe_success{job="govgraph-staging"} == 0
+          for: 2m
+          labels:
+            severity: critical
+            tenant: govgraph
+          annotations:
+            summary: "Govgraph staging probe is failing"
+            description: "probe_success{job=govgraph-staging} is 0 for 2m (expect HTTP 302 through the public path; govgraph staging sits behind Cloudflare Access). See docs/runbooks/govgraph.md."
+            runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/govgraph.md
+        - alert: GovgraphRefreshStale
+          expr: |
+            (
+              time() - kube_cronjob_status_last_successful_time{namespace="govgraph-prod",cronjob="govgraph-refresh"}
+            ) > 93600
+            or
+            (
+              (time() - kube_cronjob_created{namespace="govgraph-prod",cronjob="govgraph-refresh"}) > 93600
+              and on (namespace, cronjob)
+              absent(kube_cronjob_status_last_successful_time{namespace="govgraph-prod",cronjob="govgraph-refresh"})
+            )
+          for: 15m
+          labels:
+            severity: critical
+            tenant: govgraph
+          annotations:
+            summary: "govgraph-refresh has not succeeded within 26h"
+            description: "CronJob govgraph-prod/govgraph-refresh: {{ $value }} seconds since the last success (or since creation if it never succeeded; threshold 26h, schedule 04:00 Africa/Lagos). See docs/runbooks/govgraph.md."
+            runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/govgraph.md
+        - alert: GovgraphProdUnavailable
+          expr: |
+            kube_deployment_status_replicas_available{namespace="govgraph-prod",deployment="web"} < 1
+          for: 2m
+          labels:
+            severity: critical
+            tenant: govgraph
+          annotations:
+            summary: "govgraph prod web Deployment has no available replicas"
+            description: "govgraph-prod/web has {{ $value }} available replicas (want 1). apps-deploy must name the Deployment web. See docs/runbooks/govgraph.md."
+            runbook_url: https://gitea.home.arpa/tunsgit/homelab-platform/src/branch/main/docs/runbooks/govgraph.md

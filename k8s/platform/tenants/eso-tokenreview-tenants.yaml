@@ -15,6 +15,12 @@ subjects:
   - kind: ServiceAccount
     name: eso
     namespace: personal-site-prod
+  - kind: ServiceAccount
+    name: eso
+    namespace: govgraph-staging
+  - kind: ServiceAccount
+    name: eso
+    namespace: govgraph-prod
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
