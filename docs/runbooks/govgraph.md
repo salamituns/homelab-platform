@@ -9,42 +9,14 @@ Do not `kubectl apply` from this document until the owner is cutting over. Platf
 YAML is in `k8s/tenants/govgraph/`. Workloads (Deployment, Service, headless Service,
 CronJob, HTTPRoute) live in **apps-deploy**, not this repo.
 
-## Quota (why these numbers)
+## Quota
 
-`workernode3` is Terraform `4` cores / `8192` MiB (`terraform/proxmox/main.tf`, ADR 0019
-D2). **Live allocatable was not queried** (no cluster apply in this change). Typical
-kubelet reservation on an 8 Gi node leaves roughly 7–7.5 Gi allocatable after
-DaemonSets (Falco, Alloy, node-exporter, kube-network-policies, Flannel, kube-proxy).
+The numbers are the tenant overlays, not this page:
 
-The kit default is `requests.cpu: 2` / `requests.memory: 2Gi` **per namespace**. Two
-govgraph environments at kit default plus `personal-site` at kit default would
-oversubscribe the node before any cache-busting flood.
+- [`k8s/tenants/govgraph/staging/kustomization.yaml`](../../k8s/tenants/govgraph/staging/kustomization.yaml)
+- [`k8s/tenants/govgraph/prod/kustomization.yaml`](../../k8s/tenants/govgraph/prod/kustomization.yaml)
 
-Caps in the overlays (sum of requests is the scheduler truth):
-
-| Env | pods | requests | limits | LimitRange default / max |
-|---|---|---|---|---|
-| staging | 6 | 500m / 768Mi | 1 / 2Gi | 250m/512Mi, max 1/768Mi |
-| prod | 8 | 1 / 1536Mi | 2 / 3840Mi | 500m/768Mi, max 1/1536Mi |
-
-**Why limits.memory is that size** — a rollout surge of `web` (replicas 1 + surge 1) plus
-one refresh job pod must fit in the same namespace:
-
-| Env | web ×2 at the LimitRange **max** | refresh at the LimitRange **default** | limits.memory |
-|---|---|---|---|
-| staging | 2 × 768Mi = 1536Mi | 512Mi | 1536 + 512 = **2048Mi = 2Gi** |
-| prod | 2 × 1536Mi = 3072Mi | 768Mi | 3072 + 768 = **3840Mi** |
-
-(The first draft had 1536Mi / 3Gi: exactly 2 × max with nothing left, so the refresh pod
-could not be admitted during a surge.) Requests fit at the LimitRange defaultRequest:
-staging 3 × 256Mi = 768Mi, prod 3 × 384Mi = 1152Mi ≤ 1536Mi. That assumes apps-deploy
-does **not** set request = limit; if it ever does, raise `requests.memory` to match the
-limits line.
-
-Together: **1.5 CPU / 2.25 Gi requests**, **3 CPU / 5.75 Gi limits**. Limits are ceilings,
-not reservations — a cache-busting flood can still only consume govgraph's quota, and the
-kubelet's node-pressure eviction is the backstop; `personal-site` and DaemonSets keep
-their requests. Raise in the overlay if the app needs more; do not remove the quota.
+Container requests and limits are the apps-deploy manifests (`apps/govgraph`). `workernode3` is a 4-core / 8 Gi node, and the kit default per namespace plus `personal-site` would oversubscribe it. A web rollout surge plus one refresh pod has to fit the namespace quota. Limits are ceilings. Raise the overlay if the app needs more; do not remove the quota.
 
 ## Split egress
 
@@ -69,33 +41,40 @@ scripts/openbao-breakglass.sh root-run tenant govgraph prod --dry-run
 scripts/openbao-breakglass.sh root-run tenant govgraph prod
 ```
 
-Roles: `tenant-govgraph-staging`, `tenant-govgraph-prod`. Policy allows
-`secret/data/apps/govgraph/<env>/*` and `secret/data/platform/nexus-pull` only.
+Roles: `tenant-govgraph-staging`, `tenant-govgraph-prod`. The policy written by that
+script (tenant mode) is read on `secret/data/apps/govgraph/<env>/*` and
+`secret/data/platform/nexus-pull` only. The `/*` is children. The object
+`secret/data/apps/govgraph/<env>` itself is not granted, and a read of it is 403.
 Details: [tenant-secrets.md](tenant-secrets.md).
 
-Then write the app keys (never print values; never commit them). One KV object per
-env, properties matching `ExternalSecret/govgraph`:
+Then write the child objects (never print values; never commit them). `bao kv put`
+omits the `data/` segment that the policy path includes:
 
-| Key | Used by |
-|---|---|
-| `DATABASE_URL` | Secret `govgraph` (web) and `govgraph-refresh`, both envs |
-| `CRON_SECRET` | Secret `govgraph` (web) and `govgraph-refresh`, both envs |
-| `CF_ZONE_ID` | Prod Secret `govgraph-refresh` only |
-| `CF_API_TOKEN` | Prod Secret `govgraph-refresh` only |
+```sh
+scripts/openbao-breakglass.sh root-run -- bao kv put secret/apps/govgraph/staging/app \
+  DATABASE_URL='<value>' CRON_SECRET='<value>'
+scripts/openbao-breakglass.sh root-run -- bao kv put secret/apps/govgraph/prod/app \
+  DATABASE_URL='<value>' CRON_SECRET='<value>'
+scripts/openbao-breakglass.sh root-run -- bao kv put secret/apps/govgraph/prod/cloudflare \
+  CF_ZONE_ID='<value>' CF_API_TOKEN='<value>'
+```
+
+| KV object (`secret/` prefix) | Keys | Read by |
+|---|---|---|
+| `apps/govgraph/<env>/app` | `DATABASE_URL`, `CRON_SECRET` | Secret `govgraph` (web) and `govgraph-refresh`, that env |
+| `apps/govgraph/prod/cloudflare` | `CF_ZONE_ID`, `CF_API_TOKEN` | Prod Secret `govgraph-refresh` only |
 
 `CF_API_TOKEN` is a Cloudflare API token with **Zone.Cache Purge** on the govgraph
-zone **only** (not account-wide, not DNS edit). Write it on the prod KV object only.
+zone **only** (not account-wide, not DNS edit).
 
 **Staging does not purge.** Staging and prod sit in the same Cloudflare zone, and a
 purge clears the whole zone, so a staging refresh would also drop prod's edge cache.
 If staging also points at the prod Supabase database, it would write the same
-snapshot twice a day. So the staging CronJob ships with `suspend: true`, and the
-staging `ExternalSecret/govgraph-refresh` does not reference `CF_ZONE_ID` or
-`CF_API_TOKEN` (only `DATABASE_URL` and `CRON_SECRET`, so that Secret syncs without
-them). The program still requires the Cloudflare keys before it persists, so a hand
-trigger (`kubectl create job --from=cronjob/govgraph-refresh`) fails closed before
-the purge. Only prod refreshes on schedule. There is no `WARM_BASE_URL` in either
-environment.
+snapshot twice a day. So the staging CronJob ships with `suspend: true`, and there
+is no `apps/govgraph/staging/cloudflare` object. The staging refresh ExternalSecret
+reads only `apps/govgraph/staging/app`. The program still requires the Cloudflare
+keys before it persists, so a hand trigger fails closed before the purge. Only prod
+refreshes on schedule. There is no `WARM_BASE_URL` in either environment.
 
 Gitea group `govgraph-dev` must exist; the tenant RoleBinding subjects that group.
 
@@ -139,9 +118,13 @@ keep that file name and branch; see [promoter.md](promoter.md)).
 ### 3. apps-deploy PR (private repo)
 
 Digest-pin `registry.home.arpa/govgraph/web` after `govgraph-promoter` opens the
-staging PR. Copy-paste shapes below. Replace `<govgraph-host>` /
-`<govgraph-staging-host>`. Image digest comes from the promoter, not from git in
-this repo.
+staging PR. The prod overlay merges dark: `web` replicas 0 and CronJob
+`suspend: true`, so merging it does not serve traffic and does not purge. The human
+promotion PR sets replicas to 1, `suspend` to false, and copies the staging digest.
+Shapes below omit container resources; those live in apps-deploy `apps/govgraph`.
+Hostnames there are `govgraph.invalid` and `staging.govgraph.invalid` until the
+owner replaces them. This repo stays hostname-free (`<govgraph-host>` /
+`<govgraph-staging-host>`).
 
 Labels the platform NetworkPolicies select:
 
@@ -177,6 +160,7 @@ spec:
     spec:
       automountServiceAccountToken: false
       imagePullSecrets: [{name: nexus-pull}]
+      terminationGracePeriodSeconds: 30
       securityContext:
         runAsNonRoot: true
         runAsUser: 1001
@@ -191,13 +175,7 @@ spec:
           # never serves entries whose in-memory invalidation tags were lost.
           command: ["node", "start.mjs"]
           workingDir: /app
-          # Explicit: Kyverno require-requests-limits checks the pod template, which a
-          # LimitRange does not fill. Prod values; staging overlay: requests 150m/256Mi,
-          # limits.memory 768Mi. Fits the quota table above with a rollout surge plus refresh
-          # (prod requests 2 x (300m, 384Mi) + (100m, 384Mi) = 700m / 1152Mi <= 1 / 1536Mi).
-          resources:
-            requests: { cpu: 300m, memory: 384Mi, ephemeral-storage: 512Mi }
-            limits: { memory: 1536Mi, ephemeral-storage: 3Gi }
+          # resources: apps-deploy apps/govgraph
           ports:
             - containerPort: 3000
               name: http
@@ -209,6 +187,11 @@ spec:
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
+          # Native preStop sleep. The image has no shell. Cluster is Kubernetes 1.33.
+          lifecycle:
+            preStop:
+              sleep:
+                seconds: 5
           volumeMounts:
             - name: next-cache
               mountPath: /app/.next/cache
@@ -234,11 +217,9 @@ spec:
             sizeLimit: 2Gi
 ```
 
-Web ephemeral-storage is request 512Mi and limit 3Gi: the 128Mi fetch cache, the
-2Gi route cache, and logs. Refresh is request 64Mi and limit 256Mi (no writable
-mount; the limit is log scratch). The tenant ResourceQuota has no ephemeral-storage
-key, so those requests are not quota. The LimitRange max is cpu and memory only, so
-it does not cap these.
+Container resources, including ephemeral-storage, are in apps-deploy `apps/govgraph`.
+The tenant ResourceQuota does not list ephemeral-storage, and the LimitRange max is
+cpu and memory only.
 
 #### Service + headless Service
 
@@ -295,11 +276,10 @@ spec:
   schedule: "0 4 * * *"
   timeZone: Africa/Lagos
   concurrencyPolicy: Forbid
-  suspend: false  # staging overlay: true — staging stays suspended (step 1)
+  suspend: false  # both overlays set true; the prod promotion PR sets false
   jobTemplate:
     spec:
-      # 1800s covers persist, two revalidate rounds, the 10s settle, one purge,
-      # and the per-pod warm. backoffLimit 2 stops OnFailure from re-purging forever.
+      # Deadline covers persist, two revalidate rounds, the settle, one purge, and the warm.
       activeDeadlineSeconds: 1800
       backoffLimit: 2
       template:
@@ -308,7 +288,7 @@ spec:
             app.kubernetes.io/name: govgraph
             app.kubernetes.io/component: refresh
         spec:
-          restartPolicy: OnFailure
+          restartPolicy: Never
           automountServiceAccountToken: false
           imagePullSecrets: [{name: nexus-pull}]
           securityContext:
@@ -323,9 +303,7 @@ spec:
               image: registry.home.arpa/govgraph/web  # same digest as web
               command: ["node", "refresh.mjs"]
               workingDir: /app
-              resources:                  # prod; staging overlay: 100m/256Mi, limit 512Mi
-                requests: { cpu: 100m, memory: 384Mi, ephemeral-storage: 64Mi }
-                limits: { memory: 768Mi, ephemeral-storage: 256Mi }
+              # resources: apps-deploy apps/govgraph
               envFrom:
                 - secretRef:
                     name: govgraph-refresh
@@ -355,8 +333,9 @@ that page on **each pod** directly (the A records captured from `web-headless`).
 That fills pod caches. The Cloudflare edge is filled later by real client misses.
 A failed persist, DNS lookup, revalidation round, or purge skips warm-up and fails
 the job. A warm-up failure is logged (`pod warmups failed after purge; refresh
-succeeded`) and does **not** fail the job, so `restartPolicy: OnFailure` cannot
-re-run persist and purge. It also cannot undo the purge.
+succeeded`) and does **not** fail the job, so it does not consume `backoffLimit`.
+`restartPolicy: Never` does not restart the pod in place. A failed purge can be
+retried only up to that limit, and it cannot be undone.
 
 #### HTTPRoute (hostnames only in apps-deploy)
 
@@ -402,7 +381,7 @@ Do **not** change public DNS until all six are true:
    Proven by the NetworkPolicies in this repo.
 4. **Build without database credentials.** Image build does not receive
    `DATABASE_URL`.
-5. **Tenant quota.** Caps above are synced on `govgraph-staging` / `govgraph-prod`.
+5. **Tenant quota.** The caps in `k8s/tenants/govgraph/{staging,prod}` are synced on `govgraph-staging` / `govgraph-prod`.
 6. **Outside check and alerts.** Outside uptime check (D8). PrometheusRule
    `govgraph-rules` covers the public-path probes (apex + staging — that is where a 5xx
    shows), CronJob no success within 26h (including a CronJob that has never succeeded),
