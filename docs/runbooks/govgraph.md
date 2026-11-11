@@ -91,9 +91,12 @@ they share a zone.
 purge clears the whole zone, so a staging refresh would also drop prod's edge cache.
 If staging also points at the prod Supabase database, it would write the same
 snapshot twice a day. So the staging CronJob ships with `suspend: true` and no `CF_*` keys in
-`secret/apps/govgraph/staging`; trigger it by hand (`kubectl create job --from=cronjob/...`)
-when testing a refresh, and expect it to fail at the purge step. Only prod refreshes
-on schedule.
+`secret/apps/govgraph/staging`. The program requires `CF_ZONE_ID` and `CF_API_TOKEN`
+before it persists anything, so a hand trigger
+(`kubectl create job --from=cronjob/govgraph-refresh`) fails closed on the missing
+keys and does not reach the purge. The staging ExternalSecret still lists those
+properties, so `Secret/govgraph-refresh` does not sync until they exist. Only prod
+refreshes on schedule. There is no `WARM_BASE_URL` in either environment.
 
 Gitea group `govgraph-dev` must exist; the tenant RoleBinding subjects that group.
 
@@ -158,6 +161,11 @@ metadata:
   name: web
 spec:
   replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       app.kubernetes.io/name: govgraph
@@ -168,6 +176,8 @@ spec:
         app.kubernetes.io/name: govgraph
         app.kubernetes.io/component: web
     spec:
+      automountServiceAccountToken: false
+      imagePullSecrets: [{name: nexus-pull}]
       securityContext:
         runAsNonRoot: true
         runAsUser: 1001
@@ -180,7 +190,7 @@ spec:
           image: registry.home.arpa/govgraph/web  # digest-pinned in the overlay
           # start.mjs empties both cache mounts, then loads server.js, so a restart
           # never serves entries whose in-memory invalidation tags were lost.
-          command: ["node", "/app/start.mjs"]
+          command: ["node", "start.mjs"]
           workingDir: /app
           # Explicit: Kyverno require-requests-limits checks the pod template, which a
           # LimitRange does not fill. Prod values; staging overlay: requests 150m/256Mi,
@@ -225,6 +235,12 @@ spec:
             sizeLimit: 2Gi
 ```
 
+The contract also says to budget ephemeral-storage request and limit for both
+cache volumes plus logs. These examples do not. The tenant ResourceQuota does not
+track ephemeral-storage, and the contract's only quantities are the emptyDir
+sizeLimits above (128Mi and 2Gi). No numeric pod ephemeral-storage request is given,
+so none is set.
+
 #### Service + headless Service
 
 ```yaml
@@ -261,11 +277,13 @@ spec:
     app.kubernetes.io/component: web
 ```
 
-Refresh uses `REVALIDATE_HOST=web-headless` (or `web-headless.<ns>.svc`) and
-`REVALIDATE_PORT=3000` so every pod expires its cache tags (in memory; the files under
+Refresh uses `REVALIDATE_HOST=web-headless` (or `web-headless.<ns>.svc`),
+`REVALIDATE_PORT=3000` and `REVALIDATE_SETTLE_MS=10000` so every pod expires its cache
+tags twice, with a settle wait between the rounds (in memory; the files under
 `.next/cache` and `.next/server/route-cache` stay on disk and are regenerated on the next
-request; only `start.mjs` deletes them). Put those two
-in the CronJob env; do not put them in OpenBao.
+request; only `start.mjs` deletes them). Put those three
+in the CronJob env; do not put them in OpenBao. The settle value is the program
+default; it has to be longer than the longest render, including database latency.
 
 #### CronJob (refresh)
 
@@ -278,7 +296,9 @@ spec:
   schedule: "0 4 * * *"
   timeZone: Africa/Lagos
   concurrencyPolicy: Forbid
-  suspend: false  # staging overlay: true — staging refreshes by hand only (step 1)
+  # No activeDeadlineSeconds. The contract says a deadline must cover persistence,
+  # the settle interval, both revalidate rounds and warm-up, and it gives no duration.
+  suspend: false  # staging overlay: true — staging stays suspended (step 1)
   jobTemplate:
     spec:
       template:
@@ -288,6 +308,8 @@ spec:
             app.kubernetes.io/component: refresh
         spec:
           restartPolicy: OnFailure
+          automountServiceAccountToken: false
+          imagePullSecrets: [{name: nexus-pull}]
           securityContext:
             runAsNonRoot: true
             runAsUser: 1001
@@ -298,7 +320,7 @@ spec:
           containers:
             - name: refresh
               image: registry.home.arpa/govgraph/web  # same digest as web
-              command: ["node", "/app/refresh.mjs"]
+              command: ["node", "refresh.mjs"]
               workingDir: /app
               resources:                  # prod; staging overlay: 100m/256Mi, limit 512Mi
                 requests: { cpu: 100m, memory: 384Mi }
@@ -311,31 +333,29 @@ spec:
                   value: web-headless
                 - name: REVALIDATE_PORT
                   value: "3000"
-                # Prod only. After a successful purge, refresh.mjs warms the public
-                # origin — GETs WARM_BASE_URL for /ng plus the top entity pages, low
-                # concurrency — so the pod caches and the nearest edge refill after
-                # the daily cold start. Optional: unset, the run skips warm-up with a
-                # log line. Staging does not purge, so it does not set this.
-                - name: WARM_BASE_URL
-                  value: https://<govgraph-host>  # prod; omit in the staging overlay
+                - name: REVALIDATE_SETTLE_MS
+                  value: "10000"
               securityContext:
                 readOnlyRootFilesystem: true
                 allowPrivilegeEscalation: false
                 capabilities:
                   drop: ["ALL"]
-              volumeMounts:                # scratch only; the app contract states whether refresh writes anywhere
-                - name: tmp
-                  mountPath: /tmp
-          volumes:
-            - name: tmp
-              emptyDir:
-                sizeLimit: 64Mi
+              # No volumeMounts. The contract: refresh writes nowhere (no cache, no /tmp).
 ```
 
-Order inside `refresh.mjs`: revalidate every web pod, **then** purge Cloudflare
-(ADR Rev D condition 2). Purging first lets the edge re-cache stale HTML. Prod then
-**warms up** (WARM_BASE_URL): re-GET the public origin so the pods and the nearest
-edge re-cache instead of leaving the first real visitor to eat the cold cache.
+Do not set `WARM_BASE_URL`. `refresh.mjs` does not read it.
+
+Order inside `refresh.mjs`: persist, revalidate every web pod, wait
+`REVALIDATE_SETTLE_MS`, revalidate every web pod again, **then** purge Cloudflare
+(ADR Rev D condition 2), **then** warm the pods. Purging earlier lets the edge
+re-cache stale HTML. Warm-up is not an edge refill and not a GET of the public
+hostname. After the purge the job GETs `/ng` and the versioned graph URL found in
+that page on **each pod** directly (the A records captured from `web-headless`).
+That fills pod caches. The Cloudflare edge is filled later by real client misses.
+A failed persist, DNS lookup, revalidation round, or purge skips warm-up and fails
+the job. A warm-up failure is logged (`pod warmups failed after purge; refresh
+succeeded`) and does **not** fail the job, so `restartPolicy: OnFailure` cannot
+re-run persist and purge. It also cannot undo the purge.
 
 #### HTTPRoute (hostnames only in apps-deploy)
 
@@ -348,6 +368,7 @@ spec:
   parentRefs:
     - name: public-gateway
       namespace: nginx-gateway
+      sectionName: http
   hostnames:
     - "<govgraph-host>"   # staging overlay: <govgraph-staging-host>
   rules:
@@ -369,8 +390,10 @@ Do **not** change public DNS until all six are true:
 1. **Edge rules live.** Cache rules for HTML and the graph data (cache key ignores
    unknown query strings), Bot Fight Mode, AI-crawler blocking, and one rate-limit
    rule on uncacheable paths.
-2. **Refresh ordering.** CronJob revalidates every web pod, then purges, then (prod)
-   warms up. Purge token in OpenBao (`CF_API_TOKEN`). The Cloudflare zone holds
+2. **Refresh ordering.** CronJob revalidates every web pod, waits
+   `REVALIDATE_SETTLE_MS`, revalidates again, then purges, then warms each pod's
+   `/ng` and versioned graph URL directly. Warm-up failures are logged and do not
+   fail the job. Purge token in OpenBao (`CF_API_TOKEN`). The Cloudflare zone holds
    **govgraph hostnames only** — the token's purge is zone-wide, so keep it that
    way: as long as no other app shares the zone, a purge can never drop someone
    else's edge cache.
