@@ -1128,6 +1128,36 @@ fi
 BAO_TOKEN="$RT" bao read -format=json secret/data/apps/govgraph/prod/cloudflare \
   | jq -e --arg z "$GG_ZONE2" --arg t "$GG_TOKEN2" '.data.data | .CF_ZONE_ID == $z and .CF_API_TOKEN == $t' >/dev/null \
   && ok "cloudflare object restored with the expected values"
+echo "== 15m. --overwrite-app with a DAMAGED cloudflare object refuses BEFORE rotating the app object"
+# The kept cloudflare object's contents are verified before the app write, so a damaged
+# object cannot leave a half-rotated prod state (CRON_SECRET rotated, then exit 1).
+BAO_TOKEN="$RT" bao kv put secret/apps/govgraph/prod/cloudflare WRONG_KEY=x >/dev/null
+PROD_CRON_A="$(BAO_TOKEN="$RT" bao read -format=json secret/data/apps/govgraph/prod/app | jq -r .data.data.CRON_SECRET)"
+PROD_APP_VA="$(BAO_TOKEN="$RT" bao read -format=json secret/metadata/apps/govgraph/prod/app | jq -r .data.current_version)"
+F15m=$(feed_govgraph "$GG_DB2")
+if run_flow "$TD/run-gg-damaged.out" root-run govgraph-secrets prod --overwrite-app <"$F15m"; then
+  bad "--overwrite-app succeeded over a damaged cloudflare object"
+else
+  ok "refused (nonzero exit)"
+fi
+grep -q "does not hold exactly CF_ZONE_ID + CF_API_TOKEN - nothing written" "$TD/run-gg-damaged.out" \
+  && ok "the refusal says nothing was written" || { bad "refusal message missing"; cat "$TD/run-gg-damaged.out"; }
+PROD_CRON_B="$(BAO_TOKEN="$RT" bao read -format=json secret/data/apps/govgraph/prod/app | jq -r .data.data.CRON_SECRET)"
+PROD_APP_VB="$(BAO_TOKEN="$RT" bao read -format=json secret/metadata/apps/govgraph/prod/app | jq -r .data.current_version)"
+if [[ "$PROD_CRON_B" == "$PROD_CRON_A" && "$PROD_APP_VB" == "$PROD_APP_VA" ]]; then
+  ok "the app object is untouched (CRON_SECRET and version unchanged)"
+else
+  bad "THE APP OBJECT WAS ROTATED BEFORE THE REFUSAL"
+fi
+F15m2=$(feed_govgraph "$GG_DB" "$GG_ZONE2" "$GG_TOKEN2")
+if run_flow "$TD/run-gg-repair.out" root-run govgraph-secrets prod --overwrite <"$F15m2"; then
+  ok "--overwrite repairs the damaged cloudflare object"
+else
+  bad "the repair run failed"; cat "$TD/run-gg-repair.out"; exit 1
+fi
+BAO_TOKEN="$RT" bao read -format=json secret/data/apps/govgraph/prod/cloudflare \
+  | jq -e '.data.data | keys | sort == ["CF_API_TOKEN","CF_ZONE_ID"]' >/dev/null \
+  && ok "cloudflare object holds exactly its two keys again" || bad "cloudflare object not repaired"
 unset RT GG_CRON_1 GG_CRON_2 GG_CRON_3 GG_DB GG_BAD_PORT GG_ZONE GG_TOKEN \
   GG_DB_SLASH GG_DB_SPACE GG_DB2 GG_ZONE2 GG_TOKEN2 PROD_CRON_1 PROD_CRON_2 PROD_CRON_3 \
   PROD_APP_V0 PROD_APP_V1 PROD_APP_V2 PROD_CF_V0 PROD_CF_V1 PROD_CF_V2 \

@@ -397,6 +397,7 @@ cmd_root_run() {
   # children do not inherit them (stdin is not inherited as data). If the session
   # fails, re-running is safe: the script cancels any in-flight root generation first.
   if ! { printf 'set -euo pipefail\numask 077\nIFS= read -r P\n'; printf '%s\n' "$payload"; cat <<'REMOTE_SCRIPT'
+[[ -n "$P" ]] && jq -e 'type == "object"' >/dev/null 2>&1 <<<"$P" || { echo "ERROR: no payload received on stdin" >&2; exit 1; }
 ADDR=$(jq -r .addr <<<"$P")
 MODE=$(jq -r 'if .cmd then "exec" elif .oidc then "oidc" elif .watchdog then "watchdog" elif .nexuspull then "nexuspull" elif .tenant then "tenant" elif .cloudflared then "cloudflared" elif .publicsite then "publicsite" elif .govgraph then "govgraph" elif .govgraphprobes then "govgraphprobes" else "alertmanager" end' <<<"$P")
 
@@ -714,6 +715,12 @@ elif [[ "$MODE" == "govgraph" ]]; then
     KVCF="apps/govgraph/prod/cloudflare"
     EXCF=$(curl -q -s --config "$CFG" -o /dev/null -w '%{http_code}' "$ADDR/v1/secret/metadata/$KVCF")
   fi
+  # Only 404 means "missing". Any other non-200 (403, 5xx, 000 on a network blip) must not
+  # be read as missing: that would write a fresh CRON_SECRET over an object that exists.
+  [[ "$EXAPP" == "200" || "$EXAPP" == "404" ]] \
+    || { echo "ERROR: cannot tell whether secret/$KV exists (HTTP $EXAPP) - nothing written; retry" >&2; exit 1; }
+  [[ "$ENVN" != "prod" || "$EXCF" == "200" || "$EXCF" == "404" ]] \
+    || { echo "ERROR: cannot tell whether secret/$KVCF exists (HTTP $EXCF) - nothing written; retry" >&2; exit 1; }
   # Every precondition is checked BEFORE any write, so a run writes everything it
   # intends or nothing (no half-rotated prod state): if this run will create or rotate
   # the app object the payload must hold DATABASE_URL, and in prod the same for the
@@ -724,6 +731,18 @@ elif [[ "$MODE" == "govgraph" ]]; then
   fi
   if { [[ "$ENVN" == "prod" && ( "$EXCF" != "200" || "$OVER_CF" == "true" ) ]]; } && ! jq -e '.govgraph | has("zone_id") and has("api_token")' <<<"$P" >/dev/null; then
     echo "ERROR: this run would write secret/$KVCF but carries no CF values (--overwrite-app rotates only the app object) - run without it, or with --overwrite/--overwrite-cloudflare" >&2; exit 1
+  fi
+  if [[ "$ENVN" == "prod" && "$EXCF" == "200" && "$OVER_CF" != "true" ]]; then
+    # The cloudflare object will be kept: verify its contents now, before the app write,
+    # so a damaged object refuses the run instead of failing after CRON_SECRET rotated.
+    READ=$(curl -q -s --config "$CFG" -w '\n%{http_code}' "$ADDR/v1/secret/data/$KVCF")
+    READ_HTTP="${READ##*$'\n'}" READ_DATA="${READ%$'\n'*}"
+    if [[ "$READ_HTTP" != "200" ]]; then
+      echo "ERROR: secret/$KVCF data is unreadable (HTTP $READ_HTTP) - nothing written; pass --overwrite or --overwrite-cloudflare to repair" >&2; exit 1
+    fi
+    printf '%s' "$READ_DATA" | jq -e '.data.data | keys | sort == ["CF_API_TOKEN","CF_ZONE_ID"]' >/dev/null \
+      || { echo "ERROR: secret/$KVCF does not hold exactly CF_ZONE_ID + CF_API_TOKEN - nothing written; pass --overwrite or --overwrite-cloudflare to repair" >&2; exit 1; }
+    unset READ READ_DATA READ_HTTP
   fi
   if [[ "$EXAPP" == "200" && "$OVER_APP" != "true" ]]; then
     # Verify what is stored, not just that metadata answers 200 (a hand-mangled object or
@@ -758,14 +777,6 @@ elif [[ "$MODE" == "govgraph" ]]; then
   echo "    [remote] secret/$KV keys: DATABASE_URL, CRON_SECRET (version $VERSION)"
   if [[ "$ENVN" == "prod" ]]; then
     if [[ "$EXCF" == "200" && "$OVER_CF" != "true" ]]; then
-      READ=$(curl -q -s --config "$CFG" -w '\n%{http_code}' "$ADDR/v1/secret/data/$KVCF")
-      READ_HTTP="${READ##*$'\n'}" READ_DATA="${READ%$'\n'*}"
-      if [[ "$READ_HTTP" != "200" ]]; then
-        echo "ERROR: secret/$KVCF data is unreadable (HTTP $READ_HTTP) - pass --overwrite or --overwrite-cloudflare to repair" >&2; exit 1
-      fi
-      printf '%s' "$READ_DATA" | jq -e '.data.data | keys | sort == ["CF_API_TOKEN","CF_ZONE_ID"]' >/dev/null \
-        || { echo "ERROR: secret/$KVCF does not hold exactly CF_ZONE_ID + CF_API_TOKEN - pass --overwrite or --overwrite-cloudflare to repair" >&2; exit 1; }
-      unset READ READ_DATA READ_HTTP
       echo "    [remote] secret/$KVCF already exists (kept; pass --overwrite or --overwrite-cloudflare to replace - rotating only the Cloudflare values keeps CRON_SECRET)"
     else
       echo "    [remote] writing secret/$KVCF (CF_ZONE_ID, CF_API_TOKEN from the payload; values never printed)"
