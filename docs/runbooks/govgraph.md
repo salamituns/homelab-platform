@@ -47,17 +47,48 @@ script (tenant mode) is read on `secret/data/apps/govgraph/<env>/*` and
 `secret/data/apps/govgraph/<env>` itself is not granted, and a read of it is 403.
 Details: [tenant-secrets.md](tenant-secrets.md).
 
-Then write the child objects (never print values; never commit them). `bao kv put`
-omits the `data/` segment that the policy path includes:
+Then write the child objects with `root-run govgraph-secrets` (never print values; never
+commit them). `DATABASE_URL` is prompted hidden and shape-checked locally (postgres scheme,
+a host, port 5432/6543) before anything is contacted, and internal whitespace is refused —
+only leading/trailing whitespace is trimmed — so a bad paste is never silently stored as a
+different value; `CRON_SECRET` is **generated on sectools** (32 random bytes, hex) — never
+prompted, never on the Mac, never printed. Prod additionally prompts hidden for
+`CF_ZONE_ID` (32 hex characters) and `CF_API_TOKEN` and writes the cloudflare object;
+staging writes no cloudflare object. Re-running without `--overwrite` refuses the existing
+objects and keeps `CRON_SECRET`, so web and refresh stay in agreement, and the skip path
+verifies what is actually stored (key set + `CRON_SECRET` shape, not just that the path
+exists); `--overwrite` replaces both objects, regenerating `CRON_SECRET`;
+`--overwrite-app` rotates only the app object, and `--overwrite-cloudflare` (prod only)
+rotates only the Cloudflare object while keeping `CRON_SECRET` byte-for-byte — use that one
+for a token rotation so the web and refresh cron secrets stay in agreement. Exactly one of
+the three flags may be passed, and each prompts only for the object it writes:
+`--overwrite-app` never asks for the CF values, `--overwrite-cloudflare` never asks for
+`DATABASE_URL`, so no value is read, held or shipped for an object the run does not
+touch. A run checks every precondition before writing anything — including whether a
+missing sibling object would have to be created without the values for it, and the
+contents of any object it keeps — so a bad state is refused with nothing written. It is
+not a transaction: in prod the app object is written before the cloudflare object, so if
+the cloudflare **write itself** then fails (OpenBao 5xx/403), the run exits 1 with
+`CRON_SECRET` already rotated. If that happens, re-run the same command until it
+succeeds, then restart the web Deployment and let the next refresh run, so web and
+refresh read the same `CRON_SECRET`. Values travel local variable → jq
+environment → ssh stdin payload → the remote script's stdin (a non-exported variable;
+never the remote shell's exec-time environment, never argv on either side), and the
+command prints only the key names written plus each path's version:
 
 ```sh
-scripts/openbao-breakglass.sh root-run -- bao kv put secret/apps/govgraph/staging/app \
-  DATABASE_URL='<value>' CRON_SECRET='<value>'
-scripts/openbao-breakglass.sh root-run -- bao kv put secret/apps/govgraph/prod/app \
-  DATABASE_URL='<value>' CRON_SECRET='<value>'
-scripts/openbao-breakglass.sh root-run -- bao kv put secret/apps/govgraph/prod/cloudflare \
-  CF_ZONE_ID='<value>' CF_API_TOKEN='<value>'
+scripts/openbao-breakglass.sh root-run govgraph-secrets staging --dry-run
+scripts/openbao-breakglass.sh root-run govgraph-secrets staging
+scripts/openbao-breakglass.sh root-run govgraph-secrets prod --dry-run
+scripts/openbao-breakglass.sh root-run govgraph-secrets prod
 ```
+
+When feeding the hidden prompts from a pipe or a script instead of a terminal, supply
+exactly the values that run will ask for, in order, one per line after the two unseal
+shares: staging (any flag or none): `DATABASE_URL`. Prod with no flag or `--overwrite`:
+`DATABASE_URL`, `CF_ZONE_ID`, `CF_API_TOKEN`. Prod with `--overwrite-app`:
+`DATABASE_URL` only. Prod with `--overwrite-cloudflare`: `CF_ZONE_ID`, `CF_API_TOKEN`
+only — a `DATABASE_URL` line would be read as the zone id.
 
 | KV object (`secret/` prefix) | Keys | Read by |
 |---|---|---|
@@ -88,15 +119,28 @@ Gitea group `govgraph-dev` must exist; the tenant RoleBinding subjects that grou
 public paths, like personal-site's. The two govgraph URLs live in the existing
 `monitoring/public-site-probes` KV object (keys `govgraph_apex_url`,
 `govgraph_staging_url`) so the SecretStore, ServiceAccount and OpenBao role are reused.
-Write them with the raw breakglass mode **before the platform PR merges** — ESO renders
-all four target files from that one object, so until both keys exist the probe-targets
-ExternalSecret cannot sync; the git bootstrap keeps `[]` for govgraph, so its alerts stay
-silent, not wrong:
+Write them with `root-run govgraph-probes`, ideally **before the platform PR merges**; if
+it has already merged, the probe-targets ExternalSecret simply sits unsynced until this
+runs, and this is what unblocks it — ESO renders all four target files from that one
+object, so until both keys exist the ExternalSecret cannot sync; the git bootstrap keeps
+`[]` for govgraph, so its alerts stay silent, not wrong. The mode PATCHes only the two
+govgraph keys into the shared object (created by `root-run public-site-probes`), keeping
+`apex_url`/`staging_url` untouched, and writes with a KV v2 check-and-set on the version
+it just read — if another writer races the run, the write fails and re-running is safe.
+It refuses existing govgraph keys without `--overwrite`, and it refuses before writing
+anything a stray key or a lone govgraph key. With `--overwrite` the write is the
+canonical four-key content: it repairs a lone govgraph key or an empty stored URL and
+drops any stray keys — so removing a stray key never needs a raw, argv-borne
+`bao kv put` (either mode does this; a missing `apex_url`/`staging_url` base pair is
+rebuilt by `root-run public-site-probes --overwrite`, as is a soft-deleted latest
+version — `bao kv delete` without `-versions`). `public-site-probes` likewise
+carries the govgraph keys over on its writes, so the two modes cannot clobber each
+other. Both URLs are prompted hidden, must
+be `https` and end in a slash, and are verified by key set and length, never printed:
 
 ```sh
-scripts/openbao-breakglass.sh root-run -- bao kv patch secret/monitoring/public-site-probes \
-  govgraph_apex_url='https://<govgraph-host>/' \
-  govgraph_staging_url='https://<govgraph-staging-host>/'
+scripts/openbao-breakglass.sh root-run govgraph-probes --dry-run
+scripts/openbao-breakglass.sh root-run govgraph-probes
 ```
 
 ### 2. Platform PR (this repo)

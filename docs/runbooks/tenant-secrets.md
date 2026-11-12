@@ -215,3 +215,12 @@ binding) so OpenBao can verify its JWT via `TokenReview`. Full kit:
     name: eso
     namespace: <app>-<env>
 ```
+
+### 4. Write the tenant's secret values
+
+Do **not** write tenant values with `root-run -- bao kv put ...`: the values land in argv
+and shell history on the Mac and on sectools. For govgraph, `scripts/openbao-breakglass.sh
+root-run govgraph-secrets <staging|prod>` prompts hidden for `DATABASE_URL` (plus
+`CF_ZONE_ID`/`CF_API_TOKEN` in prod), generates `CRON_SECRET` on sectools, and writes the
+child objects argv-free on both sides ([govgraph.md](govgraph.md) step 1). A future tenant
+with the same shape should get its own such mode in the script, not a raw `bao kv put`.

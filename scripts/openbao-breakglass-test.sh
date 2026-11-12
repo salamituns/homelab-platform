@@ -23,7 +23,36 @@
 #   10. the root-run -- <cmd> passthrough works with BAO_TOKEN set;
 #   10b. root-run watchdog-url PATCHes only watchdog_url (SMTP keys kept), prints stored (N chars),
 #       never prints the URL; a bad prefix is rejected before minting;
-#   11. the written objects have the right shape (keys only, never values).
+#   11. the written objects have the right shape (keys only, never values);
+#   15. root-run govgraph-secrets: staging/prod writes (DATABASE_URL hidden-prompted,
+#       CRON_SECRET generated on the "remote" side, 64 hex), re-run skips without
+#       --overwrite and regenerates CRON_SECRET with it, prod also writes the cloudflare
+#       object, bad values die before minting, --dry-run prompts nothing (stdin closed),
+#       and the secret values never appear in the ssh boundary's argv log, any local or
+#       remote jq argv, or any transcript. Also: a DATABASE_URL whose password contains
+#       '/' is rejected without leaking any fragment, internal whitespace in
+#       DATABASE_URL/CF_API_TOKEN is rejected (only edges are trimmed), the skip path
+#       verifies the stored key set + CRON_SECRET shape instead of trusting metadata,
+#       --overwrite-app rotates only the app object, --overwrite-cloudflare rotates only
+#       the prod cloudflare object (CRON_SECRET kept byte-for-byte; each prompts only
+#       for the object it writes), and the split flags refuse bad combinations (together /
+#       staging cloudflare / wrong mode) before minting. The payload rides ssh stdin into
+#       a non-exported variable: root-run -- env shows no share, the remote shell's
+#       exec-time environment (ps eww) holds neither share nor payload variable, and
+#       --overwrite-app with a missing cloudflare object refuses BEFORE any write;
+#   16. root-run govgraph-probes: PATCHes govgraph_apex_url+govgraph_staging_url into the
+#       shared public-site-probes object (all four keys afterwards, public keys untouched)
+#       with a KV v2 check-and-set on the version just read, refuses without --overwrite,
+#       refuses a stray key before writing (without --overwrite; with it the canonical
+#       write drops the stray key - same for public-site-probes - so removing one never
+#       needs a raw argv write), refuses an empty stored govgraph URL on the keep path,
+#       --overwrite repairs a lone govgraph key, a missing base pair is refused by
+#       govgraph-probes and repaired by public-site-probes --overwrite, and a soft-deleted
+#       latest version (data 404, metadata 200) is rebuilt by public-site-probes
+#       --overwrite, public-site-probes --overwrite afterwards KEEPS the govgraph keys, a missing
+#       trailing slash dies before minting, --dry-run prompts nothing (stdin closed), the
+#       server rejects a stale check-and-set write (HTTP 400), and no probe URL or unseal
+#       share rides argv or any transcript.
 #
 # Nothing touches sectools: the "remote" side runs on this Mac via BREAKGLASS_SSH.
 # Test shares/password are throwaway. No secret values are printed; the harness prints
@@ -215,6 +244,27 @@ if grep -q "revocation" "$TD/dry6.out"; then
   ok "root-run public-site-probes --dry-run prints the flow, prompted for nothing"
 else
   bad "root-run public-site-probes --dry-run"; cat "$TD/dry6.out"
+fi
+"$SCRIPT" root-run --dry-run govgraph-secrets staging </dev/null >"$TD/dry7.out" 2>&1
+if grep -q "revocation" "$TD/dry7.out" && grep -q "secret/apps/govgraph/staging/app" "$TD/dry7.out" \
+  && grep -q "generated on sectools" "$TD/dry7.out" && grep -qi "no cloudflare object" "$TD/dry7.out"; then
+  ok "root-run govgraph-secrets staging --dry-run prints the plan, prompts nothing (stdin was closed)"
+else
+  bad "root-run govgraph-secrets staging --dry-run"; cat "$TD/dry7.out"
+fi
+"$SCRIPT" root-run --dry-run govgraph-secrets prod </dev/null >"$TD/dry8.out" 2>&1
+if grep -q "revocation" "$TD/dry8.out" && grep -q "secret/apps/govgraph/prod/app" "$TD/dry8.out" \
+  && grep -q "secret/apps/govgraph/prod/cloudflare" "$TD/dry8.out" && grep -q "generated on sectools" "$TD/dry8.out"; then
+  ok "root-run govgraph-secrets prod --dry-run prints both paths, prompts nothing (stdin was closed)"
+else
+  bad "root-run govgraph-secrets prod --dry-run"; cat "$TD/dry8.out"
+fi
+"$SCRIPT" root-run --dry-run govgraph-probes </dev/null >"$TD/dry9.out" 2>&1
+if grep -q "revocation" "$TD/dry9.out" && grep -q "secret/monitoring/public-site-probes" "$TD/dry9.out" \
+  && grep -q "govgraph_apex_url" "$TD/dry9.out" && grep -qi "kept untouched" "$TD/dry9.out"; then
+  ok "root-run govgraph-probes --dry-run prints the PATCH plan, prompts nothing (stdin was closed)"
+else
+  bad "root-run govgraph-probes --dry-run"; cat "$TD/dry9.out"
 fi
 
 echo "== 5. root-run alertmanager through the local-shell override (the full flow)"
@@ -587,6 +637,854 @@ BAO_TOKEN="$RT" bao policy read public-site-probes-read | grep -q 'secret/data/m
   && [[ "$(BAO_TOKEN="$RT" bao policy read public-site-probes-read | grep -c '^path')" == 1 ]] \
   && ok "policy public-site-probes-read grants exactly the probe-URL path"
 unset RT
+
+echo "== 15. root-run govgraph-secrets: argv-free writes, overwrite, validation"
+# An argv-logging shim on the ssh boundary: it records every argv word that crosses the
+# boundary (stdin is never argv), so the test can prove no secret value ever rides argv.
+# The log path is baked into the shim: $TD is not exported into the shim's environment.
+cat >"$TD/ssh-shim" <<SHIM
+#!/usr/bin/env bash
+printf '%s\n' "\$@" >>"$TD/ssh-argv.log"
+exec "\$@"
+SHIM
+chmod +x "$TD/ssh-shim"
+# A second argv-logging shim, this one on jq itself. In this harness BOTH sides run on
+# this Mac (the remote side is BREAKGLASS_SSH="bash -c" and inherits the environment),
+# so the wrapper records every argv word of every jq call either side makes. Values that
+# ride jq's --arg/--argjson would land in this log; values passed through the environment
+# (the pattern the sweep converted everything to) never do. The real jq path and the log
+# path are baked into the wrapper for the same reason as the ssh shim.
+REAL_JQ="$(command -v jq)"
+mkdir -p "$TD/bin"
+cat >"$TD/bin/jq" <<JQSHIM
+#!/usr/bin/env bash
+printf '%s\n' "\$@" >>"$TD/jq-argv.log"
+exec "$REAL_JQ" "\$@"
+JQSHIM
+chmod +x "$TD/bin/jq"
+run_flow_shim() {  # like run_flow, but the ssh boundary logs its argv and jq does too
+  local out="$1"; shift
+  PATH="$TD/bin:$PATH" BREAKGLASS_SSH="$TD/ssh-shim bash -c" BREAKGLASS_BAO_ADDR="$ADDR" "$SCRIPT" "$@" >"$out" 2>&1
+}
+GG_DB='postgres://ggtest:throwaway@127.0.0.1:6543/postgres'
+GG_BAD_PORT='postgres://ggtest:throwaway@127.0.0.1:5433/postgres'
+GG_ZONE='a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6'
+GG_TOKEN='cf-api-token-throwaway'
+SHARE1="$(jq -r '.unseal_keys_b64[0]' "$TD/init.json")"  # a real share, for the jq argv audit
+feed_govgraph() {  # $@ = every prompt line after the 2 shares
+  local f; f=$(mktemp "$TD/answers.XXXXXX")
+  jq -r '.unseal_keys_b64[0,1]' "$TD/init.json" >"$f"
+  printf '%s\n' "$@" >>"$f"
+  echo "$f"
+}
+
+echo "== 15a. bad DATABASE_URL port and bad CF_ZONE_ID die before minting (nothing written)"
+RT="$(jq -r .root_token "$TD/init.json")"
+Fgga=$(feed_govgraph "$GG_BAD_PORT")
+if run_flow "$TD/run-gg-badport.out" root-run govgraph-secrets staging <"$Fgga"; then
+  bad "bad DATABASE_URL port accepted"
+else
+  ok "bad DATABASE_URL port rejected (nonzero exit)"
+fi
+if grep -q "port 5432 or 6543" "$TD/run-gg-badport.out"; then
+  ok "bad port error names the allowed ports"
+else
+  bad "bad port error missing"; cat "$TD/run-gg-badport.out"
+fi
+if grep -q "minting the root token" "$TD/run-gg-badport.out"; then
+  bad "bad port minted a root token (should die locally first)"
+else
+  ok "bad port died before minting"
+fi
+Fggb=$(feed_govgraph "$GG_DB" 'zz-not-32-hex' "$GG_TOKEN")
+if run_flow "$TD/run-gg-badzone.out" root-run govgraph-secrets prod <"$Fggb"; then
+  bad "bad CF_ZONE_ID accepted"
+else
+  ok "bad CF_ZONE_ID rejected (nonzero exit)"
+fi
+if grep -q "32 hex" "$TD/run-gg-badzone.out"; then
+  ok "bad CF_ZONE_ID error names the expected shape"
+else
+  bad "bad zone error missing"; cat "$TD/run-gg-badzone.out"
+fi
+if grep -q "minting the root token" "$TD/run-gg-badzone.out"; then
+  bad "bad zone minted a root token (should die locally first)"
+else
+  ok "bad zone died before minting"
+fi
+if BAO_TOKEN="$RT" bao read -format=json secret/data/apps/govgraph/staging/app >/dev/null 2>&1; then
+  bad "the rejected staging run WROTE an object"
+else
+  ok "no staging object exists after the rejected runs"
+fi
+if BAO_TOKEN="$RT" bao read -format=json secret/data/apps/govgraph/prod/cloudflare >/dev/null 2>&1; then
+  bad "the rejected prod run WROTE an object"
+else
+  ok "no prod object exists after the rejected runs"
+fi
+
+echo "== 15b. staging write: both keys, remotely generated CRON_SECRET, argv and transcript clean"
+Fggc=$(feed_govgraph "$GG_DB")
+if run_flow_shim "$TD/run-ggs.out" root-run govgraph-secrets staging <"$Fggc"; then
+  ok "root-run govgraph-secrets staging exited 0"
+else
+  bad "root-run govgraph-secrets staging failed"; cat "$TD/run-ggs.out"; exit 1
+fi
+if grep -q "govgraph-secrets setup complete (staging)" "$TD/run-ggs.out"; then ok "staging app object written"; else bad "staging completion line missing"; fi
+if [[ -s "$TD/ssh-argv.log" ]] && grep -q '^bash -s$' "$TD/ssh-argv.log"; then
+  ok "ssh-boundary argv logger captured the boundary traffic (positive control)"
+else
+  bad "ssh-boundary argv log is missing/empty - the argv checks are vacuous"
+fi
+if [[ -s "$TD/jq-argv.log" ]] && grep -q "fromjson" "$TD/jq-argv.log"; then
+  ok "jq argv logger captured local+remote jq traffic (positive control)"
+else
+  bad "jq argv log is missing/empty/no fromjson - the jq argv checks are vacuous"
+fi
+if grep -qF "$SHARE1" "$TD/jq-argv.log"; then
+  bad "AN UNSEAL SHARE APPEARED IN A LOCAL/REMOTE JQ ARGV"
+else
+  ok "unseal shares never ride a local/remote jq argv (payload passes through the environment)"
+fi
+if grep -qF "$GG_DB" "$TD/jq-argv.log"; then
+  bad "DATABASE_URL APPEARED IN A LOCAL/REMOTE JQ ARGV"
+else
+  ok "DATABASE_URL never rides a local/remote jq argv"
+fi
+if grep -q "keys: DATABASE_URL, CRON_SECRET (version 1)" "$TD/run-ggs.out"; then ok "prints only key names + version 1"; else bad "key/version line missing"; fi
+if grep -q "revocation verified" "$TD/run-ggs.out"; then ok "staging run revoked its token"; else bad "staging revocation missing"; fi
+if grep -qF "$GG_DB" "$TD/ssh-argv.log"; then
+  bad "DATABASE_URL APPEARED IN THE SSH BOUNDARY'S ARGV"
+else
+  ok "DATABASE_URL never crosses the ssh boundary on argv"
+fi
+if grep -qF "$GG_DB" "$TD/run-ggs.out"; then
+  bad "DATABASE_URL WAS PRINTED INTO THE TRANSCRIPT"
+else
+  ok "DATABASE_URL never printed"
+fi
+GG_CRON_1="$(BAO_TOKEN="$RT" bao read -format=json secret/data/apps/govgraph/staging/app | jq -r .data.data.CRON_SECRET)"
+if [[ "$GG_CRON_1" =~ ^[0-9a-f]{64}$ ]]; then
+  ok "CRON_SECRET is 64 hex characters (generated on sectools; the feed supplied no value for it)"
+else
+  bad "CRON_SECRET is not 64 hex characters"
+fi
+BAO_TOKEN="$RT" bao read -format=json secret/data/apps/govgraph/staging/app \
+  | jq -e --arg db "$GG_DB" '.data.data | (keys | sort == ["CRON_SECRET","DATABASE_URL"]) and .DATABASE_URL == $db' >/dev/null \
+  && ok "staging object holds exactly the prompted DATABASE_URL + the generated CRON_SECRET"
+if BAO_TOKEN="$RT" bao read -format=json secret/data/apps/govgraph/staging/cloudflare >/dev/null 2>&1; then
+  bad "STAGING WROTE A CLOUDFLARE OBJECT"
+else
+  ok "staging wrote no cloudflare object"
+fi
+
+echo "== 15c. re-run refuses without --overwrite (CRON_SECRET kept); --overwrite regenerates it"
+Fggd=$(feed_govgraph "$GG_DB")
+run_flow_shim "$TD/run-ggs2.out" root-run govgraph-secrets staging <"$Fggd" || true
+if grep -q "already exists" "$TD/run-ggs2.out"; then
+  ok "second staging run refuses the existing object"
+else
+  bad "second staging run did not refuse"; cat "$TD/run-ggs2.out"
+fi
+GG_CRON_2="$(BAO_TOKEN="$RT" bao read -format=json secret/data/apps/govgraph/staging/app | jq -r .data.data.CRON_SECRET)"
+if [[ "$GG_CRON_2" == "$GG_CRON_1" ]]; then
+  ok "CRON_SECRET kept (web and refresh stay in agreement)"
+else
+  bad "CRON_SECRET CHANGED WITHOUT --overwrite"
+fi
+Fgge=$(feed_govgraph "$GG_DB")
+if run_flow_shim "$TD/run-ggs3.out" root-run govgraph-secrets staging --overwrite <"$Fgge"; then
+  ok "staging --overwrite exited 0"
+else
+  bad "staging --overwrite failed"; cat "$TD/run-ggs3.out"; exit 1
+fi
+GG_CRON_3="$(BAO_TOKEN="$RT" bao read -format=json secret/data/apps/govgraph/staging/app | jq -r .data.data.CRON_SECRET)"
+if [[ "$GG_CRON_3" =~ ^[0-9a-f]{64}$ && "$GG_CRON_3" != "$GG_CRON_1" ]]; then
+  ok "--overwrite regenerated CRON_SECRET (still 64 hex)"
+else
+  bad "--overwrite did not regenerate CRON_SECRET"
+fi
+if grep -q "keys: DATABASE_URL, CRON_SECRET (version 2)" "$TD/run-ggs3.out"; then ok "--overwrite prints version 2"; else bad "--overwrite version line missing"; fi
+
+echo "== 15d. prod writes both objects; values never in argv or transcripts"
+Fggf=$(feed_govgraph "$GG_DB" "$GG_ZONE" "$GG_TOKEN")
+if run_flow_shim "$TD/run-ggp.out" root-run govgraph-secrets prod <"$Fggf"; then
+  ok "root-run govgraph-secrets prod exited 0"
+else
+  bad "root-run govgraph-secrets prod failed"; cat "$TD/run-ggp.out"; exit 1
+fi
+if grep -q "govgraph-secrets setup complete (prod)" "$TD/run-ggp.out"; then ok "prod run completed"; else bad "prod completion line missing"; fi
+if grep -q "secret/apps/govgraph/prod/app keys: DATABASE_URL, CRON_SECRET (version 1)" "$TD/run-ggp.out"; then ok "prod app object written, key names + version printed"; else bad "prod app key/version line missing"; fi
+if grep -q "secret/apps/govgraph/prod/cloudflare keys: CF_ZONE_ID, CF_API_TOKEN (version 1)" "$TD/run-ggp.out"; then ok "prod cloudflare object written, key names + version printed"; else bad "prod cloudflare key/version line missing"; fi
+if grep -qF "$GG_DB" "$TD/ssh-argv.log" || grep -qF "$GG_TOKEN" "$TD/ssh-argv.log" || grep -qF "$GG_ZONE" "$TD/ssh-argv.log"; then
+  bad "A GOVGRAPH SECRET APPEARED IN THE SSH BOUNDARY'S ARGV"
+else
+  ok "prod secrets never cross the ssh boundary on argv"
+fi
+if grep -qF "$GG_DB" "$TD/run-ggp.out" || grep -qF "$GG_TOKEN" "$TD/run-ggp.out" || grep -qF "$GG_ZONE" "$TD/run-ggp.out"; then
+  bad "A GOVGRAPH SECRET WAS PRINTED INTO THE TRANSCRIPT"
+else
+  ok "prod secrets never printed"
+fi
+BAO_TOKEN="$RT" bao read -format=json secret/data/apps/govgraph/prod/app \
+  | jq -e --arg db "$GG_DB" '.data.data | (keys | sort == ["CRON_SECRET","DATABASE_URL"]) and .DATABASE_URL == $db' >/dev/null \
+  && ok "prod app object holds the prompted DATABASE_URL + a generated CRON_SECRET"
+BAO_TOKEN="$RT" bao read -format=json secret/data/apps/govgraph/prod/cloudflare \
+  | jq -e --arg z "$GG_ZONE" --arg t "$GG_TOKEN" \
+    '.data.data | (keys | sort == ["CF_API_TOKEN","CF_ZONE_ID"]) and .CF_ZONE_ID == $z and .CF_API_TOKEN == $t' >/dev/null \
+  && ok "prod cloudflare object holds the prompted CF_ZONE_ID + CF_API_TOKEN"
+if grep -qF "$GG_ZONE" "$TD/jq-argv.log" || grep -qF "$GG_TOKEN" "$TD/jq-argv.log"; then
+  bad "A CF VALUE APPEARED IN A LOCAL/REMOTE JQ ARGV"
+else
+  ok "CF values never ride a local/remote jq argv"
+fi
+if grep -q "revocation verified" "$TD/run-ggp.out"; then ok "prod run revoked its token"; else bad "prod revocation missing"; fi
+
+echo "== 15e. a DATABASE_URL whose password contains '/' is rejected WITHOUT leaking a fragment"
+# urlparse raises a ValueError that names the offending fragment on this shape ('Port
+# could not be cast to integer value as ...'); the validator must swallow it and print
+# only the fixed allowed-ports message.
+GG_DB_SLASH='postgres://ggtest:pwn/dZk9secret@127.0.0.1:5432/postgres'
+F15e=$(feed_govgraph "$GG_DB_SLASH")
+if run_flow "$TD/run-gg-slash.out" root-run govgraph-secrets staging <"$F15e"; then
+  bad "DATABASE_URL with a '/' in the password accepted"
+else
+  ok "DATABASE_URL with a '/' in the password rejected (nonzero exit)"
+fi
+if grep -q "port 5432 or 6543" "$TD/run-gg-slash.out"; then
+  ok "slash-password error is the fixed allowed-ports message"
+else
+  bad "slash-password error message missing"; cat "$TD/run-gg-slash.out"
+fi
+if grep -qF 'dZk9secret' "$TD/run-gg-slash.out" || grep -qF 'ggtest:pwn' "$TD/run-gg-slash.out"; then
+  bad "PASSWORD FRAGMENT LEAKED INTO THE TRANSCRIPT"
+else
+  ok "no password fragment appears anywhere in the transcript"
+fi
+if grep -q "minting the root token" "$TD/run-gg-slash.out"; then
+  bad "slash-password run minted a root token (should die locally first)"
+else
+  ok "slash-password run died before minting"
+fi
+
+echo "== 15f. internal whitespace in DATABASE_URL/CF_API_TOKEN is rejected, not stripped-and-stored"
+GG_DB_SPACE='postgres://ggtest/throw away@127.0.0.1:5432/postgres'
+F15f=$(feed_govgraph "$GG_DB_SPACE")
+if run_flow "$TD/run-gg-space.out" root-run govgraph-secrets staging <"$F15f"; then
+  bad "DATABASE_URL with internal whitespace accepted"
+else
+  ok "DATABASE_URL with internal whitespace rejected (nonzero exit)"
+fi
+if grep -q "DATABASE_URL must not contain whitespace" "$TD/run-gg-space.out"; then
+  ok "the whitespace error names the rule (the value is refused, not silently changed)"
+else
+  bad "DATABASE_URL whitespace error missing"; cat "$TD/run-gg-space.out"
+fi
+if grep -q "minting the root token" "$TD/run-gg-space.out"; then
+  bad "whitespace run minted a root token (should die locally first)"
+else
+  ok "whitespace run died before minting"
+fi
+F15f2=$(feed_govgraph "$GG_DB" "$GG_ZONE" 'cf-api-token with spaces')
+if run_flow "$TD/run-gg-cfspace.out" root-run govgraph-secrets prod <"$F15f2"; then
+  bad "CF_API_TOKEN with internal whitespace accepted"
+else
+  ok "CF_API_TOKEN with internal whitespace rejected (nonzero exit)"
+fi
+if grep -q "CF_API_TOKEN must not contain whitespace" "$TD/run-gg-cfspace.out"; then
+  ok "CF_API_TOKEN whitespace error names the rule"
+else
+  bad "CF_API_TOKEN whitespace error missing"; cat "$TD/run-gg-cfspace.out"
+fi
+if grep -q "minting the root token" "$TD/run-gg-cfspace.out"; then
+  bad "CF whitespace run minted a root token (should die locally first)"
+else
+  ok "CF whitespace run died before minting"
+fi
+
+echo "== 15g. leading/trailing whitespace is trimmed (accepted); the stored value is the trimmed one"
+F15g=$(feed_govgraph "  $GG_DB  ")
+if run_flow_shim "$TD/run-gg-trim.out" root-run govgraph-secrets staging --overwrite <"$F15g"; then
+  ok "padded DATABASE_URL accepted (edges trimmed)"
+else
+  bad "padded DATABASE_URL rejected"; cat "$TD/run-gg-trim.out"; exit 1
+fi
+BAO_TOKEN="$RT" bao read -format=json secret/data/apps/govgraph/staging/app \
+  | jq -e --arg db "$GG_DB" '.data.data.DATABASE_URL == $db' >/dev/null \
+  && ok "stored DATABASE_URL is exactly the trimmed value"
+
+echo "== 15h. the skip path verifies the stored data (a wrong key set is reported, not rubber-stamped)"
+BAO_TOKEN="$RT" bao kv put secret/apps/govgraph/staging/app DATABASE_URL="$GG_DB" CRON_SECRETT=typo >/dev/null
+F15h=$(feed_govgraph "$GG_DB")
+run_flow "$TD/run-gg-skipbad.out" root-run govgraph-secrets staging <"$F15h" || true
+if grep -q "does not hold exactly DATABASE_URL + a 64-hex CRON_SECRET" "$TD/run-gg-skipbad.out"; then
+  ok "skip path reports the wrong key set instead of printing success"
+else
+  bad "skip path did not verify the stored data"; cat "$TD/run-gg-skipbad.out"
+fi
+if grep -q "govgraph-secrets setup complete (staging)" "$TD/run-gg-skipbad.out"; then
+  bad "skip path claimed success on a malformed object"
+else
+  ok "malformed-object run did not complete"
+fi
+F15h2=$(feed_govgraph "$GG_DB")
+if run_flow "$TD/run-gg-skipfix.out" root-run govgraph-secrets staging --overwrite <"$F15h2"; then
+  ok "--overwrite repairs the malformed app object"
+else
+  bad "--overwrite repair failed"; cat "$TD/run-gg-skipfix.out"; exit 1
+fi
+BAO_TOKEN="$RT" bao read -format=json secret/data/apps/govgraph/staging/app \
+  | jq -e '.data.data | (keys | sort == ["CRON_SECRET","DATABASE_URL"]) and (.CRON_SECRET | test("^[0-9a-f]{64}$"))' >/dev/null \
+  && ok "repaired object holds exactly DATABASE_URL + a 64-hex CRON_SECRET"
+
+echo "== 15i. split rotation: --overwrite-cloudflare keeps CRON_SECRET, --overwrite-app regenerates it"
+GG_DB2='postgres://ggtest2:throwaway2@127.0.0.1:5432/postgres'
+GG_ZONE2='a7b8c9d0e1f2a3b4c5d6a7b8c9d0e1f2'
+GG_TOKEN2='cf-api-token-throwaway-2'
+PROD_CRON_1="$(BAO_TOKEN="$RT" bao read -format=json secret/data/apps/govgraph/prod/app | jq -r .data.data.CRON_SECRET)"
+PROD_APP_V0="$(BAO_TOKEN="$RT" bao read -format=json secret/metadata/apps/govgraph/prod/app | jq -r .data.current_version)"
+PROD_CF_V0="$(BAO_TOKEN="$RT" bao read -format=json secret/metadata/apps/govgraph/prod/cloudflare | jq -r .data.current_version)"
+# --overwrite-cloudflare prompts for the CF values ONLY (no DATABASE_URL is read or shipped)
+F15i=$(feed_govgraph "$GG_ZONE2" "$GG_TOKEN2")
+if run_flow_shim "$TD/run-gg-ovcf.out" root-run govgraph-secrets prod --overwrite-cloudflare <"$F15i"; then
+  ok "--overwrite-cloudflare exited 0"
+else
+  bad "--overwrite-cloudflare failed"; cat "$TD/run-gg-ovcf.out"; exit 1
+fi
+if grep -q "DATABASE_URL must" "$TD/run-gg-ovcf.out"; then
+  bad "--overwrite-cloudflare READ A DATABASE_URL (a prompt would have eaten the zone answer and failed validation)"
+else
+  ok "--overwrite-cloudflare never reads a DATABASE_URL (exit 0 with only the two CF answers fed proves it)"
+fi
+PROD_CRON_2="$(BAO_TOKEN="$RT" bao read -format=json secret/data/apps/govgraph/prod/app | jq -r .data.data.CRON_SECRET)"
+PROD_APP_V1="$(BAO_TOKEN="$RT" bao read -format=json secret/metadata/apps/govgraph/prod/app | jq -r .data.current_version)"
+PROD_CF_V1="$(BAO_TOKEN="$RT" bao read -format=json secret/metadata/apps/govgraph/prod/cloudflare | jq -r .data.current_version)"
+if [[ "$PROD_CRON_2" == "$PROD_CRON_1" ]]; then
+  ok "--overwrite-cloudflare kept CRON_SECRET byte-for-byte (web and refresh stay in agreement)"
+else
+  bad "--overwrite-cloudflare REGENERATED CRON_SECRET"
+fi
+if [[ "$PROD_APP_V1" == "$PROD_APP_V0" ]]; then
+  ok "--overwrite-cloudflare did not touch the app object (version unchanged)"
+else
+  bad "--overwrite-cloudflare bumped the app object version"
+fi
+BAO_TOKEN="$RT" bao read -format=json secret/data/apps/govgraph/prod/cloudflare \
+  | jq -e --arg z "$GG_ZONE2" --arg t "$GG_TOKEN2" '.data.data | .CF_ZONE_ID == $z and .CF_API_TOKEN == $t' >/dev/null \
+  && ok "--overwrite-cloudflare stored the new CF values"
+if [[ "$PROD_CF_V1" != "$PROD_CF_V0" ]]; then
+  ok "--overwrite-cloudflare rewrote the cloudflare object (version bumped)"
+else
+  bad "--overwrite-cloudflare did not rewrite the cloudflare object"
+fi
+# --overwrite-app prompts for DATABASE_URL ONLY (no CF value is read or shipped)
+F15i2=$(feed_govgraph "$GG_DB2")
+if run_flow_shim "$TD/run-gg-ovapp.out" root-run govgraph-secrets prod --overwrite-app <"$F15i2"; then
+  ok "--overwrite-app exited 0"
+else
+  bad "--overwrite-app failed"; cat "$TD/run-gg-ovapp.out"; exit 1
+fi
+if grep -qE "CF_ZONE_ID must|CF_API_TOKEN must" "$TD/run-gg-ovapp.out"; then
+  bad "--overwrite-app READ CF VALUES (a prompt would have eaten the answer or hit EOF and failed validation)"
+else
+  ok "--overwrite-app never reads CF values (exit 0 with only DATABASE_URL fed proves it)"
+fi
+PROD_CRON_3="$(BAO_TOKEN="$RT" bao read -format=json secret/data/apps/govgraph/prod/app | jq -r .data.data.CRON_SECRET)"
+PROD_APP_V2="$(BAO_TOKEN="$RT" bao read -format=json secret/metadata/apps/govgraph/prod/app | jq -r .data.current_version)"
+PROD_CF_V2="$(BAO_TOKEN="$RT" bao read -format=json secret/metadata/apps/govgraph/prod/cloudflare | jq -r .data.current_version)"
+if [[ "$PROD_CRON_3" =~ ^[0-9a-f]{64}$ && "$PROD_CRON_3" != "$PROD_CRON_2" ]]; then
+  ok "--overwrite-app regenerated CRON_SECRET (still 64 hex)"
+else
+  bad "--overwrite-app did not regenerate CRON_SECRET"
+fi
+if [[ "$PROD_APP_V2" != "$PROD_APP_V1" ]]; then
+  ok "--overwrite-app rewrote the app object (version bumped)"
+else
+  bad "--overwrite-app did not rewrite the app object"
+fi
+BAO_TOKEN="$RT" bao read -format=json secret/data/apps/govgraph/prod/app \
+  | jq -e --arg db "$GG_DB2" '.data.data.DATABASE_URL == $db' >/dev/null \
+  && ok "--overwrite-app stored the new DATABASE_URL"
+if [[ "$PROD_CF_V2" == "$PROD_CF_V1" ]]; then
+  ok "--overwrite-app left the cloudflare object untouched (version unchanged)"
+else
+  bad "--overwrite-app bumped the cloudflare object version"
+fi
+BAO_TOKEN="$RT" bao read -format=json secret/data/apps/govgraph/prod/cloudflare \
+  | jq -e --arg z "$GG_ZONE2" --arg t "$GG_TOKEN2" '.data.data | .CF_ZONE_ID == $z and .CF_API_TOKEN == $t' >/dev/null \
+  && ok "--overwrite-app kept the new CF values (still readable, unchanged)"
+
+echo "== 15j. split-flag misuse dies before minting"
+if run_flow "$TD/run-gg-flag1.out" root-run govgraph-secrets prod --overwrite --overwrite-app </dev/null; then
+  bad "--overwrite + --overwrite-app accepted together"
+else
+  ok "--overwrite + --overwrite-app refused"
+fi
+if grep -q "exactly one of --overwrite, --overwrite-app, --overwrite-cloudflare" "$TD/run-gg-flag1.out"; then
+  ok "the combination error names all three flags"
+else
+  bad "combination error missing"; cat "$TD/run-gg-flag1.out"
+fi
+if run_flow "$TD/run-gg-flag2.out" root-run govgraph-secrets staging --overwrite-cloudflare </dev/null; then
+  bad "--overwrite-cloudflare accepted on staging"
+else
+  ok "--overwrite-cloudflare refused on staging"
+fi
+if grep -q "staging writes no cloudflare object" "$TD/run-gg-flag2.out"; then
+  ok "the staging error explains which flag to use instead"
+else
+  bad "staging cloudflare error missing"; cat "$TD/run-gg-flag2.out"
+fi
+if run_flow "$TD/run-gg-flag3.out" root-run govgraph-probes --overwrite-app </dev/null; then
+  bad "--overwrite-app accepted on govgraph-probes"
+else
+  ok "--overwrite-app refused outside govgraph-secrets"
+fi
+if grep -q "govgraph-secrets only" "$TD/run-gg-flag3.out"; then
+  ok "the misuse error names the allowed mode"
+else
+  bad "misuse error missing"; cat "$TD/run-gg-flag3.out"
+fi
+
+echo "== 15k. root-run -- env sees no share (the payload env var is unset on the remote side)"
+# The shares ride the ssh stdin payload, but the remote side used to keep
+# BREAKGLASS_PAYLOAD exported for the whole session, so `root-run -- <cmd>` and every
+# child inherited them. A plain `root-run -- env` must print neither share nor the var.
+SHARE2="$(jq -r '.unseal_keys_b64[1]' "$TD/init.json")"
+F15k=$(feed_shares)
+if run_flow "$TD/run-env.out" root-run -- env <"$F15k"; then
+  ok "root-run -- env exited 0"
+else
+  bad "root-run -- env failed"; cat "$TD/run-env.out"; exit 1
+fi
+if grep -q "^PATH=" "$TD/run-env.out"; then
+  ok "env output captured (positive control)"
+else
+  bad "env output missing - the leak checks are vacuous"; cat "$TD/run-env.out"
+fi
+if grep -qF "$SHARE1" "$TD/run-env.out" || grep -qF "$SHARE2" "$TD/run-env.out"; then
+  bad "AN UNSEAL SHARE LEAKED INTO root-run -- env OUTPUT"
+else
+  ok "neither unseal share appears in the child's environment dump"
+fi
+if grep -q "BREAKGLASS_PAYLOAD" "$TD/run-env.out"; then
+  bad "BREAKGLASS_PAYLOAD STILL EXPORTED INTO THE root-run -- CHILD"
+else
+  ok "the payload variable is unset before any child runs"
+fi
+# The remote bash -s itself: the payload must never be in its EXEC-TIME environment
+# (unsetting after exec does not rewrite /proc/<pid>/environ; on sectools that block is
+# readable for the whole session). `ps eww` prints that original environment block for
+# every process this user owns, so the remote shell is covered however it was spawned.
+F15k2=$(feed_shares)
+if run_flow "$TD/run-psenv.out" root-run -- ps eww -o 'command=' <"$F15k2"; then
+  ok "root-run -- ps eww (process environments) exited 0"
+else
+  bad "root-run -- ps eww failed"; cat "$TD/run-psenv.out"; exit 1
+fi
+if grep -q "PATH=" "$TD/run-psenv.out"; then
+  ok "process environments were captured (positive control)"
+else
+  bad "ps eww output missing - the environ check is vacuous"; cat "$TD/run-psenv.out"
+fi
+if grep -qF "$SHARE1" "$TD/run-psenv.out" || grep -qF "$SHARE2" "$TD/run-psenv.out" || grep -q "BREAKGLASS_PAYLOAD" "$TD/run-psenv.out"; then
+  bad "THE PAYLOAD IS IN SOME PROCESS'S EXEC-TIME ENVIRONMENT"
+else
+  ok "no share or payload variable in any process's exec-time environment"
+fi
+unset SHARE2
+
+echo "== 15l. --overwrite-app with no cloudflare object refuses BEFORE writing anything"
+# Precondition check up front: the run would have to write the missing cloudflare object
+# but carries no CF values, so nothing at all is written (the app object is not rotated).
+BAO_TOKEN="$RT" bao kv metadata delete secret/apps/govgraph/prod/cloudflare >/dev/null
+PROD_CRON_A="$(BAO_TOKEN="$RT" bao read -format=json secret/data/apps/govgraph/prod/app | jq -r .data.data.CRON_SECRET)"
+PROD_APP_VA="$(BAO_TOKEN="$RT" bao read -format=json secret/metadata/apps/govgraph/prod/app | jq -r .data.current_version)"
+F15l=$(feed_govgraph "$GG_DB2")
+if run_flow "$TD/run-gg-atomic.out" root-run govgraph-secrets prod --overwrite-app <"$F15l"; then
+  bad "--overwrite-app succeeded with no cloudflare object (should have refused first)"
+else
+  ok "refused before any write (nonzero exit)"
+fi
+if grep -q "carries no CF values" "$TD/run-gg-atomic.out"; then
+  ok "the refusal explains the missing CF values and the flags that create the object"
+else
+  bad "refusal message missing"; cat "$TD/run-gg-atomic.out"
+fi
+PROD_CRON_B="$(BAO_TOKEN="$RT" bao read -format=json secret/data/apps/govgraph/prod/app | jq -r .data.data.CRON_SECRET)"
+PROD_APP_VB="$(BAO_TOKEN="$RT" bao read -format=json secret/metadata/apps/govgraph/prod/app | jq -r .data.current_version)"
+if [[ "$PROD_CRON_B" == "$PROD_CRON_A" && "$PROD_APP_VB" == "$PROD_APP_VA" ]]; then
+  ok "the app object is untouched (CRON_SECRET and version unchanged - everything or nothing)"
+else
+  bad "THE APP OBJECT WAS ROTATED BEFORE THE FAILURE"
+fi
+# Restore the cloudflare object with a plain no-flag run (app skip path, CF created).
+F15l2=$(feed_govgraph "$GG_DB" "$GG_ZONE2" "$GG_TOKEN2")
+if run_flow "$TD/run-gg-restore.out" root-run govgraph-secrets prod <"$F15l2"; then
+  ok "a no-flag run recreates the cloudflare object"
+else
+  bad "the restore run failed"; cat "$TD/run-gg-restore.out"; exit 1
+fi
+BAO_TOKEN="$RT" bao read -format=json secret/data/apps/govgraph/prod/cloudflare \
+  | jq -e --arg z "$GG_ZONE2" --arg t "$GG_TOKEN2" '.data.data | .CF_ZONE_ID == $z and .CF_API_TOKEN == $t' >/dev/null \
+  && ok "cloudflare object restored with the expected values"
+echo "== 15m. --overwrite-app with a DAMAGED cloudflare object refuses BEFORE rotating the app object"
+# The kept cloudflare object's contents are verified before the app write, so a damaged
+# object cannot leave a half-rotated prod state (CRON_SECRET rotated, then exit 1).
+BAO_TOKEN="$RT" bao kv put secret/apps/govgraph/prod/cloudflare WRONG_KEY=x >/dev/null
+PROD_CRON_A="$(BAO_TOKEN="$RT" bao read -format=json secret/data/apps/govgraph/prod/app | jq -r .data.data.CRON_SECRET)"
+PROD_APP_VA="$(BAO_TOKEN="$RT" bao read -format=json secret/metadata/apps/govgraph/prod/app | jq -r .data.current_version)"
+PROD_CF_VA="$(BAO_TOKEN="$RT" bao read -format=json secret/metadata/apps/govgraph/prod/cloudflare | jq -r .data.current_version)"
+F15m=$(feed_govgraph "$GG_DB2")
+if run_flow "$TD/run-gg-damaged.out" root-run govgraph-secrets prod --overwrite-app <"$F15m"; then
+  bad "--overwrite-app succeeded over a damaged cloudflare object"
+else
+  ok "refused (nonzero exit)"
+fi
+if grep -q "does not hold exactly CF_ZONE_ID + CF_API_TOKEN - nothing written" "$TD/run-gg-damaged.out"; then
+  ok "the refusal says nothing was written"
+else
+  bad "refusal message missing"; cat "$TD/run-gg-damaged.out"
+fi
+PROD_CRON_B="$(BAO_TOKEN="$RT" bao read -format=json secret/data/apps/govgraph/prod/app | jq -r .data.data.CRON_SECRET)"
+PROD_APP_VB="$(BAO_TOKEN="$RT" bao read -format=json secret/metadata/apps/govgraph/prod/app | jq -r .data.current_version)"
+if [[ "$PROD_CRON_B" == "$PROD_CRON_A" && "$PROD_APP_VB" == "$PROD_APP_VA" ]]; then
+  ok "the app object is untouched (CRON_SECRET and version unchanged)"
+else
+  bad "THE APP OBJECT WAS ROTATED BEFORE THE REFUSAL"
+fi
+PROD_CF_VB="$(BAO_TOKEN="$RT" bao read -format=json secret/metadata/apps/govgraph/prod/cloudflare | jq -r .data.current_version)"
+if [[ "$PROD_CF_VB" == "$PROD_CF_VA" ]]; then
+  ok "the damaged cloudflare object is untouched by the refused run (version unchanged)"
+else
+  bad "THE REFUSED RUN WROTE THE CLOUDFLARE OBJECT"
+fi
+F15m2=$(feed_govgraph "$GG_DB" "$GG_ZONE2" "$GG_TOKEN2")
+if run_flow "$TD/run-gg-repair.out" root-run govgraph-secrets prod --overwrite <"$F15m2"; then
+  ok "--overwrite repairs the damaged cloudflare object"
+else
+  bad "the repair run failed"; cat "$TD/run-gg-repair.out"; exit 1
+fi
+if BAO_TOKEN="$RT" bao read -format=json secret/data/apps/govgraph/prod/cloudflare \
+  | jq -e '.data.data | keys | sort == ["CF_API_TOKEN","CF_ZONE_ID"]' >/dev/null; then
+  ok "cloudflare object holds exactly its two keys again"
+else
+  bad "cloudflare object not repaired"
+fi
+unset RT GG_CRON_1 GG_CRON_2 GG_CRON_3 GG_DB GG_BAD_PORT GG_ZONE GG_TOKEN \
+  GG_DB_SLASH GG_DB_SPACE GG_DB2 GG_ZONE2 GG_TOKEN2 PROD_CRON_1 PROD_CRON_2 PROD_CRON_3 \
+  PROD_APP_V0 PROD_APP_V1 PROD_APP_V2 PROD_CF_V0 PROD_CF_V1 PROD_CF_V2 \
+  PROD_CRON_A PROD_CRON_B PROD_APP_VA PROD_APP_VB PROD_CF_VA PROD_CF_VB
+
+echo "== 16. root-run govgraph-probes: PATCH into the shared probe object"
+GG_PS_APEX='https://govgraph.example/'
+GG_PS_STAGING='https://govgraph-staging.example/'
+GG_PS_APEX2='https://govgraph-2.example/'
+GG_PS_STAGING2='https://govgraph-staging-2.example/'
+feed_ggprobes() {  # $1/$2 = the two hidden prompt answers (defaults to the first pair)
+  local f; f=$(mktemp "$TD/answers.XXXXXX")
+  jq -r '.unseal_keys_b64[0,1]' "$TD/init.json" >"$f"
+  printf '%s\n' "${1:-$GG_PS_APEX}" "${2:-$GG_PS_STAGING}" >>"$f"
+  echo "$f"
+}
+
+echo "== 16a. a probe URL without a trailing slash dies before minting"
+F16a=$(feed_ggprobes 'https://govgraph.example' "$GG_PS_STAGING")
+if run_flow "$TD/run-ggp-slash.out" root-run govgraph-probes <"$F16a"; then
+  bad "URL without a trailing slash accepted"
+else
+  ok "URL without a trailing slash rejected (nonzero exit)"
+fi
+if grep -q "must end in a slash" "$TD/run-ggp-slash.out"; then
+  ok "missing-slash error names the required slash"
+else
+  bad "missing-slash error missing"; cat "$TD/run-ggp-slash.out"
+fi
+if grep -q "minting the root token" "$TD/run-ggp-slash.out"; then
+  bad "missing-slash run minted a root token (should die locally first)"
+else
+  ok "missing-slash run died before minting"
+fi
+
+echo "== 16b. govgraph-probes PATCHes the object public-site-probes wrote: all four keys, public keys untouched"
+RT="$(jq -r .root_token "$TD/init.json")"
+F16b=$(feed_ggprobes)
+if run_flow_shim "$TD/run-ggp2.out" root-run govgraph-probes <"$F16b"; then
+  ok "root-run govgraph-probes exited 0"
+else
+  bad "root-run govgraph-probes failed"; cat "$TD/run-ggp2.out"; exit 1
+fi
+if grep -q "stored (govgraph apex ${#GG_PS_APEX} chars, staging ${#GG_PS_STAGING} chars; apex_url/staging_url untouched)" "$TD/run-ggp2.out"; then
+  ok "prints stored (N chars) + untouched note only"
+else
+  bad "govgraph-probes stored line missing"; cat "$TD/run-ggp2.out"
+fi
+if grep -q "govgraph-probes setup complete" "$TD/run-ggp2.out"; then ok "govgraph-probes run completed"; else bad "govgraph-probes completion line missing"; fi
+if grep -q "revocation verified" "$TD/run-ggp2.out"; then ok "govgraph-probes run revoked its token"; else bad "govgraph-probes revocation missing"; fi
+BAO_TOKEN="$RT" bao read -format=json secret/data/monitoring/public-site-probes \
+  | jq -e --arg a "$PS_APEX" --arg s "$PS_STAGING" --arg ga "$GG_PS_APEX" --arg gs "$GG_PS_STAGING" \
+    '.data.data | ((keys | sort) == ["apex_url","govgraph_apex_url","govgraph_staging_url","staging_url"])
+     and .apex_url == $a and .staging_url == $s
+     and .govgraph_apex_url == $ga and .govgraph_staging_url == $gs' >/dev/null \
+  && ok "all four probe keys present; public-site URLs unchanged, govgraph URLs stored"
+if grep -qF "$GG_PS_APEX" "$TD/ssh-argv.log" || grep -qF "$GG_PS_STAGING" "$TD/ssh-argv.log"; then
+  bad "A GOVGRAPH PROBE URL APPEARED IN THE SSH BOUNDARY'S ARGV"
+else
+  ok "govgraph probe URLs never cross the ssh boundary on argv"
+fi
+if grep -qF "$GG_PS_APEX" "$TD/run-ggp2.out" || grep -qF "$GG_PS_STAGING" "$TD/run-ggp2.out"; then
+  bad "A GOVGRAPH PROBE URL WAS PRINTED INTO THE TRANSCRIPT"
+else
+  ok "govgraph probe URLs never printed"
+fi
+if grep -qF "$GG_PS_APEX" "$TD/jq-argv.log" || grep -qF "$GG_PS_STAGING" "$TD/jq-argv.log"; then
+  bad "A GOVGRAPH PROBE URL APPEARED IN A LOCAL/REMOTE JQ ARGV"
+else
+  ok "govgraph probe URLs never ride a local/remote jq argv"
+fi
+
+echo "== 16c. re-run refuses without --overwrite; --overwrite replaces just the govgraph keys"
+F16c=$(feed_ggprobes)
+run_flow_shim "$TD/run-ggp3.out" root-run govgraph-probes <"$F16c" || true
+if grep -q "already exist" "$TD/run-ggp3.out"; then
+  ok "second govgraph-probes run refuses the existing keys"
+else
+  bad "second govgraph-probes run did not refuse"; cat "$TD/run-ggp3.out"
+fi
+BAO_TOKEN="$RT" bao read -format=json secret/data/monitoring/public-site-probes \
+  | jq -e --arg ga "$GG_PS_APEX" --arg gs "$GG_PS_STAGING" --arg a "$PS_APEX" --arg s "$PS_STAGING" \
+    '.data.data | .govgraph_apex_url == $ga and .govgraph_staging_url == $gs and .apex_url == $a and .staging_url == $s' >/dev/null \
+  && ok "the refused run changed nothing (all four values intact)"
+F16d=$(feed_ggprobes "$GG_PS_APEX2" "$GG_PS_STAGING2")
+if run_flow_shim "$TD/run-ggp4.out" root-run govgraph-probes --overwrite <"$F16d"; then
+  ok "govgraph-probes --overwrite exited 0"
+else
+  bad "govgraph-probes --overwrite failed"; cat "$TD/run-ggp4.out"; exit 1
+fi
+BAO_TOKEN="$RT" bao read -format=json secret/data/monitoring/public-site-probes \
+  | jq -e --arg ga "$GG_PS_APEX2" --arg gs "$GG_PS_STAGING2" --arg a "$PS_APEX" --arg s "$PS_STAGING" \
+    '.data.data | ((keys | sort) == ["apex_url","govgraph_apex_url","govgraph_staging_url","staging_url"])
+     and .govgraph_apex_url == $ga and .govgraph_staging_url == $gs
+     and .apex_url == $a and .staging_url == $s' >/dev/null \
+  && ok "--overwrite replaced only the govgraph keys; public-site URLs still intact"
+
+echo "== 16d. public-site-probes --overwrite afterwards KEEPS the govgraph keys (patch, not put)"
+F16e=$(feed_publicsite)
+if run_flow_shim "$TD/run-ps3.out" root-run public-site-probes --overwrite <"$F16e"; then
+  ok "public-site-probes --overwrite exited 0"
+else
+  bad "public-site-probes --overwrite failed"; cat "$TD/run-ps3.out"; exit 1
+fi
+BAO_TOKEN="$RT" bao read -format=json secret/data/monitoring/public-site-probes \
+  | jq -e --arg a "$PS_APEX" --arg s "$PS_STAGING" --arg ga "$GG_PS_APEX2" --arg gs "$GG_PS_STAGING2" \
+    '.data.data | ((keys | sort) == ["apex_url","govgraph_apex_url","govgraph_staging_url","staging_url"])
+     and .apex_url == $a and .staging_url == $s
+     and .govgraph_apex_url == $ga and .govgraph_staging_url == $gs' >/dev/null \
+  && ok "public-site-probes --overwrite kept both govgraph keys (the modes cannot clobber each other)"
+if grep -q "public-site-probes setup complete" "$TD/run-ps3.out"; then ok "public-site-probes run completed"; else bad "public-site-probes completion line missing"; fi
+if grep -q "revocation verified" "$TD/run-ps3.out"; then ok "public-site-probes overwrite run revoked its token"; else bad "public-site-probes overwrite revocation missing"; fi
+if grep -qF "$PS_APEX" "$TD/jq-argv.log" || grep -qF "$PS_STAGING" "$TD/jq-argv.log" \
+  || grep -qF "$GG_PS_APEX2" "$TD/jq-argv.log" || grep -qF "$GG_PS_STAGING2" "$TD/jq-argv.log"; then
+  bad "A PROBE URL APPEARED IN A LOCAL/REMOTE JQ ARGV"
+else
+  ok "no probe URL rides a local/remote jq argv (either mode, either side)"
+fi
+
+echo "== 16e. a stray key is refused without --overwrite; with it the canonical write DROPS it"
+# Raw-write a stray key past both modes: neither may write over it silently, but
+# --overwrite must also be a complete argv-free way to remove it (canonical write).
+BAO_TOKEN="$RT" bao kv put secret/monitoring/public-site-probes \
+  apex_url="$PS_APEX" staging_url="$PS_STAGING" \
+  govgraph_apex_url="$GG_PS_APEX2" govgraph_staging_url="$GG_PS_STAGING2" \
+  stray_key=stray-value >/dev/null
+PSPV_S1="$(BAO_TOKEN="$RT" bao read -format=json secret/metadata/monitoring/public-site-probes | jq -r .data.current_version)"
+F16e=$(feed_ggprobes)
+run_flow "$TD/run-ggp-stray.out" root-run govgraph-probes <"$F16e" || true
+if grep -q "keys other than the four probe keys" "$TD/run-ggp-stray.out"; then
+  ok "govgraph-probes refuses the stray key before writing"
+else
+  bad "govgraph-probes did not refuse the stray key"; cat "$TD/run-ggp-stray.out"
+fi
+F16e3=$(feed_publicsite)
+run_flow "$TD/run-ps-stray.out" root-run public-site-probes <"$F16e3" || true
+if grep -q "keys other than the four probe keys" "$TD/run-ps-stray.out"; then
+  ok "public-site-probes also refuses the stray key before writing"
+else
+  bad "public-site-probes did not refuse the stray key"; cat "$TD/run-ps-stray.out"
+fi
+PSPV_S2="$(BAO_TOKEN="$RT" bao read -format=json secret/metadata/monitoring/public-site-probes | jq -r .data.current_version)"
+if [[ "$PSPV_S2" == "$PSPV_S1" ]]; then
+  ok "no version bump: nothing was written while the stray key was present"
+else
+  bad "THE OBJECT WAS WRITTEN DESPITE THE STRAY KEY"
+fi
+F16e2=$(feed_ggprobes)
+if run_flow "$TD/run-ggp-stray2.out" root-run govgraph-probes --overwrite <"$F16e2"; then
+  ok "govgraph-probes --overwrite writes the canonical keys and drops the stray one"
+else
+  bad "govgraph-probes --overwrite failed on the stray-key object"; cat "$TD/run-ggp-stray2.out"; exit 1
+fi
+BAO_TOKEN="$RT" bao read -format=json secret/data/monitoring/public-site-probes \
+  | jq -e --arg a "$PS_APEX" --arg s "$PS_STAGING" --arg ga "$GG_PS_APEX" --arg gs "$GG_PS_STAGING" \
+    '.data.data | ((keys | sort) == ["apex_url","govgraph_apex_url","govgraph_staging_url","staging_url"])
+     and .apex_url == $a and .staging_url == $s
+     and .govgraph_apex_url == $ga and .govgraph_staging_url == $gs' >/dev/null \
+  && ok "the stray key is gone and all four canonical keys hold the right values (no raw argv write needed)"
+# public-site-probes --overwrite must drop a stray key the same way.
+BAO_TOKEN="$RT" bao kv put secret/monitoring/public-site-probes \
+  apex_url="$PS_APEX" staging_url="$PS_STAGING" \
+  govgraph_apex_url="$GG_PS_APEX" govgraph_staging_url="$GG_PS_STAGING" \
+  stray_key=stray-value >/dev/null
+F16e5=$(feed_publicsite)
+if run_flow "$TD/run-ps-stray2.out" root-run public-site-probes --overwrite <"$F16e5"; then
+  ok "public-site-probes --overwrite writes the canonical keys and drops the stray one"
+else
+  bad "public-site-probes --overwrite failed on the stray-key object"; cat "$TD/run-ps-stray2.out"; exit 1
+fi
+BAO_TOKEN="$RT" bao read -format=json secret/data/monitoring/public-site-probes \
+  | jq -e --arg a "$PS_APEX" --arg s "$PS_STAGING" --arg ga "$GG_PS_APEX" --arg gs "$GG_PS_STAGING" \
+    '.data.data | ((keys | sort) == ["apex_url","govgraph_apex_url","govgraph_staging_url","staging_url"])
+     and .apex_url == $a and .staging_url == $s
+     and .govgraph_apex_url == $ga and .govgraph_staging_url == $gs' >/dev/null \
+  && ok "both modes can fully repair the shared object argv-free"
+F16e4=$(feed_ggprobes)
+run_flow "$TD/run-ggp-stray3.out" root-run govgraph-probes <"$F16e4" || true
+if grep -q "already exist" "$TD/run-ggp-stray3.out"; then
+  ok "with the stray key gone, the skip path works again"
+else
+  bad "skip path still failing after the repair"; cat "$TD/run-ggp-stray3.out"
+fi
+
+echo "== 16f. an empty stored govgraph URL is refused on the keep path; --overwrite repairs a lone govgraph key"
+# empty value: both govgraph keys exist but govgraph_staging_url is empty (a hand edit).
+# The keep path must refuse it - an empty target would silently kill that probe.
+BAO_TOKEN="$RT" bao kv put secret/monitoring/public-site-probes \
+  apex_url="$PS_APEX" staging_url="$PS_STAGING" \
+  govgraph_apex_url="$GG_PS_APEX2" govgraph_staging_url="" >/dev/null
+F16f0=$(feed_ggprobes)
+run_flow "$TD/run-ggp-empty.out" root-run govgraph-probes <"$F16f0" || true
+if grep -q "must both be non-empty" "$TD/run-ggp-empty.out"; then
+  ok "an empty govgraph_staging_url is refused on the keep path (no third read of the secret)"
+else
+  bad "empty govgraph_staging_url accepted"; cat "$TD/run-ggp-empty.out"
+fi
+F16f0b=$(feed_ggprobes)
+if run_flow "$TD/run-ggp-emptyfix.out" root-run govgraph-probes --overwrite <"$F16f0b"; then
+  ok "--overwrite repairs the empty value"
+else
+  bad "--overwrite repair of the empty value failed"; cat "$TD/run-ggp-emptyfix.out"; exit 1
+fi
+BAO_TOKEN="$RT" bao read -format=json secret/data/monitoring/public-site-probes \
+  | jq -e --arg ga "$GG_PS_APEX" --arg gs "$GG_PS_STAGING" \
+    '.data.data | .govgraph_apex_url == $ga and .govgraph_staging_url == $gs' >/dev/null \
+  && ok "both govgraph URLs are non-empty again"
+# lone govgraph key: govgraph_apex_url without its pair
+BAO_TOKEN="$RT" bao kv put secret/monitoring/public-site-probes \
+  apex_url="$PS_APEX" staging_url="$PS_STAGING" govgraph_apex_url="$GG_PS_APEX" >/dev/null
+F16f=$(feed_ggprobes)
+run_flow "$TD/run-ggp-lone.out" root-run govgraph-probes <"$F16f" || true
+if grep -q "only one of the two govgraph keys" "$TD/run-ggp-lone.out"; then
+  ok "a lone govgraph key is refused without --overwrite"
+else
+  bad "lone govgraph key not refused"; cat "$TD/run-ggp-lone.out"
+fi
+F16f2=$(feed_ggprobes)
+if run_flow "$TD/run-ggp-lonefix.out" root-run govgraph-probes --overwrite <"$F16f2"; then
+  ok "--overwrite repairs the lone govgraph key"
+else
+  bad "--overwrite repair of the lone key failed"; cat "$TD/run-ggp-lonefix.out"; exit 1
+fi
+BAO_TOKEN="$RT" bao read -format=json secret/data/monitoring/public-site-probes \
+  | jq -e --arg a "$PS_APEX" --arg s "$PS_STAGING" --arg ga "$GG_PS_APEX" --arg gs "$GG_PS_STAGING" \
+    '.data.data | ((keys | sort) == ["apex_url","govgraph_apex_url","govgraph_staging_url","staging_url"])
+     and .apex_url == $a and .staging_url == $s
+     and .govgraph_apex_url == $ga and .govgraph_staging_url == $gs' >/dev/null \
+  && ok "repaired object holds the canonical four keys with the base pair intact"
+if grep -q "PATCHing secret/monitoring/public-site-probes (govgraph_apex_url + govgraph_staging_url; apex_url/staging_url untouched; cas " "$TD/run-ggp-lonefix.out"; then
+  ok "the PATCH line names the check-and-set version it read"
+else
+  bad "the PATCH line does not name a cas version"; cat "$TD/run-ggp-lonefix.out"
+fi
+# missing base pair: only the govgraph keys -> govgraph-probes refuses (it cannot write
+# the base pair); public-site-probes --overwrite rebuilds it and carries the pair over
+BAO_TOKEN="$RT" bao kv put secret/monitoring/public-site-probes \
+  govgraph_apex_url="$GG_PS_APEX" govgraph_staging_url="$GG_PS_STAGING" >/dev/null
+F16f3=$(feed_ggprobes)
+run_flow "$TD/run-ggp-nobase.out" root-run govgraph-probes <"$F16f3" || true
+if grep -q "lacks apex_url/staging_url" "$TD/run-ggp-nobase.out"; then
+  ok "govgraph-probes refuses an object with no base pair (it cannot write those keys)"
+else
+  bad "missing-base-pair object not refused"; cat "$TD/run-ggp-nobase.out"
+fi
+F16f4=$(feed_publicsite)
+if run_flow "$TD/run-ps-repair.out" root-run public-site-probes --overwrite <"$F16f4"; then
+  ok "public-site-probes --overwrite repairs the missing base pair"
+else
+  bad "public-site-probes --overwrite repair failed"; cat "$TD/run-ps-repair.out"; exit 1
+fi
+BAO_TOKEN="$RT" bao read -format=json secret/data/monitoring/public-site-probes \
+  | jq -e --arg a "$PS_APEX" --arg s "$PS_STAGING" --arg ga "$GG_PS_APEX" --arg gs "$GG_PS_STAGING" \
+    '.data.data | ((keys | sort) == ["apex_url","govgraph_apex_url","govgraph_staging_url","staging_url"])
+     and .apex_url == $a and .staging_url == $s
+     and .govgraph_apex_url == $ga and .govgraph_staging_url == $gs' >/dev/null \
+  && ok "repaired object: base pair restored, govgraph pair carried over untouched"
+
+echo "== 16g. the server enforces check-and-set (what makes the cas on every write meaningful)"
+PSPV_C="$(BAO_TOKEN="$RT" bao read -format=json secret/metadata/monitoring/public-site-probes | jq -r .data.current_version)"
+STALE=$((PSPV_C - 1))
+CASHTTP="$(curl -s -o /dev/null -w '%{http_code}' -H "X-Vault-Token: $RT" \
+  -d "{\"options\":{\"cas\":$STALE},\"data\":{\"apex_url\":\"x\",\"staging_url\":\"y\",\"govgraph_apex_url\":\"z\",\"govgraph_staging_url\":\"w\"}}" \
+  "$ADDR/v1/secret/data/monitoring/public-site-probes")"
+if [[ "$CASHTTP" == "400" ]]; then
+  ok "a stale-cas write is rejected by the server (HTTP 400), so a racing writer cannot be clobbered"
+else
+  bad "stale-cas write returned HTTP $CASHTTP (expected 400)"
+fi
+
+echo "== 16h. a soft-deleted latest version (data 404, metadata 200): refused without --overwrite, rebuilt with it"
+# `bao kv delete` soft-deletes the data of the latest version; the metadata path still
+# answers 200. Without --overwrite the run must refuse (no silent empty success);
+# with it public-site-probes writes the canonical object again at the current version.
+BAO_TOKEN="$RT" bao kv delete secret/monitoring/public-site-probes >/dev/null
+F16h0=$(feed_publicsite)
+if run_flow "$TD/run-ps-sdrefuse.out" root-run public-site-probes <"$F16h0"; then
+  bad "a soft-deleted object reported success without --overwrite"
+else
+  ok "soft-deleted object refused without --overwrite (nonzero exit)"
+fi
+if grep -q "soft-deleted" "$TD/run-ps-sdrefuse.out"; then
+  ok "the refusal names the soft delete and --overwrite"
+else
+  bad "soft-delete refusal message missing"; cat "$TD/run-ps-sdrefuse.out"
+fi
+if grep -q "public-site-probes setup complete" "$TD/run-ps-sdrefuse.out"; then
+  bad "THE REFUSED RUN STILL CLAIMED COMPLETION"
+else
+  ok "no success line on the refused run"
+fi
+F16h=$(feed_publicsite)
+if run_flow "$TD/run-ps-undelete.out" root-run public-site-probes --overwrite <"$F16h"; then
+  ok "public-site-probes --overwrite rebuilt the soft-deleted object"
+else
+  bad "rebuild of the soft-deleted object failed"; cat "$TD/run-ps-undelete.out"; exit 1
+fi
+BAO_TOKEN="$RT" bao read -format=json secret/data/monitoring/public-site-probes \
+  | jq -e --arg a "$PS_APEX" --arg s "$PS_STAGING" \
+    '.data.data | ((keys | sort) == ["apex_url","staging_url"]) and .apex_url == $a and .staging_url == $s' >/dev/null \
+  && ok "the base pair is back (the govgraph pair is re-added by govgraph-probes)"
+F16h2=$(feed_ggprobes)
+if run_flow "$TD/run-ggp-undelete.out" root-run govgraph-probes <"$F16h2"; then
+  ok "govgraph-probes re-adds the pair afterwards"
+else
+  bad "govgraph-probes failed after the rebuild"; cat "$TD/run-ggp-undelete.out"; exit 1
+fi
+BAO_TOKEN="$RT" bao read -format=json secret/data/monitoring/public-site-probes \
+  | jq -e --arg a "$PS_APEX" --arg s "$PS_STAGING" --arg ga "$GG_PS_APEX" --arg gs "$GG_PS_STAGING" \
+    '.data.data | ((keys | sort) == ["apex_url","govgraph_apex_url","govgraph_staging_url","staging_url"])
+     and .apex_url == $a and .staging_url == $s
+     and .govgraph_apex_url == $ga and .govgraph_staging_url == $gs' >/dev/null \
+  && ok "all four keys restored after the soft-delete repair"
+unset RT GG_PS_APEX GG_PS_STAGING GG_PS_APEX2 GG_PS_STAGING2 PSPV_S1 PSPV_S2 PSPV_C STALE CASHTTP
 
 echo ""
 echo "result: $PASS passed, $FAIL failed"
