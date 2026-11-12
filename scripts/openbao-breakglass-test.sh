@@ -1140,8 +1140,11 @@ if run_flow "$TD/run-gg-damaged.out" root-run govgraph-secrets prod --overwrite-
 else
   ok "refused (nonzero exit)"
 fi
-grep -q "does not hold exactly CF_ZONE_ID + CF_API_TOKEN - nothing written" "$TD/run-gg-damaged.out" \
-  && ok "the refusal says nothing was written" || { bad "refusal message missing"; cat "$TD/run-gg-damaged.out"; }
+if grep -q "does not hold exactly CF_ZONE_ID + CF_API_TOKEN - nothing written" "$TD/run-gg-damaged.out"; then
+  ok "the refusal says nothing was written"
+else
+  bad "refusal message missing"; cat "$TD/run-gg-damaged.out"
+fi
 PROD_CRON_B="$(BAO_TOKEN="$RT" bao read -format=json secret/data/apps/govgraph/prod/app | jq -r .data.data.CRON_SECRET)"
 PROD_APP_VB="$(BAO_TOKEN="$RT" bao read -format=json secret/metadata/apps/govgraph/prod/app | jq -r .data.current_version)"
 if [[ "$PROD_CRON_B" == "$PROD_CRON_A" && "$PROD_APP_VB" == "$PROD_APP_VA" ]]; then
@@ -1155,9 +1158,12 @@ if run_flow "$TD/run-gg-repair.out" root-run govgraph-secrets prod --overwrite <
 else
   bad "the repair run failed"; cat "$TD/run-gg-repair.out"; exit 1
 fi
-BAO_TOKEN="$RT" bao read -format=json secret/data/apps/govgraph/prod/cloudflare \
-  | jq -e '.data.data | keys | sort == ["CF_API_TOKEN","CF_ZONE_ID"]' >/dev/null \
-  && ok "cloudflare object holds exactly its two keys again" || bad "cloudflare object not repaired"
+if BAO_TOKEN="$RT" bao read -format=json secret/data/apps/govgraph/prod/cloudflare \
+  | jq -e '.data.data | keys | sort == ["CF_API_TOKEN","CF_ZONE_ID"]' >/dev/null; then
+  ok "cloudflare object holds exactly its two keys again"
+else
+  bad "cloudflare object not repaired"
+fi
 unset RT GG_CRON_1 GG_CRON_2 GG_CRON_3 GG_DB GG_BAD_PORT GG_ZONE GG_TOKEN \
   GG_DB_SLASH GG_DB_SPACE GG_DB2 GG_ZONE2 GG_TOKEN2 PROD_CRON_1 PROD_CRON_2 PROD_CRON_3 \
   PROD_APP_V0 PROD_APP_V1 PROD_APP_V2 PROD_CF_V0 PROD_CF_V1 PROD_CF_V2 \
