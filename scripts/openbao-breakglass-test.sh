@@ -1134,6 +1134,7 @@ echo "== 15m. --overwrite-app with a DAMAGED cloudflare object refuses BEFORE ro
 BAO_TOKEN="$RT" bao kv put secret/apps/govgraph/prod/cloudflare WRONG_KEY=x >/dev/null
 PROD_CRON_A="$(BAO_TOKEN="$RT" bao read -format=json secret/data/apps/govgraph/prod/app | jq -r .data.data.CRON_SECRET)"
 PROD_APP_VA="$(BAO_TOKEN="$RT" bao read -format=json secret/metadata/apps/govgraph/prod/app | jq -r .data.current_version)"
+PROD_CF_VA="$(BAO_TOKEN="$RT" bao read -format=json secret/metadata/apps/govgraph/prod/cloudflare | jq -r .data.current_version)"
 F15m=$(feed_govgraph "$GG_DB2")
 if run_flow "$TD/run-gg-damaged.out" root-run govgraph-secrets prod --overwrite-app <"$F15m"; then
   bad "--overwrite-app succeeded over a damaged cloudflare object"
@@ -1152,6 +1153,12 @@ if [[ "$PROD_CRON_B" == "$PROD_CRON_A" && "$PROD_APP_VB" == "$PROD_APP_VA" ]]; t
 else
   bad "THE APP OBJECT WAS ROTATED BEFORE THE REFUSAL"
 fi
+PROD_CF_VB="$(BAO_TOKEN="$RT" bao read -format=json secret/metadata/apps/govgraph/prod/cloudflare | jq -r .data.current_version)"
+if [[ "$PROD_CF_VB" == "$PROD_CF_VA" ]]; then
+  ok "the damaged cloudflare object is untouched by the refused run (version unchanged)"
+else
+  bad "THE REFUSED RUN WROTE THE CLOUDFLARE OBJECT"
+fi
 F15m2=$(feed_govgraph "$GG_DB" "$GG_ZONE2" "$GG_TOKEN2")
 if run_flow "$TD/run-gg-repair.out" root-run govgraph-secrets prod --overwrite <"$F15m2"; then
   ok "--overwrite repairs the damaged cloudflare object"
@@ -1167,7 +1174,7 @@ fi
 unset RT GG_CRON_1 GG_CRON_2 GG_CRON_3 GG_DB GG_BAD_PORT GG_ZONE GG_TOKEN \
   GG_DB_SLASH GG_DB_SPACE GG_DB2 GG_ZONE2 GG_TOKEN2 PROD_CRON_1 PROD_CRON_2 PROD_CRON_3 \
   PROD_APP_V0 PROD_APP_V1 PROD_APP_V2 PROD_CF_V0 PROD_CF_V1 PROD_CF_V2 \
-  PROD_CRON_A PROD_CRON_B PROD_APP_VA PROD_APP_VB
+  PROD_CRON_A PROD_CRON_B PROD_APP_VA PROD_APP_VB PROD_CF_VA PROD_CF_VB
 
 echo "== 16. root-run govgraph-probes: PATCH into the shared probe object"
 GG_PS_APEX='https://govgraph.example/'

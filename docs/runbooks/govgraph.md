@@ -65,8 +65,13 @@ the three flags may be passed, and each prompts only for the object it writes:
 `--overwrite-app` never asks for the CF values, `--overwrite-cloudflare` never asks for
 `DATABASE_URL`, so no value is read, held or shipped for an object the run does not
 touch. A run checks every precondition before writing anything — including whether a
-missing sibling object would have to be created without the values for it — so it
-either writes everything it intends or nothing. Values travel local variable → jq
+missing sibling object would have to be created without the values for it, and the
+contents of any object it keeps — so a bad state is refused with nothing written. It is
+not a transaction: in prod the app object is written before the cloudflare object, so if
+the cloudflare **write itself** then fails (OpenBao 5xx/403), the run exits 1 with
+`CRON_SECRET` already rotated. If that happens, re-run the same command until it
+succeeds, then restart the web Deployment and let the next refresh run, so web and
+refresh read the same `CRON_SECRET`. Values travel local variable → jq
 environment → ssh stdin payload → the remote script's stdin (a non-exported variable;
 never the remote shell's exec-time environment, never argv on either side), and the
 command prints only the key names written plus each path's version:
