@@ -36,8 +36,10 @@
 #       --overwrite-app rotates only the app object, --overwrite-cloudflare rotates only
 #       the prod cloudflare object (CRON_SECRET kept byte-for-byte; each prompts only
 #       for the object it writes), and the split flags refuse bad combinations (together /
-#       staging cloudflare / wrong mode) before minting. root-run -- env shows no share
-#       (the payload env var is unset on the remote side before any child runs);
+#       staging cloudflare / wrong mode) before minting. The payload rides ssh stdin into
+#       a non-exported variable: root-run -- env shows no share, the remote shell's
+#       exec-time environment (ps eww) holds neither share nor payload variable, and
+#       --overwrite-app with a missing cloudflare object refuses BEFORE any write;
 #   16. root-run govgraph-probes: PATCHes govgraph_apex_url+govgraph_staging_url into the
 #       shared public-site-probes object (all four keys afterwards, public keys untouched)
 #       with a KV v2 check-and-set on the version just read, refuses without --overwrite,
@@ -729,7 +731,7 @@ else
   bad "root-run govgraph-secrets staging failed"; cat "$TD/run-ggs.out"; exit 1
 fi
 if grep -q "govgraph-secrets setup complete (staging)" "$TD/run-ggs.out"; then ok "staging app object written"; else bad "staging completion line missing"; fi
-if [[ -s "$TD/ssh-argv.log" ]] && grep -q "BREAKGLASS_PAYLOAD" "$TD/ssh-argv.log"; then
+if [[ -s "$TD/ssh-argv.log" ]] && grep -q '^bash -s$' "$TD/ssh-argv.log"; then
   ok "ssh-boundary argv logger captured the boundary traffic (positive control)"
 else
   bad "ssh-boundary argv log is missing/empty - the argv checks are vacuous"
@@ -1070,10 +1072,66 @@ if grep -q "BREAKGLASS_PAYLOAD" "$TD/run-env.out"; then
 else
   ok "the payload variable is unset before any child runs"
 fi
+# The remote bash -s itself: the payload must never be in its EXEC-TIME environment
+# (unsetting after exec does not rewrite /proc/<pid>/environ; on sectools that block is
+# readable for the whole session). `ps eww` prints that original environment block for
+# every process this user owns, so the remote shell is covered however it was spawned.
+F15k2=$(feed_shares)
+if run_flow "$TD/run-psenv.out" root-run -- ps eww -o 'command=' <"$F15k2"; then
+  ok "root-run -- ps eww (process environments) exited 0"
+else
+  bad "root-run -- ps eww failed"; cat "$TD/run-psenv.out"; exit 1
+fi
+if grep -q "PATH=" "$TD/run-psenv.out"; then
+  ok "process environments were captured (positive control)"
+else
+  bad "ps eww output missing - the environ check is vacuous"; cat "$TD/run-psenv.out"
+fi
+if grep -qF "$SHARE1" "$TD/run-psenv.out" || grep -qF "$SHARE2" "$TD/run-psenv.out" || grep -q "BREAKGLASS_PAYLOAD" "$TD/run-psenv.out"; then
+  bad "THE PAYLOAD IS IN SOME PROCESS'S EXEC-TIME ENVIRONMENT"
+else
+  ok "no share or payload variable in any process's exec-time environment"
+fi
 unset SHARE2
+
+echo "== 15l. --overwrite-app with no cloudflare object refuses BEFORE writing anything"
+# Precondition check up front: the run would have to write the missing cloudflare object
+# but carries no CF values, so nothing at all is written (the app object is not rotated).
+BAO_TOKEN="$RT" bao kv metadata delete secret/apps/govgraph/prod/cloudflare >/dev/null
+PROD_CRON_A="$(BAO_TOKEN="$RT" bao read -format=json secret/data/apps/govgraph/prod/app | jq -r .data.data.CRON_SECRET)"
+PROD_APP_VA="$(BAO_TOKEN="$RT" bao read -format=json secret/metadata/apps/govgraph/prod/app | jq -r .data.current_version)"
+F15l=$(feed_govgraph "$GG_DB2")
+if run_flow "$TD/run-gg-atomic.out" root-run govgraph-secrets prod --overwrite-app <"$F15l"; then
+  bad "--overwrite-app succeeded with no cloudflare object (should have refused first)"
+else
+  ok "refused before any write (nonzero exit)"
+fi
+if grep -q "carries no CF values" "$TD/run-gg-atomic.out"; then
+  ok "the refusal explains the missing CF values and the flags that create the object"
+else
+  bad "refusal message missing"; cat "$TD/run-gg-atomic.out"
+fi
+PROD_CRON_B="$(BAO_TOKEN="$RT" bao read -format=json secret/data/apps/govgraph/prod/app | jq -r .data.data.CRON_SECRET)"
+PROD_APP_VB="$(BAO_TOKEN="$RT" bao read -format=json secret/metadata/apps/govgraph/prod/app | jq -r .data.current_version)"
+if [[ "$PROD_CRON_B" == "$PROD_CRON_A" && "$PROD_APP_VB" == "$PROD_APP_VA" ]]; then
+  ok "the app object is untouched (CRON_SECRET and version unchanged - everything or nothing)"
+else
+  bad "THE APP OBJECT WAS ROTATED BEFORE THE FAILURE"
+fi
+# Restore the cloudflare object with a plain no-flag run (app skip path, CF created).
+F15l2=$(feed_govgraph "$GG_DB" "$GG_ZONE2" "$GG_TOKEN2")
+if run_flow "$TD/run-gg-restore.out" root-run govgraph-secrets prod <"$F15l2"; then
+  ok "a no-flag run recreates the cloudflare object"
+else
+  bad "the restore run failed"; cat "$TD/run-gg-restore.out"; exit 1
+fi
+BAO_TOKEN="$RT" bao read -format=json secret/data/apps/govgraph/prod/cloudflare \
+  | jq -e --arg z "$GG_ZONE2" --arg t "$GG_TOKEN2" '.data.data | .CF_ZONE_ID == $z and .CF_API_TOKEN == $t' >/dev/null \
+  && ok "cloudflare object restored with the expected values"
 unset RT GG_CRON_1 GG_CRON_2 GG_CRON_3 GG_DB GG_BAD_PORT GG_ZONE GG_TOKEN \
   GG_DB_SLASH GG_DB_SPACE GG_DB2 GG_ZONE2 GG_TOKEN2 PROD_CRON_1 PROD_CRON_2 PROD_CRON_3 \
-  PROD_APP_V0 PROD_APP_V1 PROD_APP_V2 PROD_CF_V0 PROD_CF_V1 PROD_CF_V2
+  PROD_APP_V0 PROD_APP_V1 PROD_APP_V2 PROD_CF_V0 PROD_CF_V1 PROD_CF_V2 \
+  PROD_CRON_A PROD_CRON_B PROD_APP_VA PROD_APP_VB
 
 echo "== 16. root-run govgraph-probes: PATCH into the shared probe object"
 GG_PS_APEX='https://govgraph.example/'
@@ -1340,11 +1398,27 @@ else
   bad "stale-cas write returned HTTP $CASHTTP (expected 400)"
 fi
 
-echo "== 16h. a soft-deleted latest version (data 404, metadata 200) is writable again"
+echo "== 16h. a soft-deleted latest version (data 404, metadata 200): refused without --overwrite, rebuilt with it"
 # `bao kv delete` soft-deletes the data of the latest version; the metadata path still
-# answers 200. public-site-probes --overwrite must treat that as empty-and-writable at
-# the current cas version and rebuild the object, not report stray keys.
+# answers 200. Without --overwrite the run must refuse (no silent empty success);
+# with it public-site-probes writes the canonical object again at the current version.
 BAO_TOKEN="$RT" bao kv delete secret/monitoring/public-site-probes >/dev/null
+F16h0=$(feed_publicsite)
+if run_flow "$TD/run-ps-sdrefuse.out" root-run public-site-probes <"$F16h0"; then
+  bad "a soft-deleted object reported success without --overwrite"
+else
+  ok "soft-deleted object refused without --overwrite (nonzero exit)"
+fi
+if grep -q "soft-deleted" "$TD/run-ps-sdrefuse.out"; then
+  ok "the refusal names the soft delete and --overwrite"
+else
+  bad "soft-delete refusal message missing"; cat "$TD/run-ps-sdrefuse.out"
+fi
+if grep -q "public-site-probes setup complete" "$TD/run-ps-sdrefuse.out"; then
+  bad "THE REFUSED RUN STILL CLAIMED COMPLETION"
+else
+  ok "no success line on the refused run"
+fi
 F16h=$(feed_publicsite)
 if run_flow "$TD/run-ps-undelete.out" root-run public-site-probes --overwrite <"$F16h"; then
   ok "public-site-probes --overwrite rebuilt the soft-deleted object"

@@ -64,9 +64,12 @@ for a token rotation so the web and refresh cron secrets stay in agreement. Exac
 the three flags may be passed, and each prompts only for the object it writes:
 `--overwrite-app` never asks for the CF values, `--overwrite-cloudflare` never asks for
 `DATABASE_URL`, so no value is read, held or shipped for an object the run does not
-touch. Values travel local variable → jq environment
-→ ssh stdin payload → remote environment, never argv on either side, and the command
-prints only the key names written plus each path's version:
+touch. A run checks every precondition before writing anything — including whether a
+missing sibling object would have to be created without the values for it — so it
+either writes everything it intends or nothing. Values travel local variable → jq
+environment → ssh stdin payload → the remote script's stdin (a non-exported variable;
+never the remote shell's exec-time environment, never argv on either side), and the
+command prints only the key names written plus each path's version:
 
 ```sh
 scripts/openbao-breakglass.sh root-run govgraph-secrets staging --dry-run
@@ -74,6 +77,13 @@ scripts/openbao-breakglass.sh root-run govgraph-secrets staging
 scripts/openbao-breakglass.sh root-run govgraph-secrets prod --dry-run
 scripts/openbao-breakglass.sh root-run govgraph-secrets prod
 ```
+
+When feeding the hidden prompts from a pipe or a script instead of a terminal, supply
+exactly the values that run will ask for, in order, one per line after the two unseal
+shares: staging (any flag or none): `DATABASE_URL`. Prod with no flag or `--overwrite`:
+`DATABASE_URL`, `CF_ZONE_ID`, `CF_API_TOKEN`. Prod with `--overwrite-app`:
+`DATABASE_URL` only. Prod with `--overwrite-cloudflare`: `CF_ZONE_ID`, `CF_API_TOKEN`
+only — a `DATABASE_URL` line would be read as the zone id.
 
 | KV object (`secret/` prefix) | Keys | Read by |
 |---|---|---|

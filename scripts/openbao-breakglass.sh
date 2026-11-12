@@ -349,24 +349,23 @@ cmd_root_run() {
 
   if [[ "$DRY_RUN" == true && "$mode" == "govgraph" ]]; then
     say "govgraph-secrets plan ($GOVGRAPH_ENV):"
-    note "write secret/apps/govgraph/$GOVGRAPH_ENV/app - keys: DATABASE_URL (prompted hidden, shape-checked locally),"
-    note "CRON_SECRET (generated on sectools: 32 random bytes, hex - never prompted, never printed)"
+    if [[ "$OVERWRITE_CF" != true ]]; then
+      note "write secret/apps/govgraph/$GOVGRAPH_ENV/app - keys: DATABASE_URL (prompted hidden, shape-checked locally),"
+      note "CRON_SECRET (generated on sectools: 32 random bytes, hex - never prompted, never printed)"
+    else
+      note "keep secret/apps/govgraph/$GOVGRAPH_ENV/app untouched (this run rotates only the cloudflare object)"
+    fi
     if [[ "$GOVGRAPH_ENV" == "prod" ]]; then
-      note "write secret/apps/govgraph/prod/cloudflare - keys: CF_ZONE_ID (32 hex), CF_API_TOKEN (both prompted hidden)"
+      if [[ "$OVERWRITE_APP" != true ]]; then
+        note "write secret/apps/govgraph/prod/cloudflare - keys: CF_ZONE_ID (32 hex), CF_API_TOKEN (both prompted hidden)"
+      else
+        note "keep secret/apps/govgraph/prod/cloudflare untouched (this run rotates only the app object)"
+      fi
     else
       note "no cloudflare object (staging does not purge)"
     fi
     if [[ "$OVERWRITE_APP" == true || "$OVERWRITE_CF" == true ]]; then
-      local which_over
-      if [[ "$OVERWRITE_APP" == true ]]; then which_over="--overwrite-app: replaces the app object only (CRON_SECRET is regenerated)"
-      else which_over="--overwrite-cloudflare: replaces the prod cloudflare object only (CRON_SECRET is kept so web and refresh stay in agreement)"
-      fi
-      note "existing objects are kept without a flag; $which_over"
-      if [[ "$OVERWRITE_APP" == true ]]; then
-        note "prompts hidden for DATABASE_URL only (the cloudflare object is not touched, no CF value is read or shipped)"
-      else
-        note "prompts hidden for CF_ZONE_ID + CF_API_TOKEN only (the app object is not touched, no DATABASE_URL is read or shipped)"
-      fi
+      note "the split flag rotates only its own object: prompts, payload and write are limited to it"
     else
       note "existing objects are kept without --overwrite; with it both objects are replaced (CRON_SECRET is regenerated)"
     fi
@@ -391,18 +390,13 @@ cmd_root_run() {
   fi
 
   say "minting the root token on sectools and running the $mode step (this can take a minute)"
-  # One ssh session, two-part stdin: the payload JSON on line 1 (into an env var, off
-  # argv), then the script itself. If the session fails, re-running is safe: the script
-  # cancels any in-flight root generation before it starts.
-  if ! { printf '%s\n' "$payload"; cat <<'REMOTE_SCRIPT'
-set -euo pipefail
-umask 077
-P="${BREAKGLASS_PAYLOAD:?}"
-# The payload holds the unseal shares. Drop it from the environment immediately after
-# copying it into the local variable: `root-run -- <cmd>` and every other child spawned
-# by this script must never inherit it (a plain `root-run -- env` would otherwise print
-# both shares).
-unset BREAKGLASS_PAYLOAD
+  # One ssh session, two-part stdin: the payload JSON is the first line, read into the
+  # NON-EXPORTED P by the `read` that leads the script, then the script itself. The
+  # shares never enter any process's exec-time environment (a /proc/<pid>/environ or
+  # `ps e` of the remote shell shows nothing) and never ride argv; `root-run -- <cmd>`
+  # children do not inherit them (stdin is not inherited as data). If the session
+  # fails, re-running is safe: the script cancels any in-flight root generation first.
+  if ! { printf 'set -euo pipefail\numask 077\nIFS= read -r P\n'; printf '%s\n' "$payload"; cat <<'REMOTE_SCRIPT'
 ADDR=$(jq -r .addr <<<"$P")
 MODE=$(jq -r 'if .cmd then "exec" elif .oidc then "oidc" elif .watchdog then "watchdog" elif .nexuspull then "nexuspull" elif .tenant then "tenant" elif .cloudflared then "cloudflared" elif .publicsite then "publicsite" elif .govgraph then "govgraph" elif .govgraphprobes then "govgraphprobes" else "alertmanager" end' <<<"$P")
 
@@ -653,13 +647,15 @@ elif [[ "$MODE" == "publicsite" ]]; then
   # lone govgraph key) and drops any stray keys - removing one never needs a raw
   # argv-borne `bao kv put`. The data GET is read with a pipe (no temp file: probe URLs
   # must not touch the sectools disk); a 404 with metadata 200 is a soft-deleted latest
-  # version - the path is writable again at the current version, so --overwrite rebuilds.
+  # version - refused without --overwrite, rebuilt (empty at the current version) with it.
   EXISTING='{}' CAS=0 CARRY='{}'
   if [[ "$EXISTS" == "200" ]]; then
     READ=$(curl -q -s --config "$CFG" -w '\n%{http_code}' "$ADDR/v1/secret/data/$KV")
     READ_HTTP="${READ##*$'\n'}" READ_DATA="${READ%$'\n'*}"
     if [[ "$READ_HTTP" == "404" ]]; then
-      unset READ READ_DATA
+      if [[ "$OVER" != "true" ]]; then
+        echo "ERROR: secret/$KV is soft-deleted (data 404, metadata 200) - pass --overwrite to rebuild it (nothing written)" >&2; exit 1
+      fi
       CAS=$(curl -q -s --config "$CFG" "$ADDR/v1/secret/metadata/$KV" | jq -r '.data.current_version')
     elif [[ "$READ_HTTP" == "200" ]]; then
       EXISTING=$(printf '%s' "$READ_DATA" | jq -c '.data.data')
@@ -676,11 +672,11 @@ elif [[ "$MODE" == "publicsite" ]]; then
         CARRY=$(printf '%s' "$EXISTING" | jq -c '{govgraph_apex_url, govgraph_staging_url}')
       fi
     else
-      unset READ READ_DATA
       echo "ERROR: secret/$KV data is unreadable (HTTP $READ_HTTP)" >&2; exit 1
     fi
     unset READ_HTTP
   fi
+  [[ "$CAS" =~ ^[0-9]+$ ]] || { echo "ERROR: secret/$KV version read failed - cannot check-and-set; re-run" >&2; exit 1; }
   if [[ "$EXISTS" == "200" && "$OVER" != "true" ]]; then
     echo "    [remote] secret/$KV already exists (pass --overwrite to replace)"
   else
@@ -709,10 +705,27 @@ elif [[ "$MODE" == "govgraph" ]]; then
   ENVN=$(jq -r '.govgraph.env' <<<"$P")
   [[ "$ENVN" == "staging" || "$ENVN" == "prod" ]] || { echo "ERROR: govgraph-secrets env must be staging or prod" >&2; exit 1; }
   KV="apps/govgraph/$ENVN/app"
+  KVCF=""
   OVER_APP=$(jq -r '.govgraph.overwrite_app // false' <<<"$P")
   OVER_CF=$(jq -r '.govgraph.overwrite_cf // false' <<<"$P")
-  EXISTS=$(curl -q -s --config "$CFG" -o /dev/null -w '%{http_code}' "$ADDR/v1/secret/metadata/$KV")
-  if [[ "$EXISTS" == "200" && "$OVER_APP" != "true" ]]; then
+  EXAPP=$(curl -q -s --config "$CFG" -o /dev/null -w '%{http_code}' "$ADDR/v1/secret/metadata/$KV")
+  EXCF=000
+  if [[ "$ENVN" == "prod" ]]; then
+    KVCF="apps/govgraph/prod/cloudflare"
+    EXCF=$(curl -q -s --config "$CFG" -o /dev/null -w '%{http_code}' "$ADDR/v1/secret/metadata/$KVCF")
+  fi
+  # Every precondition is checked BEFORE any write, so a run writes everything it
+  # intends or nothing (no half-rotated prod state): if this run will create or rotate
+  # the app object the payload must hold DATABASE_URL, and in prod the same for the
+  # cloudflare object's CF values. The split flags prompt only for their own object,
+  # so a missing sibling object is refused here instead of failing after the first write.
+  if { [[ "$EXAPP" != "200" || "$OVER_APP" == "true" ]]; } && ! jq -e '.govgraph | has("database_url")' <<<"$P" >/dev/null; then
+    echo "ERROR: this run would write secret/$KV but carries no DATABASE_URL (--overwrite-cloudflare rotates only the cloudflare object) - run without it, or with --overwrite/--overwrite-app" >&2; exit 1
+  fi
+  if { [[ "$ENVN" == "prod" && ( "$EXCF" != "200" || "$OVER_CF" == "true" ) ]]; } && ! jq -e '.govgraph | has("zone_id") and has("api_token")' <<<"$P" >/dev/null; then
+    echo "ERROR: this run would write secret/$KVCF but carries no CF values (--overwrite-app rotates only the app object) - run without it, or with --overwrite/--overwrite-cloudflare" >&2; exit 1
+  fi
+  if [[ "$EXAPP" == "200" && "$OVER_APP" != "true" ]]; then
     # Verify what is stored, not just that metadata answers 200 (a hand-mangled object or
     # a soft-deleted latest version would otherwise pass as success and leave the tenant
     # ExternalSecret broken). The data is read with a pipe, never a temp file: the values
@@ -720,14 +733,13 @@ elif [[ "$MODE" == "govgraph" ]]; then
     READ=$(curl -q -s --config "$CFG" -w '\n%{http_code}' "$ADDR/v1/secret/data/$KV")
     READ_HTTP="${READ##*$'\n'}" READ_DATA="${READ%$'\n'*}"
     if [[ "$READ_HTTP" != "200" ]]; then
-      unset READ READ_DATA READ_HTTP
       echo "ERROR: secret/$KV data is unreadable (HTTP $READ_HTTP) - pass --overwrite to repair" >&2; exit 1
     fi
     printf '%s' "$READ_DATA" | jq -e '.data.data | (keys | sort == ["CRON_SECRET","DATABASE_URL"]) and (.CRON_SECRET | test("^[0-9a-f]{64}$"))' >/dev/null \
-      || { unset READ READ_DATA READ_HTTP; echo "ERROR: secret/$KV does not hold exactly DATABASE_URL + a 64-hex CRON_SECRET - pass --overwrite to repair" >&2; exit 1; }
+      || { echo "ERROR: secret/$KV does not hold exactly DATABASE_URL + a 64-hex CRON_SECRET - pass --overwrite to repair" >&2; exit 1; }
     unset READ READ_DATA READ_HTTP
     echo "    [remote] secret/$KV already exists (kept; pass --overwrite or --overwrite-app to replace; CRON_SECRET kept so web and refresh stay in agreement)"
-  elif jq -e '.govgraph | has("database_url")' <<<"$P" >/dev/null; then
+  else
     # CRON_SECRET is generated HERE on sectools (32 random bytes, hex): never prompted,
     # never on the Mac, never printed. It reaches curl via jq's environment and stdin;
     # DATABASE_URL arrives in the payload (ssh stdin). Nothing rides argv on this side.
@@ -741,28 +753,21 @@ elif [[ "$MODE" == "govgraph" ]]; then
     curl -q -s --config "$CFG" "$ADDR/v1/secret/data/$KV" \
       | jq -e '.data.data | (keys | sort == ["CRON_SECRET","DATABASE_URL"]) and (.CRON_SECRET | test("^[0-9a-f]{64}$"))' >/dev/null \
       || { echo "ERROR: secret/$KV does not hold exactly DATABASE_URL + a 64-hex CRON_SECRET" >&2; exit 1; }
-  else
-    # --overwrite-cloudflare prompts only for the CF values, so the payload has no
-    # DATABASE_URL; it rotates the cloudflare object only and cannot create the app one.
-    echo "ERROR: secret/$KV is missing but this run rotates only the cloudflare object - run without --overwrite-cloudflare (or with --overwrite/--overwrite-app) to create it" >&2; exit 1
   fi
   VERSION=$(curl -q -s --config "$CFG" "$ADDR/v1/secret/metadata/$KV" | jq -r '.data.current_version')
   echo "    [remote] secret/$KV keys: DATABASE_URL, CRON_SECRET (version $VERSION)"
   if [[ "$ENVN" == "prod" ]]; then
-    KVCF="apps/govgraph/prod/cloudflare"
-    EX=$(curl -q -s --config "$CFG" -o /dev/null -w '%{http_code}' "$ADDR/v1/secret/metadata/$KVCF")
-    if [[ "$EX" == "200" && "$OVER_CF" != "true" ]]; then
+    if [[ "$EXCF" == "200" && "$OVER_CF" != "true" ]]; then
       READ=$(curl -q -s --config "$CFG" -w '\n%{http_code}' "$ADDR/v1/secret/data/$KVCF")
       READ_HTTP="${READ##*$'\n'}" READ_DATA="${READ%$'\n'*}"
       if [[ "$READ_HTTP" != "200" ]]; then
-        unset READ READ_DATA READ_HTTP
         echo "ERROR: secret/$KVCF data is unreadable (HTTP $READ_HTTP) - pass --overwrite or --overwrite-cloudflare to repair" >&2; exit 1
       fi
       printf '%s' "$READ_DATA" | jq -e '.data.data | keys | sort == ["CF_API_TOKEN","CF_ZONE_ID"]' >/dev/null \
-        || { unset READ READ_DATA READ_HTTP; echo "ERROR: secret/$KVCF does not hold exactly CF_ZONE_ID + CF_API_TOKEN - pass --overwrite or --overwrite-cloudflare to repair" >&2; exit 1; }
+        || { echo "ERROR: secret/$KVCF does not hold exactly CF_ZONE_ID + CF_API_TOKEN - pass --overwrite or --overwrite-cloudflare to repair" >&2; exit 1; }
       unset READ READ_DATA READ_HTTP
       echo "    [remote] secret/$KVCF already exists (kept; pass --overwrite or --overwrite-cloudflare to replace - rotating only the Cloudflare values keeps CRON_SECRET)"
-    elif jq -e '.govgraph | has("zone_id") and has("api_token")' <<<"$P" >/dev/null; then
+    else
       echo "    [remote] writing secret/$KVCF (CF_ZONE_ID, CF_API_TOKEN from the payload; values never printed)"
       CODE=$(jq -c '{data: {CF_ZONE_ID: .govgraph.zone_id, CF_API_TOKEN: .govgraph.api_token}}' <<<"$P" \
         | curl -q -s --config "$CFG" -o /dev/null -w '%{http_code}' -X POST --data-binary @- "$ADDR/v1/secret/data/$KVCF")
@@ -771,10 +776,6 @@ elif [[ "$MODE" == "govgraph" ]]; then
       curl -q -s --config "$CFG" "$ADDR/v1/secret/data/$KVCF" \
         | jq -e '.data.data | keys | sort == ["CF_API_TOKEN","CF_ZONE_ID"]' >/dev/null \
         || { echo "ERROR: secret/$KVCF does not hold exactly CF_ZONE_ID + CF_API_TOKEN" >&2; exit 1; }
-    else
-      # --overwrite-app prompts only for DATABASE_URL, so the payload has no CF values;
-      # it rotates the app object only and cannot create the cloudflare one.
-      echo "ERROR: secret/$KVCF is missing but this run rotates only the app object - run without --overwrite-app (or with --overwrite/--overwrite-cloudflare) to create it" >&2; exit 1
     fi
     VERSIONCF=$(curl -q -s --config "$CFG" "$ADDR/v1/secret/metadata/$KVCF" | jq -r '.data.current_version')
     echo "    [remote] secret/$KVCF keys: CF_ZONE_ID, CF_API_TOKEN (version $VERSIONCF)"
@@ -799,9 +800,10 @@ elif [[ "$MODE" == "govgraphprobes" ]]; then
     || { echo "ERROR: kv v2 is not mounted at secret/" >&2; exit 1; }
   READ=$(curl -q -s --config "$CFG" -w '\n%{http_code}' "$ADDR/v1/secret/data/$KV")
   READ_HTTP="${READ##*$'\n'}" READ_DATA="${READ%$'\n'*}"
-  [[ "$READ_HTTP" == "200" ]] || { unset READ READ_DATA READ_HTTP; echo "ERROR: secret/$KV missing (HTTP $READ_HTTP) - run root-run public-site-probes first" >&2; exit 1; }
+  [[ "$READ_HTTP" == "200" ]] || { echo "ERROR: secret/$KV missing (HTTP $READ_HTTP) - run root-run public-site-probes first" >&2; exit 1; }
   EXISTING=$(printf '%s' "$READ_DATA" | jq -c '.data.data') CAS=$(printf '%s' "$READ_DATA" | jq -r '.data.metadata.version')
   unset READ READ_DATA READ_HTTP
+  [[ "$CAS" =~ ^[0-9]+$ ]] || { echo "ERROR: secret/$KV version read failed - cannot check-and-set; re-run" >&2; exit 1; }
   OVER=$(jq -r '.overwrite // false' <<<"$P")
   if [[ "$OVER" != "true" ]]; then
     printf '%s' "$EXISTING" | jq -e '([keys[]] - ["apex_url","staging_url","govgraph_apex_url","govgraph_staging_url"]) | length == 0' >/dev/null \
@@ -860,7 +862,7 @@ elif [[ "$MODE" == "watchdog" ]]; then
   # Piped read, never a temp file: the SMTP password must not touch the sectools disk.
   READ=$(curl -q -s --config "$CFG" -w '\n%{http_code}' "$ADDR/v1/secret/data/$KV")
   READ_HTTP="${READ##*$'\n'}" READ_DATA="${READ%$'\n'*}"
-  [[ "$READ_HTTP" == "200" ]] || { unset READ READ_DATA READ_HTTP; echo "ERROR: secret/$KV missing (HTTP $READ_HTTP) - run root-run alertmanager first" >&2; exit 1; }
+  [[ "$READ_HTTP" == "200" ]] || { echo "ERROR: secret/$KV missing (HTTP $READ_HTTP) - run root-run alertmanager first" >&2; exit 1; }
   EXISTING=$(printf '%s' "$READ_DATA" | jq -c '.data.data')
   unset READ READ_DATA READ_HTTP
   printf '%s' "$EXISTING" | jq -e 'has("username") and has("password") and has("from") and has("to")' >/dev/null \
@@ -937,7 +939,7 @@ else
 fi
 echo "==> root-run done: command ran, token revoked and verified revoked"
 REMOTE_SCRIPT
-  } | "${SSH_RUNNER[@]}" 'read -r BREAKGLASS_PAYLOAD && export BREAKGLASS_PAYLOAD && bash -s'; then
+  } | "${SSH_RUNNER[@]}" 'bash -s'; then
     die "root-run session failed - see the messages above; re-running is safe (it cancels any in-flight root generation first)"
   fi
 }
