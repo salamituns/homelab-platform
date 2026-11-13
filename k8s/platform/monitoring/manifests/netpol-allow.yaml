@@ -10,7 +10,7 @@
 # Scrapes (17 ServiceMonitors, all listed live): apiserver endpoints 192.168.1.90:6443;
 # kube-controller-manager 192.168.1.90:10257; kube-scheduler 192.168.1.90:10259; etcd
 # 192.168.1.90:2381 (2381, not the usual 2379 - read from the live Endpoints);
-# kube-proxy 192.168.1.{90,89,84}:10249; kubelet 10250 plus 4194/10255 on all three node
+# kube-proxy 192.168.1.{90,89,84,91}:10249; kubelet 10250 plus 4194/10255 on all three node
 # IPs; node-exporter hostNetwork :9100 on all three node IPs (hostNetwork pods are outside
 # policy scope themselves, but prometheus reaches them AT the node IP, which IS in scope);
 # coredns pods 10.244.x:9153; external-secrets and belleshop-backend pod targets;
@@ -103,6 +103,8 @@ spec:
             cidr: 192.168.1.89/32   # workernode1
         - ipBlock:
             cidr: 192.168.1.84/32   # workernode2
+        - ipBlock:
+            cidr: 192.168.1.91/32   # workernode3 (apps pool, joined 2026-11-07)
       ports:
         - { protocol: TCP, port: 9100 }   # node-exporter (hostNetwork, node IP)
         - { protocol: TCP, port: 10249 }  # kube-proxy
