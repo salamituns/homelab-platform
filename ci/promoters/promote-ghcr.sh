@@ -311,8 +311,18 @@ else
 	#    signature + attestation in Nexus). Copy digest-preserving. Auth for
 	#    registry.home.arpa comes from the docker login the Jenkinsfile did (crane
 	#    reads ~/.docker/config.json); GHCR stays anonymous.
-	ci_log "promote: crane copy -> ${DEST_REF}"
-	crane copy "${SOURCE_REF}" "${DEST_IMAGE}" || ci_die "crane copy failed"
+	# Push under a tag unique to the digest. A bare DEST_IMAGE means crane's default
+	# ":latest", which the per-app Nexus repos (redeploy disabled) accept exactly once,
+	# so every promotion after the first failed with REDEPLOY_DISABLED. The digest is
+	# what deploys; the tag only satisfies the registry. If an earlier run already
+	# copied this digest (it failed later, before the PR), skip the copy.
+	DEST_TAG="${DEST_IMAGE}:${DIGEST/:/-}"
+	if [[ "$(crane digest "${DEST_TAG}" 2>/dev/null || true)" == "${DIGEST}" ]]; then
+		ci_log "promote: ${DEST_TAG} already holds this digest; not copying again"
+	else
+		ci_log "promote: crane copy -> ${DEST_TAG}"
+		crane copy "${SOURCE_REF}" "${DEST_TAG}" || ci_die "crane copy failed"
+	fi
 	COPIED="$(crane digest "${DEST_REF}")" || ci_die "cannot read back ${DEST_REF}"
 	[[ "${COPIED}" == "${DIGEST}" ]] || ci_die "digest changed in transit: ${COPIED}"
 
