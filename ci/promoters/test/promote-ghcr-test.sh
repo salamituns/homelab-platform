@@ -17,6 +17,12 @@ for t in crane cosign trivy syft; do
   cat >"$W/bin/$t" <<EOF
 #!/bin/bash
 echo "$t \$*" >>"\$CALLS"
+# crane copy records its destination; a digest lookup of a lab TAG (":sha256-") only
+# answers once that tag was copied, like a real registry.
+if [ "$t" = crane ] && [ "\$1" = copy ]; then echo "\$3" >>"\$CALLS.copied"; fi
+if [ "$t" = crane ] && [ "\$1" = digest ] && [[ "\$2" == *registry.home.arpa*:sha256-* ]]; then
+  grep -qxF -- "\$2" "\$CALLS.copied" 2>/dev/null || exit 1
+fi
 if [ "$t" = crane ] && [ "\$1" = digest ]; then
   case "\$2" in
     *govgraph*) echo "$DIG_GOV" ;;
@@ -105,6 +111,10 @@ echo 500 >"$W/mode"
 rc=$(run)
 ok "PR API 500: run fails"                '[ "$rc" != 0 ]'
 ok "PR API 500: copied+signed once"       '[ "$(copies)" = 1 ] && [ "$(signs)" = 1 ]'
+# Nexus app repos have redeploy disabled: a bare/":latest" destination works once, then
+# REDEPLOY_DISABLED forever (govgraph builds #46-#53, 2026-11-13). Copy to a per-digest tag.
+ok "copy goes to a per-digest tag"        'grep -qx "crane copy ghcr.io/owner/personal-site@$DIG registry.home.arpa/personal-site/site:${DIG/:/-}" "$CALLS"'
+ok "copy never targets the default tag"   '! grep -E "^crane copy .* registry.home.arpa/[^ :@]+/[^ :@]+(:latest)?$" "$CALLS"'
 ok "branch pushed with digest"            'git -C "$W/remote.git" show promote/site-aaaaaaaaaaaa:apps/personal-site/overlays/staging/kustomization.yaml | grep -q "$DIG"'
 
 echo 201 >"$W/mode"
@@ -160,5 +170,16 @@ ok "govgraph PR title names the app"     'grep -q "\"title\": \"promote govgraph
 ok "govgraph PR body names the app image" 'grep -q "registry.home.arpa/govgraph/web@$DIG_GOV" "$W/posts"'
 ok "govgraph PR body names the workflow" 'grep -q "workflow lab-release.yml@main" "$W/posts"'
 ok "govgraph repo name never logged"     '! grep -qi "site.example" "$W/out.log"'
+
+# Copy done but the run died before the PR (e.g. sign or push failed): the retry finds the
+# per-digest tag already holding the digest and must not copy again (that PUT is refused).
+git -C "$W/remote.git" branch -q -D promote/govgraph-bbbbbbbbbbbb
+echo '[]' >"$W/prs.json"
+: >"$W/posts"
+rc=$(run)
+ok "tag already copied: exits 0"          '[ "$rc" = 0 ]'
+ok "tag already copied: no second copy"   '[ "$(copies)" = 0 ] && [ "$(signs)" = 1 ]'
+ok "tag already copied: says so"          'grep -q "already holds this digest; not copying again" "$W/out.log"'
+ok "tag already copied: PR still opened"  '[ "$(posts | grep -c 201)" = 1 ]'
 echo "TOTAL pass=$pass fail=$fail"
 [ "$fail" = 0 ] || { echo "--- last out.log"; cat "$W/out.log"; }
