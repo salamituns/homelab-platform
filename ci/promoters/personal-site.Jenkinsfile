@@ -29,6 +29,7 @@ pipeline {
         ]) {
           // Jenkins runs sh steps with /bin/sh (dash on the agent): POSIX only, no <<< or [[ ]].
           sh '''
+            set +x  # Jenkins sh runs with -x; secrets below must not be traced
             set -eu
             # Registry auth for crane / syft / cosign / trivy lives in a per-build
             # DOCKER_CONFIG, deleted on exit, so the Nexus push password never outlives
@@ -84,8 +85,9 @@ pipeline {
 def pingPromoterWatchdog(String suffix) {
   try {
     withCredentials([string(credentialsId: 'promoter-watchdog-url', variable: 'WD_URL')]) {
-      // set -eu only: never set -x; the ping URL is a secret and must not hit the log.
+      // Jenkins sh runs with -x by default: the block starts with set +x so the ping URL is never traced.
       sh '''
+        set +x  # Jenkins sh runs with -x; secrets below must not be traced
         set -eu
         u=$(printf '%s' "$WD_URL" | tr -d ' \t\r\n')
         curl -fsS -m 10 -o /dev/null "${u}''' + suffix + '''"
