@@ -316,7 +316,10 @@ else
 	# so every promotion after the first failed with REDEPLOY_DISABLED. The digest is
 	# what deploys; the tag only satisfies the registry. If an earlier run already
 	# copied this digest (it failed later, before the PR), skip the copy.
-	DEST_TAG="${DEST_IMAGE}:${DIGEST/:/-}"
+	# NOT "sha256-<hex>": that is the OCI 1.1 referrers fallback tag, where cosign
+	# writes the signature/attestation index; an image there makes signing fail
+	# ("fallback tag manifest is not an OCI image index", build #56, 2026-11-13).
+	DEST_TAG="${DEST_IMAGE}:promoted-${DIGEST#sha256:}"
 	if [[ "$(crane digest "${DEST_TAG}" 2>/dev/null || true)" == "${DIGEST}" ]]; then
 		ci_log "promote: ${DEST_TAG} already holds this digest; not copying again"
 	else
