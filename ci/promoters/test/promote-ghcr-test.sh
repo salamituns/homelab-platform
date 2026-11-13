@@ -17,10 +17,10 @@ for t in crane cosign trivy syft; do
   cat >"$W/bin/$t" <<EOF
 #!/bin/bash
 echo "$t \$*" >>"\$CALLS"
-# crane copy records its destination; a digest lookup of a lab TAG (":sha256-") only
+# crane copy records its destination; a digest lookup of a lab TAG (":promoted-") only
 # answers once that tag was copied, like a real registry.
 if [ "$t" = crane ] && [ "\$1" = copy ]; then echo "\$3" >>"\$CALLS.copied"; fi
-if [ "$t" = crane ] && [ "\$1" = digest ] && [[ "\$2" == *registry.home.arpa*:sha256-* ]]; then
+if [ "$t" = crane ] && [ "\$1" = digest ] && [[ "\$2" == *registry.home.arpa*:promoted-* ]]; then
   grep -qxF -- "\$2" "\$CALLS.copied" 2>/dev/null || exit 1
 fi
 if [ "$t" = crane ] && [ "\$1" = digest ]; then
@@ -113,7 +113,9 @@ ok "PR API 500: run fails"                '[ "$rc" != 0 ]'
 ok "PR API 500: copied+signed once"       '[ "$(copies)" = 1 ] && [ "$(signs)" = 1 ]'
 # Nexus app repos have redeploy disabled: a bare/":latest" destination works once, then
 # REDEPLOY_DISABLED forever (govgraph builds #46-#53, 2026-11-13). Copy to a per-digest tag.
-ok "copy goes to a per-digest tag"        'grep -qx "crane copy ghcr.io/owner/personal-site@$DIG registry.home.arpa/personal-site/site:${DIG/:/-}" "$CALLS"'
+ok "copy goes to a per-digest tag"        'grep -qx "crane copy ghcr.io/owner/personal-site@$DIG registry.home.arpa/personal-site/site:promoted-${DIG#sha256:}" "$CALLS"'
+# "sha256-<hex>" is the OCI referrers fallback tag cosign writes to (build #56).
+ok "copy avoids the referrers fallback tag" '! grep -E "^crane copy .*:sha256-[0-9a-f]+$" "$CALLS"'
 ok "copy never targets the default tag"   '! grep -E "^crane copy .* registry.home.arpa/[^ :@]+/[^ :@]+(:latest)?$" "$CALLS"'
 ok "branch pushed with digest"            'git -C "$W/remote.git" show promote/site-aaaaaaaaaaaa:apps/personal-site/overlays/staging/kustomization.yaml | grep -q "$DIG"'
 
