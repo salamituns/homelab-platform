@@ -17,6 +17,14 @@ dig +short @192.168.1.96 example.com                      # an IP (forwarded ups
 ssh tunsadmin@192.168.1.96 'sudo ss -lunp | grep ":53 "'  # dnsmasq only on 192.168.1.96
 ```
 
+### Kubernetes (CoreDNS)
+
+CoreDNS forwards **everything** outside `cluster.local` to this dnsmasq first, then `1.1.1.1` and
+`9.9.9.9` only if the gateway VM is down (`k8s/platform/cluster-config/coredns-configmap.yaml`,
+`policy sequential`). It never uses the nodes' resolv.conf, which also lists the AT&T router:
+the router answers NXDOMAIN for `*.home.arpa` and kept a stale public delegation for days after a
+domain moved to Cloudflare (pods got the old site at random, 14 Nov 2026).
+
 ## 2. Laptop: Tailscale split DNS
 
 Admin console, **DNS**, **Nameservers, Add nameserver, Custom**:

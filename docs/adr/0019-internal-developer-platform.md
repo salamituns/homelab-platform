@@ -2,10 +2,11 @@
 
 - Status: **Accepted on merge** (owner answered the open questions 2026-11-07; see Rev B).
   Phase 1 gate passed 2026-11-09 (see Rev C and the Phase 1 gate evidence).
-  Phase 2 (govgraph) hosting decision recorded 2026-11-11 (see Rev D)
+  Phase 2 (govgraph) hosting decision recorded 2026-11-11 (see Rev D); govgraph cut over to the
+  lab 2026-11-12, 7-day gate running (see Rev E)
 - Date: 2026-11-07
 - Owner: owner
-- Last reviewed: 11 Nov 2026
+- Last reviewed: 14 Nov 2026
 - Next review: after each phase gate (next: Phase 2, govgraph)
 
 ## Revision history
@@ -16,6 +17,7 @@
 | B | 7 Nov 2026 | Owner decisions: protexa prod on a managed host (lab = pipeline + staging; protexa is demo/pilot, no live customers); govgraph DB is Supabase Postgres (moved from Neon by the owner); move both Vercel-DNS domains to Cloudflare |
 | C | 9 Nov 2026 | Phase 1 (personal site) done: cut-over record and gate evidence added; runbooks [edge-public.md](../runbooks/edge-public.md) and [promoter.md](../runbooks/promoter.md) |
 | D | 11 Nov 2026 | Phase 2 (govgraph) hosting decision: why govgraph exhausted Vercel's free tier, the app-side fix, traffic-spike behaviour behind Cloudflare, lab vs Vercel trade-offs, and the conditions before DNS cut-over. Corrects Phase 2 egress: web pods reach Supabase Postgres only (`:5432`/`:6543`); the refresh runs as a separate CronJob with HTTPS, Postgres and web-pod `:3000` access |
+| E | 14 Nov 2026 | Phase 2 cut-over record: govgraph serves from the lab behind Cloudflare since 12 Nov (prod 1 replica, refresh 04:00 Africa/Lagos, analytics restored 13 Nov). Day-1 defects found and fixed: public-gateway egress lacked `:3000` (#125); refresh resolved the headless Service by short name (apps-deploy #9); promoter Nexus tag (`:latest`, then the referrers fallback tag; #127, #128); apex probe hit the redirecting root (#130); the old provider's DNS zone kept answering for sticky resolvers (CoreDNS off the router, #131; old zone repointed to Cloudflare 14 Nov). Gate evidence still to collect: 7 green days and the edge cache-hit ratio |
 
 ## Scope
 

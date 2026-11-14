@@ -5,9 +5,11 @@ hosting) and D1–D9. Second public tenant after `personal-site`. Next.js 16, Po
 on Supabase, daily refresh CronJob. This repo stays hostname-free; public names are
 written here as `<govgraph-host>` / `<govgraph-staging-host>`.
 
-Do not `kubectl apply` from this document until the owner is cutting over. Platform
-YAML is in `k8s/tenants/govgraph/`. Workloads (Deployment, Service, headless Service,
-CronJob, HTTPRoute) live in **apps-deploy**, not this repo.
+**Status: live on the lab since 12 Nov 2026** (prod 1 replica, daily refresh 04:00
+Africa/Lagos; staging behind Cloudflare Access). Vercel is the documented rollback target
+until a week is green. Platform YAML is in `k8s/tenants/govgraph/`. Workloads (Deployment,
+Service, headless Service, CronJob, HTTPRoute) live in **apps-deploy**, not this repo.
+Day-2 operations are in [Operating it](#operating-it) below.
 
 ## Quota
 
@@ -458,6 +460,59 @@ as the rollback target (D9) until the account is unblocked and a week is green.
 3. The promoter can keep copying images; admission still requires the lab-signed
    digest if you return.
 
+## Operating it
+
+### Promote a new build to prod
+
+1. The promoter opens the staging PR in apps-deploy ([promoter.md](promoter.md)); review the
+   one-line digest change and merge. Check staging (pod Ready, `/ng` 200 through
+   `public-gateway`).
+2. Human prod PR: copy the staging digest into `apps/govgraph/overlays/prod`.
+3. **Purge the edge after prod rolls over.** Cloudflare caches HTML for a day; cached pages
+   reference the previous build's `/_next/static/*` chunks, which the new pod no longer
+   serves, so an uncached chunk 404s. Either purge the zone (Cloudflare dashboard → Caching
+   → Purge Everything) or run a refresh by hand, which revalidates, purges and warms:
+   `kubectl -n govgraph-prod create job govgraph-refresh-manual-$(date +%Y%m%d%H%M) --from=cronjob/govgraph-refresh`
+
+### Refresh job
+
+- Log of a good run, in order: `refresh persisted`, `revalidated N pods (round 1)`,
+  `settling 10000 ms`, `revalidated N pods (round 2)`, `Cloudflare purge accepted`,
+  `warmed N pods`. Any failure before the purge leaves the edge untouched (by design).
+- `REVALIDATE_HOST` must be the **fully qualified** Service name
+  (`web-headless.$(POD_NAMESPACE).svc.cluster.local`, set in apps-deploy). The job resolves
+  it with Node's `dns.resolve4`, which ignores resolv.conf search domains; the short name
+  gives `queryA ENOTFOUND` (first scheduled run, 13 Nov 2026).
+- `Cloudflare purge failed (401)` means Cloudflare does not recognise the stored token
+  (not a permission problem; that would be 403). Check it without printing it:
+  ```sh
+  ssh Master 'sudo kubectl --kubeconfig /etc/kubernetes/admin.conf -n govgraph-prod get secret govgraph-refresh -o jsonpath="{.data.CF_API_TOKEN}" | base64 -d | sed "s/^/Authorization: Bearer /" | curl -s -H @- https://api.cloudflare.com/client/v4/user/tokens/verify | python3 -c "import json,sys; d=json.load(sys.stdin); print(d[\"success\"], d.get(\"result\"), d.get(\"errors\"))"'
+  ```
+  `False … 1000` = invalid token: create a custom token (Zone → Cache Purge → Purge, this
+  zone only), copy the **secret shown once** on the "created" page (not the token ID, not
+  the Global API Key), then `scripts/openbao-breakglass.sh root-run govgraph-secrets prod --overwrite-cloudflare`.
+  ESO picks it up on its hourly refresh.
+
+### Analytics (PostHog)
+
+The client key is baked in **at build time** from GitHub repo variables
+`NEXT_PUBLIC_POSTHOG_KEY` / `NEXT_PUBLIC_POSTHOG_HOST` (read by `lab-release.yml`). If they
+are unset the image ships without analytics and nothing errors. The lab build sends events
+straight to PostHog (no `/ingest` proxy). Verify with a **real** browser: posthog-js drops
+headless/webdriver browsers on purpose, so an automated check shows no events.
+
+### DNS: stale answers from the old provider
+
+The domain is registered at Vercel and Vercel kept a DNS zone for it after the nameservers
+moved to Cloudflare. "Sticky" resolvers (the AT&T gateway's was one) keep asking the old
+nameservers, so some visitors and the lab got Vercel's 402 page for days. Fixed 14 Nov 2026:
+Vercel's zone now answers the apex and `*` with this Cloudflare zone's proxy addresses
+(user-owned A records, so they survive a plan change). Check: `dig +short <govgraph-host>
+@ns1.vercel-dns.com` must equal `dig +short <govgraph-host> @1.1.1.1`. A transfer to
+Cloudflare Registrar removes the old zone for good (the 60-day post-purchase lock ends
+29 Nov 2026). Inside the cluster, CoreDNS no longer asks the router at all
+([internal-dns.md](internal-dns.md)).
+
 ## Alerts
 
 PrometheusRule `govgraph-rules` (`k8s/platform/monitoring/manifests/govgraph-prometheusrule.yaml`).
@@ -467,7 +522,7 @@ promtool tests: `k8s/platform/monitoring/rules/govgraph.test.yaml`.
 NGF data plane (no ServiceMonitor), so an `http_requests_total`-style ratio has no
 source. The request-health signal is the public-path blackbox probe — personal-site's
 pattern (jobs `govgraph-apex` / `govgraph-staging` in `k8s/platform/monitoring/values.yaml`,
-targets file_sd from OpenBao, owner step above). The `http_2xx_public` module only accepts
+targets file_sd from OpenBao, owner step above). The apex job probes `<stored URL>/ng` (relabel in `values.yaml`): `/` is a 307 to `/ng`, and the `http_2xx_public` module only accepts
 200, so a 5xx fails the probe; a NetworkPolicy admitting Prometheus to the web pods on
 `:3000` is already in the netpol component for the day the app serves `/metrics`.
 
