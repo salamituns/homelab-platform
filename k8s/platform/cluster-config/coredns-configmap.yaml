@@ -1,6 +1,6 @@
 # CoreDNS config, kubeadm default plus a stub domain for the lab zone (ADR 0004).
-# Without the home.arpa block, CoreDNS forwards to the node's resolv.conf, which also lists the
-# router; the router answers NXDOMAIN for *.home.arpa, so pod lookups fail at random.
+# Everything outside the cluster goes to the gateway's dnsmasq first (see the forward block);
+# the router's resolver is never used (NXDOMAIN for *.home.arpa, stale public answers).
 # Managed by Argo CD (app cluster-config): change it in git; CoreDNS reloads within ~30s.
 # selfHeal also undoes a kubeadm upgrade that resets the Corefile.
 apiVersion: v1
@@ -22,7 +22,13 @@ data:
            ttl 30
         }
         prometheus :9153
-        forward . /etc/resolv.conf {
+        # Not /etc/resolv.conf: that also lists the AT&T router, whose resolver kept a
+        # stale delegation for whoruns9ja.com (old Vercel nameservers) for days after the
+        # Cloudflare move, so pods got the old site at random (2026-11-14). The gateway's
+        # dnsmasq (ADR 0004) forwards to 1.1.1.1 / 9.9.9.9; those two are also the
+        # fallback here when the gateway VM is down.
+        forward . 192.168.1.96 1.1.1.1 9.9.9.9 {
+           policy sequential
            max_concurrent 1000
         }
         cache 30
