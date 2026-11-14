@@ -88,3 +88,17 @@ ssh Master 'python3 -' < scripts/aptcheck-security-names.py
 Fix used: `apt-get install --no-install-recommends libdrm-amdgpu1` (no reboot). Re-check without paging Falco by
 starting the packaged unit, never `lynis` by hand: `sudo systemctl start lynis.service` (the exporter runs via
 `OnSuccess=`). Result: hardening index 64 → 69 on both nodes, warnings 0.
+
+## 13 Nov 2026: two more false warnings
+
+- **PKGS-7392 again, same mechanism as above.** After the kernel reboots the warning stayed: the
+  count was a **new** package, `linux-firmware-amd-graphics` (Ubuntu split `linux-firmware` into
+  per-vendor packages; one came from `noble-security`). `unattended-upgrade` will not install a
+  new package. Fix: `apt-get install --only-upgrade linux-firmware` (firmware only, no reboot).
+  Never a blanket `apt upgrade` on the nodes: it would pull a containerd minor bump.
+  Index 64 → 69, warnings 0 on master/workernode1/workernode2.
+- **KRNL-5830 "reboot needed" right after a reboot (workernode3).** Lynis compares the running
+  kernel with the target of `/boot/vmlinuz`; on workernode3 that link (and `initrd.img`) pointed at
+  the *old* kernel, with `.old` at the new one. GRUB boots its own entries, so only Lynis was
+  misled. Fix: `sudo linux-update-symlinks install <running-version> /boot/vmlinuz-<running-version>`.
+  Index 66 → 67, warnings 0.

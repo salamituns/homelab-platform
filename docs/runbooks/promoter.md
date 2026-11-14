@@ -7,7 +7,10 @@ promoter crosses the trust boundary: it verifies the GitHub identity, re-scans, 
 digest into the lab registry and re-signs it with the lab key.
 
 Script: `ci/promoters/promote-ghcr.sh` (installed at `/opt/ci-gates/promote-ghcr.sh` on
-`ci-agent`). Same script, per-app env (`GHCR_IMAGE`, `GHCR_WORKFLOW`, `DEST_IMAGE`,
+`ci-agent` by the `ci_agent` role). **Jenkins runs the installed copy, not the checkout:**
+after a change to the script merges, re-run `cd ansible && ansible-playbook
+playbooks/jenkins.yml -e @../private/jenkins.yml` or the old code keeps running. Jenkinsfile
+changes need no playbook (pipelines load from git). Same script, per-app env (`GHCR_IMAGE`, `GHCR_WORKFLOW`, `DEST_IMAGE`,
 `OVERLAY_DIR`, `PROMOTE_APP`, `PROMOTE_BRANCH_PREFIX`). Job wiring:
 
 | Jenkins job | Jenkinsfile | GHCR package | Nexus dest | Staging overlay | Branch prefix | Source-repo credential | Watchdog credential |
@@ -110,3 +113,10 @@ Every bug below was fixed with a test that fails on the old code. PR numbers are
 | credential file trailing newline; GHCR package name ≠ repo name | trim + `GHCR_IMAGE` (#113) |
 | `COSIGN_KEY` in the environment acted as `--key` during keyless verify | `env -u` in `keyless()` (#114) |
 | kustomize sorts keys; the overlay parser missed the digest → re-signed every run | whole-entry parser (#115) |
+| `crane copy` had no tag → Nexus `:latest`, which redeploy-disabled repos accept once: every promotion after the first failed with `REDEPLOY_DISABLED` (govgraph #46–#53) | copy to a per-digest tag (#127) |
+| that tag was `:sha256-<hex>`, the OCI 1.1 referrers fallback tag where cosign writes the signature index → "fallback tag manifest is not an OCI image index" | tag `:promoted-<hex>`, test forbids `sha256-<hex>` (#128) |
+| Jenkins `sh` runs with `-x`; the trimmed ping URL no longer matched the masked credential and printed in clear | `set +x` in every secret step; credentials written without trailing newline (#129) |
+
+**A digest stuck behind a `:sha256-<hex>` image tag** (copied between #127 and #128) can never
+be signed: Nexus will not overwrite the tag. Rebuild the source (`gh workflow run
+lab-release.yml`) for a new digest; do not delete Nexus components with admin credentials.

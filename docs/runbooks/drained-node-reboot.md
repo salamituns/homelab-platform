@@ -52,11 +52,15 @@ kubectl get csr | grep Pending || echo "no pending CSRs"
 kubectl top nodes                                # metrics-server answers, kubelet TLS still valid
 ```
 
-## 3. Rebalance (optional)
+## 3. Rebalance (required)
 
 The scheduler never moves running pods. The last node drained comes back nearly empty while the
-other worker carries everything. Restart the stateless Deployments so the scheduler places them again
-(it prefers the less-used node):
+other worker carries everything. **Not optional:** on 13 Nov 2026 workernode2 ended up with 45 pods
+at 3.8/4 GB, stopped answering SSH and kubelet (`kubectl logs` hung, metrics-server and the
+Kyverno webhook timed out) while still reporting Ready. Restart the stateless workloads, but
+**leave admission webhooks** (Kyverno admission, cert-manager webhook, ESO webhook) for last or
+alone: with `failurePolicy: Fail` a webhook that is restarting blocks new pods. The scheduler places
+restarted pods on the less-used node:
 
 ```sh
 kubectl get pods -A -o jsonpath='{range .items[*]}{.spec.nodeName}{"\n"}{end}' | sort | uniq -c
@@ -69,4 +73,5 @@ kubectl -n dev rollout restart deploy
 
 | Date | Why | Result |
 |---|---|---|
+| 2026-11-13 | Kernel 6.8.0-147 → -149 (Lynis PKGS-7392/`reboot-required`), all four nodes | Done. Lessons: rebalance hung workernode2 until fixed (above); a drain timeout piped through `tail` still let `qm reboot` run (harmless for stateless pods, check the exit code); **workernode3 (VM 128) is the apps pool**: its tainted pods cannot move, so its reboot is a ~2 min origin gap for govgraph and personal-site (Cloudflare cache covers cached pages) and needs the owner's OK |
 | 2026-10-29 | Apply pending boot order and scsi0 options (ADR 0010) | All 3 nodes rebooted, `qm pending` empty, plan: No changes, 9/9 Argo apps healthy, kubelet certs valid to 2027-10-27. Afterwards 26 of 41 pods on workernode2 (73% memory), 6 on workernode1 |

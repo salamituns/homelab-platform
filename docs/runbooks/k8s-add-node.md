@@ -93,6 +93,14 @@ Expect: Ready; label `homelab.arpa/pool=apps`; taint
 kube-flannel, kube-network-policies, node-exporter; **no**
 `speaker-` pod on that node.
 
+**Then let Prometheus reach it.** Node scrapes (node-exporter `:9100`, kubelet `:10250`)
+are allowed per node IP in `k8s/platform/monitoring/manifests/netpol-allow.yaml`
+(`prometheus-scrape-egress`). Add the new `/32` there in the same change, or the node looks
+dead: workernode3 fired `HomelabKubeNodeNotReadyFast`, `KubeletInstanceUnreachable` and
+`TargetDown` from 7 to 13 Nov 2026 while Ready (#126). Check
+`up{instance=~"<node-ip>:.*"}`: expect **four** series, all `1` (node-exporter `:9100` plus
+kubelet `:10250` scraped on three paths: `/metrics`, `/metrics/cadvisor`, `/metrics/probes`).
+
 ## Rollback
 
 ```sh
