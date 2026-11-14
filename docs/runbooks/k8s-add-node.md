@@ -98,7 +98,8 @@ are allowed per node IP in `k8s/platform/monitoring/manifests/netpol-allow.yaml`
 (`prometheus-scrape-egress`). Add the new `/32` there in the same change, or the node looks
 dead: workernode3 fired `HomelabKubeNodeNotReadyFast`, `KubeletInstanceUnreachable` and
 `TargetDown` from 7 to 13 Nov 2026 while Ready (#126). Check
-`up{instance=~"<node-ip>:.*"} == 1` for all four targets.
+`up{instance=~"<node-ip>:.*"}`: expect **four** series, all `1` (node-exporter `:9100` plus
+kubelet `:10250` scraped on three paths: `/metrics`, `/metrics/cadvisor`, `/metrics/probes`).
 
 ## Rollback
 

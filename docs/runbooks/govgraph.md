@@ -488,7 +488,10 @@ as the rollback target (D9) until the account is unblocked and a week is green.
   ```sh
   ssh Master 'sudo kubectl --kubeconfig /etc/kubernetes/admin.conf -n govgraph-prod get secret govgraph-refresh -o jsonpath="{.data.CF_API_TOKEN}" | base64 -d | sed "s/^/Authorization: Bearer /" | curl -s -H @- https://api.cloudflare.com/client/v4/user/tokens/verify | python3 -c "import json,sys; d=json.load(sys.stdin); print(d[\"success\"], d.get(\"result\"), d.get(\"errors\"))"'
   ```
-  `False … 1000` = invalid token: create a custom token (Zone → Cache Purge → Purge, this
+  That endpoint knows **user** tokens (My Profile → API Tokens). For an **account** token
+  (Manage Account → API Tokens) use `…/client/v4/accounts/<account-id>/tokens/verify`
+  instead, or a good token also reports `1000`.
+  `False … 1000` on the right endpoint = invalid token: create a custom token (Zone → Cache Purge → Purge, this
   zone only), copy the **secret shown once** on the "created" page (not the token ID, not
   the Global API Key), then `scripts/openbao-breakglass.sh root-run govgraph-secrets prod --overwrite-cloudflare`.
   ESO picks it up on its hourly refresh.
@@ -507,8 +510,9 @@ The domain is registered at Vercel and Vercel kept a DNS zone for it after the n
 moved to Cloudflare. "Sticky" resolvers (the AT&T gateway's was one) keep asking the old
 nameservers, so some visitors and the lab got Vercel's 402 page for days. Fixed 14 Nov 2026:
 Vercel's zone now answers the apex and `*` with this Cloudflare zone's proxy addresses
-(user-owned A records, so they survive a plan change). Check: `dig +short <govgraph-host>
-@ns1.vercel-dns.com` must equal `dig +short <govgraph-host> @1.1.1.1`. A transfer to
+(user-owned A records, so they survive a plan change). Check (compare sets, order varies):
+`diff <(dig +short <govgraph-host> @ns1.vercel-dns.com | sort) <(dig +short <govgraph-host> @1.1.1.1 | sort)`
+prints nothing when the old zone matches Cloudflare. A transfer to
 Cloudflare Registrar removes the old zone for good (the 60-day post-purchase lock ends
 29 Nov 2026). Inside the cluster, CoreDNS no longer asks the router at all
 ([internal-dns.md](internal-dns.md)).

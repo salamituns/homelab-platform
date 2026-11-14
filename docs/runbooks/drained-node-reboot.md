@@ -59,8 +59,8 @@ other worker carries everything. **Not optional:** on 13 Nov 2026 workernode2 en
 at 3.8/4 GB, stopped answering SSH and kubelet (`kubectl logs` hung, metrics-server and the
 Kyverno webhook timed out) while still reporting Ready. Restart the stateless workloads, but
 **leave admission webhooks** (Kyverno admission, cert-manager webhook, ESO webhook) for last or
-alone: with `failurePolicy: Fail` a webhook that is restarting blocks new pods. Restart the stateless Deployments so the scheduler places them again
-(it prefers the less-used node):
+alone: with `failurePolicy: Fail` a webhook that is restarting blocks new pods. The scheduler places
+restarted pods on the less-used node:
 
 ```sh
 kubectl get pods -A -o jsonpath='{range .items[*]}{.spec.nodeName}{"\n"}{end}' | sort | uniq -c
