@@ -243,7 +243,12 @@ prometheus:
               - /etc/prometheus/secrets/public-site-probe-targets/govgraph-apex.json
             refresh_interval: 1m
         relabel_configs:
+          # Probe /ng, not the bare apex: "/" is a 307 to /ng and this module neither
+          # follows redirects nor accepts 3xx, so the apex URL alone always "fails".
+          # /ng is the page the app actually renders (cache + Supabase behind it).
           - source_labels: [__address__]
+            regex: (.+?)/?
+            replacement: ${1}/ng
             target_label: __param_target
           - source_labels: [__param_target]
             target_label: instance
